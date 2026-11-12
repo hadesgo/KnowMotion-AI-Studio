@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://knowmotion.local/schemas/render-job.schema.json",
+  "title": "KnowMotion Render Job Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "jobId",
+    "projectId",
+    "projectRevision",
+    "rendererVersion",
+    "entryPoint",
+    "compositionId",
+    "output",
+    "inputProps",
+    "runtime"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "jobId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "projectId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "projectRevision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "rendererVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "entryPoint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "compositionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "codec",
+        "videoBitrate"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "codec": {
+          "enum": [
+            "h264",
+            "h265",
+            "prores"
+          ]
+        },
+        "videoBitrate": {
+          "type": "string",
+          "pattern": "^[0-9]+[kM]$"
+        }
+      }
+    },
+    "inputProps": {
+      "type": "object"
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "browserExecutable",
+        "ffmpegExecutable",
+        "chromeMode",
+        "concurrency",
+        "timeoutMs"
+      ],
+      "properties": {
+        "browserExecutable": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ffmpegExecutable": {
+          "type": "string",
+          "minLength": 1
+        },
+        "chromeMode": {
+          "enum": [
+            "headless-shell",
+            "chrome-for-testing"
+          ]
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1000
+        }
+      }
+    }
+  }
+}

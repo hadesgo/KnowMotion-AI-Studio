@@ -1,2 +1,54 @@
-# KnowMotion-AI-Studio
-让普通用户通过输入一个知识主题，就能够借助 AI 完成知识研究、内容策划、脚本撰写、分镜设计、视觉素材生成、动画制作、配音、字幕以及视频渲染，最终生成高质量、有趣、生动的知识科普动画视频。
+# KnowMotion AI Studio
+
+AI-powered knowledge animation studio. 用户从一个知识主题开始，在同一项目上下文中完成内容策划、脚本、分镜、素材、动画、音频字幕和视频预览。
+
+## 当前实现
+
+- Tauri 2 + React 19 + TypeScript + Vite 桌面架构。
+- Tailwind CSS v4 负责工具类与设计 Token，桌面界面组件层保留在工作站样式文件中。
+- Rust 后端通过 SQLite 保存项目、Provider 元数据和持久化状态。
+- 每个项目同步生成独立的 `project.json`、脚本、分镜、素材清单、动画时间轴和字幕目录。
+- 12 个工作区界面：Dashboard、新建项目、内容策划、脚本、分镜、图片素材、动画、时间轴、AI 助手、音频字幕、渲染、模型配置。
+- 浏览器预览支持完整项目持久化、SVG 视觉草案、系统语音试听、字幕导出和真实 WebM 视频录制。
+- 桌面版 API Key 不会持久化到 WebView；后续由系统凭据库接入。
+
+## 开发
+
+```bash
+npm install
+npm run dev
+```
+
+浏览器预览运行在 `http://127.0.0.1:1420`。
+
+## 桌面应用
+
+```bash
+npm run desktop:dev
+```
+
+要求 Windows 已安装 Rust、MSVC Build Tools 和 WebView2。桌面数据写入 Tauri 应用数据目录：
+
+```text
+%APPDATA%/com.knowmotion.studio/
+├─ studio.sqlite3
+└─ projects/
+   └─ {projectId}/
+      ├─ project.json
+      ├─ script/
+      ├─ storyboard/
+      ├─ assets/
+      ├─ animation/
+      ├─ subtitles/
+      ├─ renders/
+      └─ cache/
+```
+
+## 构建
+
+```bash
+npm run build
+npm run desktop:build
+```
+
+架构设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，UI 规范见 [docs/UI_DESIGN.md](docs/UI_DESIGN.md)。
