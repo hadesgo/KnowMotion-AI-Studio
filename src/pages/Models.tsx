@@ -29,6 +29,12 @@ import type {
   ProviderProfile,
 } from "../types";
 import { makeId } from "../utils";
+import { isTauriDesktop } from "../services/desktop";
+import {
+  clearProviderSecret,
+  saveProviderSecret,
+  testProviderConnection,
+} from "../services/agentWorkflow";
 
 const capabilities: ProviderCapability[] = [
   "LLM",
@@ -80,6 +86,8 @@ export default function Models() {
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<ProviderDraft>(emptyDraft);
   const [formError, setFormError] = useState("");
+  const [testingId, setTestingId] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const openCreate = () => {
     setDraft({ ...emptyDraft, id: undefined });
@@ -96,7 +104,7 @@ export default function Models() {
     setModalOpen(true);
   };
 
-  const saveProvider = () => {
+  const saveProvider = async () => {
     if (!draft.name.trim()) {
       setFormError("给这个 Provider 一个可识别的名称。");
       return;
@@ -115,8 +123,21 @@ export default function Models() {
       setFormError("至少选择一种模型能力。");
       return;
     }
+    const providerId = draft.id ?? makeId("provider");
+    if (isTauriDesktop && draft.apiKey.trim()) {
+      try {
+        setSaving(true);
+        await saveProviderSecret(providerId, draft.apiKey.trim());
+      } catch (error) {
+        setFormError(
+          error instanceof Error ? error.message : `密钥保存失败：${String(error)}`,
+        );
+        setSaving(false);
+        return;
+      }
+    }
     const provider: ProviderProfile = {
-      id: draft.id ?? makeId("provider"),
+      id: providerId,
       name: draft.name.trim(),
       protocol: draft.protocol,
       baseUrl: draft.baseUrl.trim(),
@@ -126,7 +147,7 @@ export default function Models() {
       health: draft.id
         ? providers.find((item) => item.id === draft.id)?.health ?? "unchecked"
         : "unchecked",
-      hasSecret: draft.hasSecret || Boolean(draft.apiKey),
+      hasSecret: draft.hasSecret || Boolean(draft.apiKey.trim()),
       isDefault:
         providers.find((item) => item.id === draft.id)?.isDefault ?? false,
     };
@@ -143,10 +164,33 @@ export default function Models() {
           : undefined,
       });
     }
+    setSaving(false);
     setModalOpen(false);
   };
 
-  const validateConfiguration = (provider: ProviderProfile) => {
+  const validateConfiguration = async (provider: ProviderProfile) => {
+    if (isTauriDesktop) {
+      setTestingId(provider.id);
+      try {
+        const result = await testProviderConnection(provider);
+        updateProvider(provider.id, { health: "healthy" });
+        pushToast({
+          type: "success",
+          title: "模型连接成功",
+          message: `${result.model} · ${result.latencyMs} ms · ${result.message}`,
+        });
+      } catch (error) {
+        updateProvider(provider.id, { health: "error" });
+        pushToast({
+          type: "error",
+          title: "模型连接失败",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        setTestingId("");
+      }
+      return;
+    }
     const checks = [
       Boolean(provider.baseUrl.startsWith("http")),
       Boolean(provider.model.trim()),
@@ -167,8 +211,15 @@ export default function Models() {
     });
   };
 
-  const removeProvider = (provider: ProviderProfile) => {
+  const removeProvider = async (provider: ProviderProfile) => {
     if (window.confirm(`删除 Provider「${provider.name}」？`)) {
+      if (isTauriDesktop && provider.hasSecret) {
+        try {
+          await clearProviderSecret(provider.id);
+        } catch {
+          // Metadata can still be removed if the credential was already absent.
+        }
+      }
       deleteProvider(provider.id);
       pushToast({ type: "info", title: "Provider 已删除" });
     }
@@ -194,13 +245,16 @@ export default function Models() {
       <div className="model-security-banner">
         <span><ShieldCheck size={20} /></span>
         <div>
-          <strong>密钥边界</strong>
+            <strong>密钥边界</strong>
           <p>
-            当前浏览器原型不会持久化 API Key。桌面版本将把密钥写入 Windows
-            Credential Manager，项目 JSON、SQLite 与日志只保留引用。
+              {isTauriDesktop
+                ? "桌面版会将 API Key 写入 Windows Credential Manager，项目 JSON、SQLite 与日志只保留引用。"
+                : "浏览器预览不会持久化 API Key。使用 Agent Workflow 和真实模型连接时请运行 Tauri 桌面版。"}
           </p>
         </div>
-        <Pill tone="info">原型模式</Pill>
+        <Pill tone={isTauriDesktop ? "success" : "info"}>
+          {isTauriDesktop ? "桌面凭据库" : "浏览器预览"}
+        </Pill>
       </div>
 
       <div className="models-summary">
@@ -290,17 +344,23 @@ export default function Models() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    icon={<RefreshCw size={14} />}
+                    icon={
+                      <RefreshCw
+                        size={14}
+                        className={testingId === provider.id ? "spin" : ""}
+                      />
+                    }
                     onClick={() => validateConfiguration(provider)}
+                    disabled={testingId === provider.id}
                   >
-                    校验
+                    {testingId === provider.id ? "检测中" : "检测"}
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => openEdit(provider)}>
                     编辑
                   </Button>
                   <IconButton
                     label="删除 Provider"
-                    onClick={() => removeProvider(provider)}
+                    onClick={() => void removeProvider(provider)}
                   >
                     <Trash2 size={15} />
                   </IconButton>
@@ -481,8 +541,8 @@ export default function Models() {
           <Button variant="ghost" onClick={() => setModalOpen(false)}>
             取消
           </Button>
-          <Button variant="primary" onClick={saveProvider}>
-            保存 Provider
+          <Button variant="primary" onClick={() => void saveProvider()} disabled={saving}>
+            {saving ? "正在保存…" : "保存 Provider"}
           </Button>
         </footer>
       </Modal>

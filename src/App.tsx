@@ -1,6 +1,7 @@
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { AppShell, ProjectGuard } from "./components/AppShell";
 import AnimationEditor from "./pages/AnimationEditor";
+import AgentWorkflow from "./pages/AgentWorkflow";
 import AudioSubtitles from "./pages/AudioSubtitles";
 import Dashboard from "./pages/Dashboard";
 import ImageAssets from "./pages/ImageAssets";
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="projects/:projectId" element={<ProjectOutlet />}>
           <Route index element={<Navigate to="plan" replace />} />
           <Route path="plan" element={<Planning />} />
+          <Route path="workflow" element={<AgentWorkflow />} />
           <Route path="script" element={<ScriptEditor />} />
           <Route path="storyboard" element={<Storyboard />} />
           <Route path="assets" element={<ImageAssets />} />

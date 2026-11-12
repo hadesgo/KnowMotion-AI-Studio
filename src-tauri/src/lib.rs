@@ -1,3 +1,5 @@
+mod agent;
+
 use chrono::Utc;
 use rusqlite::{params, Connection};
 use serde::Serialize;
@@ -68,19 +70,20 @@ fn open_database(path: &Path) -> Result<Connection, String> {
 
 fn safe_identifier(value: &str) -> bool {
     !value.is_empty()
-        && value
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_')
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+        })
 }
 
-fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
+pub(crate) fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let temporary = path.with_extension("tmp");
     {
         let mut file = File::create(&temporary).map_err(|error| error.to_string())?;
-        file.write_all(contents).map_err(|error| error.to_string())?;
+        file.write_all(contents)
+            .map_err(|error| error.to_string())?;
         file.sync_all().map_err(|error| error.to_string())?;
     }
     fs::rename(&temporary, path).map_err(|error| error.to_string())
@@ -90,7 +93,10 @@ fn json_text(value: &Value) -> Result<Vec<u8>, String> {
     serde_json::to_vec_pretty(value).map_err(|error| error.to_string())
 }
 
-fn mirror_project_files(projects_root: &Path, project: &Value) -> Result<String, String> {
+pub(crate) fn mirror_project_files(
+    projects_root: &Path,
+    project: &Value,
+) -> Result<String, String> {
     let id = project
         .get("id")
         .and_then(Value::as_str)
@@ -142,7 +148,10 @@ fn mirror_project_files(projects_root: &Path, project: &Value) -> Result<String,
         .cloned()
         .unwrap_or_else(|| Value::Array(Vec::new()));
 
-    write_atomic(&project_root.join("script/outline.json"), &json_text(&outline)?)?;
+    write_atomic(
+        &project_root.join("script/outline.json"),
+        &json_text(&outline)?,
+    )?;
     write_atomic(
         &project_root.join("script/narration.json"),
         &json_text(&scenes)?,
@@ -195,8 +204,8 @@ fn save_studio_state(
     state_json: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let parsed: Value =
-        serde_json::from_str(&state_json).map_err(|error| format!("Invalid state JSON: {error}"))?;
+    let parsed: Value = serde_json::from_str(&state_json)
+        .map_err(|error| format!("Invalid state JSON: {error}"))?;
     // Zustand persist wraps the partial state in { state, version }.
     let persisted_state = parsed.get("state").unwrap_or(&parsed);
     let now = Utc::now().to_rfc3339();
@@ -204,9 +213,7 @@ fn save_studio_state(
         .database
         .lock()
         .map_err(|_| "Database lock is unavailable".to_string())?;
-    let transaction = database
-        .transaction()
-        .map_err(|error| error.to_string())?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
 
     transaction
         .execute(
@@ -303,8 +310,8 @@ fn remove_studio_state(namespace: String, state: State<'_, AppState>) -> Result<
 
 #[tauri::command]
 fn export_project_json(app: tauri::AppHandle, project_json: String) -> Result<String, String> {
-    let project: Value =
-        serde_json::from_str(&project_json).map_err(|error| format!("Invalid project JSON: {error}"))?;
+    let project: Value = serde_json::from_str(&project_json)
+        .map_err(|error| format!("Invalid project JSON: {error}"))?;
     let title = project
         .get("title")
         .and_then(Value::as_str)
@@ -369,11 +376,14 @@ pub fn run() {
             fs::create_dir_all(&projects_root).map_err(|error| error.to_string())?;
             let database_path = app_data.join("studio.sqlite3");
             let database = open_database(&database_path).map_err(|error| error.to_string())?;
+            let agent_runtime =
+                agent::runtime::AgentRuntime::new(&database_path, projects_root.clone())?;
             app.manage(AppState {
                 database: Mutex::new(database),
                 projects_root,
                 database_path,
             });
+            app.manage(agent_runtime);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -381,7 +391,20 @@ pub fn run() {
             save_studio_state,
             remove_studio_state,
             export_project_json,
-            desktop_status
+            desktop_status,
+            agent::agent_workflow_definition,
+            agent::workflow_start,
+            agent::workflow_get,
+            agent::workflow_list,
+            agent::workflow_pause,
+            agent::workflow_resume,
+            agent::workflow_retry,
+            agent::workflow_rerun_step,
+            agent::workflow_approve,
+            agent::workflow_undo_revision,
+            agent::provider_save_secret,
+            agent::provider_clear_secret,
+            agent::provider_test
         ])
         .run(tauri::generate_context!())
         .expect("error while running KnowMotion AI Studio");

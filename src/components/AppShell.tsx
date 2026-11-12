@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   ListTree,
   MonitorPlay,
+  Network,
   Plus,
   Settings2,
   Sparkles,
@@ -35,6 +36,7 @@ import { AssistantDrawer } from "./AssistantDrawer";
 import { Button, IconButton, Pill, Toasts } from "./ui";
 
 const projectSteps = [
+  { path: "workflow", label: "Agent 工作流", icon: Network },
   { path: "plan", label: "AI 内容策划", icon: Sparkles },
   { path: "script", label: "脚本编辑", icon: FileText },
   { path: "storyboard", label: "分镜工作区", icon: LayoutDashboard },
@@ -60,6 +62,7 @@ export function AppShell() {
   const stepState = useMemo(() => {
     if (!project) return new Map<string, "done" | "active" | "todo">();
     return new Map<string, "done" | "active" | "todo">([
+      ["workflow", location.pathname.endsWith("/workflow") ? "active" : "todo"],
       ["plan", project.outline.length ? "done" : location.pathname.endsWith("/plan") ? "active" : "todo"],
       [
         "script",

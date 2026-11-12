@@ -132,6 +132,18 @@ export interface VideoProject {
   timeline: TimelineClip[];
   audio: AudioSettings;
   renders: RenderRecord[];
+  qualityReport?: {
+    score: number;
+    status: "pass" | "warn" | "fail" | string;
+    findings: Array<{
+      severity: string;
+      code: string;
+      message: string;
+      sceneId?: string;
+    }>;
+    checkedAt?: string;
+    summary?: string;
+  };
 }
 
 export type ProviderCapability = "LLM" | "Image" | "TTS" | "ASR" | "Embedding";
