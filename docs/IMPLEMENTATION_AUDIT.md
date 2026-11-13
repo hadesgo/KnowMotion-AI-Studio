@@ -192,6 +192,16 @@
 - Rust panic hook、渲染生命周期、Provider 调用、Workflow 事件、媒体合成和知识检索均接入统一管线。
 - 渲染 stderr 采用 256 KiB 滚动尾部缓冲，既持续排空子进程管道，又避免无上限内存占用。
 
+### 3.11 组件测试与桌面 E2E
+
+- Vitest + Testing Library + jsdom 覆盖共享 Segmented、Modal 键盘操作、Progress 可访问性和新建项目表单流程。
+- Tauri WebDriver 使用 `tauri-driver` + 与已安装 Edge 完全匹配的 `msedgedriver` 启动真实 release 应用。
+- 桌面 E2E 使用 `KNOWMOTION_E2E_DATA_DIR` 隔离 SQLite、项目和日志，不接触用户应用数据。
+- 自动化流程覆盖 Dashboard 输入主题、新建项目、进入策划、动画编辑、添加 Canvas 图层、打开 Remotion Studio。
+- E2E 会关闭并重启真实桌面应用，再从 Dashboard 验证新项目已由 SQLite 恢复。
+- 失败时保存页面截图与 DOM，成功时清理旧诊断文件；应用会话、WebDriver 和临时数据在 finally 中回收。
+- GitHub Actions Windows workflow 运行 Rust、Node 单元测试、组件测试、Lint、构建与桌面 E2E。
+
 ## 4. 部分实现
 
 | 功能 | 当前状态 | 缺口 |
@@ -222,7 +232,6 @@
 - 视频素材图层与视频剪辑。
 - Authenticode 签名、时间戳和 signed updater。
 - Windows 干净虚拟机 smoke test。
-- 组件测试和自动化桌面端 E2E。
 - 真实外部 LLM/Image/TTS/ASR/Embedding 服务端到端验收。
 
 ## 6. 与架构文档不一致的关键项
@@ -284,6 +293,6 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 ### P2：平台完整性
 
 1. 生成 IPC TypeScript 类型与 JSON Schema，消除手工重复模型。
-2. 增加组件测试和桌面端 E2E；当前已有前端 schema 单元测试与 Rust 单元测试。
+2. 扩展桌面 E2E 到审批流、真实媒体任务和取消/重启恢复场景。
 3. 增加发布 CI 日志聚合与远程诊断导出。
 4. 增加发布签名、signed updater、SBOM 和 VM smoke test。

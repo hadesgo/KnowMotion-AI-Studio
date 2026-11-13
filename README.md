@@ -34,11 +34,15 @@ npm run dev
 
 ```bash
 npm run test:frontend
+npm run test:components
 cd src-tauri && cargo test
 npm run renderer:smoke
+npm run test:e2e:desktop:full
 ```
 
 `renderer:smoke` 需要先执行 `npm run renderer:prepare`，会启动随包 Node/Chrome/FFmpeg 渲染一个短视频片段。
+
+桌面 E2E 使用 Tauri WebDriver 和匹配当前 Edge 版本的 `msedgedriver`。完整命令会自动构建应用；也可先运行 `npm run test:e2e:desktop` 复用已有 release EXE。测试使用隔离的临时应用数据目录，并在重启后验证项目持久化。
 
 ## 桌面应用
 

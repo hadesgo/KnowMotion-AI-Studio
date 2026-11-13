@@ -1,0 +1,51 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  unit-and-e2e:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.22.1"
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Frontend unit tests
+        run: |
+          npm run test:frontend
+          npm run test:components
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build and desktop E2E
+        run: npm run test:e2e:desktop:full
+
+      - name: Upload E2E diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-e2e-diagnostics
+          path: |
+            e2e-artifacts/
+            src-tauri/target/release/knowmotion.log
+          if-no-files-found: ignore

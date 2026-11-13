@@ -38,7 +38,7 @@ export default defineConfig([
     files: [
       'eslint.config.js',
       'scripts/**/*.{ts,mjs}',
-      'tests/**/*.ts',
+      'tests/**/*.{ts,tsx}',
       'vite.config.ts',
     ],
     languageOptions: {

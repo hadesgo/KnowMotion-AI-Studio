@@ -686,10 +686,21 @@ pub fn run() {
             serve_project_asset(context, request)
         })
         .setup(|app| {
-            let app_data = app
-                .path()
-                .app_data_dir()
-                .map_err(|error| error.to_string())?;
+            let automation = std::env::var("TAURI_WEBVIEW_AUTOMATION").as_deref() == Ok("true");
+            let app_data = if automation {
+                std::env::var_os("KNOWMOTION_E2E_DATA_DIR")
+                    .map(PathBuf::from)
+                    .unwrap_or(
+                        app.path()
+                            .app_data_dir()
+                            .map_err(|error| error.to_string())?,
+                    )
+            } else {
+                app.path()
+                    .app_data_dir()
+                    .map_err(|error| error.to_string())?
+            };
+            fs::create_dir_all(&app_data).map_err(|error| error.to_string())?;
             logging::init(&app_data.join("logs")).map_err(|error| error.to_string())?;
             logging::install_panic_hook();
             logging::log_event(
