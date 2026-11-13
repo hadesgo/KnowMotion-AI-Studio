@@ -64,6 +64,7 @@ export interface Scene {
   accent: string;
   assetId?: string;
   layers: SceneLayer[];
+  remotion?: Record<string, unknown>;
 }
 
 export interface Asset {

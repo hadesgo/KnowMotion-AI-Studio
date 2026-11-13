@@ -9,14 +9,24 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "tauri build",
+    "remotion:studio": "remotion studio src/remotion/index.ts",
+    "remotion:render": "tsx scripts/render-remotion.ts",
+    "remotion:validate": "tsx scripts/validate-remotion.ts",
+    "remotion:example": "tsx scripts/export-remotion-example.ts"
   },
   "dependencies": {
+    "@remotion/bundler": "^4.0.543",
+    "@remotion/cli": "^4.0.543",
+    "@remotion/player": "^4.0.543",
+    "@remotion/renderer": "^4.0.543",
     "@tauri-apps/api": "^2.12.4",
     "lucide-react": "^1.72.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.5",
+    "remotion": "^4.0.543",
+    "zod": "^4.6.7",
     "zustand": "^5.1.0"
   },
   "devDependencies": {
@@ -26,10 +36,11 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
     "tailwindcss": "^4.3.5",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.8"
   },
   "allowScripts": {
-    "esbuild@0.28.2": true
+    "esbuild@0.28.1": true
   }
 }

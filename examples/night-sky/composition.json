@@ -1,0 +1,629 @@
+{
+  "schemaVersion": "1.0",
+  "id": "composition-project-demo-night-sky",
+  "title": "夜空为什么是黑色的？",
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "durationInFrames": 990,
+  "assets": [
+    {
+      "id": "scene-66c78c3b-be16-4d64-b20b-c915533f0ea8-generated-visual",
+      "type": "image",
+      "src": "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22960%22%20height%3D%22720%22%20viewBox%3D%220%200%20960%20720%22%3E%0A%20%20%20%20%20%20%3Cdefs%3E%3CradialGradient%20id%3D%22g%22%20cx%3D%2272%25%22%20cy%3D%2228%25%22%20r%3D%2280%25%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23c8ff65%22%20stop-opacity%3D%22.82%22%2F%3E%3Cstop%20offset%3D%22.48%22%20stop-color%3D%22%23153e45%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23071015%22%2F%3E%3C%2FradialGradient%3E%3C%2Fdefs%3E%0A%20%20%20%20%20%20%3Crect%20width%3D%22960%22%20height%3D%22720%22%20fill%3D%22url(%23g)%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%22700%22%20cy%3D%22230%22%20r%3D%22135%22%20fill%3D%22none%22%20stroke%3D%22%23c8ff65%22%20stroke-width%3D%222%22%20opacity%3D%22.7%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%22700%22%20cy%3D%22230%22%20r%3D%2275%22%20fill%3D%22none%22%20stroke%3D%22%23c8ff65%22%20opacity%3D%22.45%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%22700%22%20cy%3D%22230%22%20r%3D%2218%22%20fill%3D%22%23c8ff65%22%2F%3E%0A%20%20%20%20%20%20%3Cpath%20d%3D%22M120%20590%20C330%20430%20530%20610%20850%20390%22%20fill%3D%22none%22%20stroke%3D%22%23c8ff65%22%20stroke-width%3D%222%22%20opacity%3D%22.4%22%2F%3E%0A%20%20%20%20%3C%2Fsvg%3E",
+      "mimeType": "image/svg+xml"
+    }
+  ],
+  "scenes": [
+    {
+      "schemaVersion": "1.0",
+      "id": "scene-66c78c3b-be16-4d64-b20b-c915533f0ea8",
+      "styleVariant": "cinematic",
+      "title": "黑夜，真的是黑色的吗？",
+      "narration": "你每晚看到的夜空，可能并不是宇宙最真实的样子。我们看到的黑暗，其实藏着一段被忽略的光的故事。",
+      "durationMs": 5000,
+      "background": {
+        "type": "gradient",
+        "colors": [
+          "#153c44",
+          "#081319",
+          "#05090d"
+        ],
+        "angle": 145,
+        "vignette": 0.34
+      },
+      "camera": {
+        "from": {
+          "scale": 1,
+          "x": 0,
+          "y": 0
+        },
+        "to": {
+          "scale": 1.07,
+          "x": -1.5,
+          "y": -1
+        },
+        "easing": "easeInOut"
+      },
+      "transition": {
+        "type": "fade",
+        "durationMs": 500,
+        "direction": "left"
+      },
+      "layers": [
+        {
+          "id": "scene-66c78c3b-be16-4d64-b20b-c915533f0ea8-orbit",
+          "timing": {
+            "fromMs": 0,
+            "toMs": 5000
+          },
+          "animation": {
+            "type": "fade",
+            "delayMs": 100,
+            "durationMs": 1200,
+            "easing": "easeOut"
+          },
+          "opacity": 0.72,
+          "x": 63,
+          "y": 5,
+          "width": 30,
+          "height": 30,
+          "rotation": 0,
+          "type": "svg",
+          "variant": "orbit",
+          "color": "#c8ff65",
+          "strokeWidth": 1.6,
+          "intensity": 1
+        },
+        {
+          "id": "scene-66c78c3b-be16-4d64-b20b-c915533f0ea8-visual",
+          "timing": {
+            "fromMs": 0,
+            "toMs": 5000
+          },
+          "animation": {
+            "type": "scaleIn",
+            "delayMs": 0,
+            "durationMs": 1300,
+            "easing": "easeOut"
+          },
+          "opacity": 0.5,
+          "x": 58,
+          "y": 3,
+          "width": 40,
+          "height": 48,
+          "rotation": 0,
+          "type": "image",
+          "assetId": "scene-66c78c3b-be16-4d64-b20b-c915533f0ea8-generated-visual",
+          "fit": "cover",
+          "borderRadius": 22,
+          "treatment": "vignette"
+        },
+        {
+          "id": "scene-66c78c3b-be16-4d64-b20b-c915533f0ea8-headline",
+          "timing": {
+            "fromMs": 0,
+            "toMs": 5000
+          },
+          "animation": {
+            "type": "fadeUp",
+            "delayMs": 80,
+            "durationMs": 650,
+            "easing": "spring"
+          },
+          "opacity": 1,
+          "x": 8,
+          "y": 62,
+          "width": 74,
+          "height": 18,
+          "rotation": 0,
+          "type": "text",
+          "content": "黑夜，真的是黑色的吗？",
+          "color": "#f3f7f4",
+          "fontSize": 58,
+          "fontWeight": 650,
+          "align": "left",
+          "letterSpacing": -1
+        },
+        {
+          "id": "scene-66c78c3b-be16-4d64-b20b-c915533f0ea8-narration",
+          "timing": {
+            "fromMs": 850,
+            "toMs": 5000
+          },
+          "animation": {
+            "type": "fadeUp",
+            "delayMs": 0,
+            "durationMs": 580,
+            "easing": "easeOut"
+          },
+          "opacity": 0.78,
+          "x": 8,
+          "y": 76,
+          "width": 62,
+          "height": 14,
+          "rotation": 0,
+          "type": "text",
+          "content": "你每晚看到的夜空，可能并不是宇宙最真实的样子。我们看到的黑暗，其实藏着一段被忽略的光的故事。",
+          "color": "#aebcc7",
+          "fontSize": 20,
+          "fontWeight": 400,
+          "align": "left",
+          "letterSpacing": 0
+        }
+      ]
+    },
+    {
+      "schemaVersion": "1.0",
+      "id": "scene-5b44b977-1225-4142-b0aa-94d9e1021abb",
+      "styleVariant": "diagram",
+      "title": "宇宙并非空无一物",
+      "narration": "如果宇宙里布满恒星，为什么夜空没有被无数星光点亮？这个问题曾让天文学家争论了数百年。",
+      "durationMs": 7000,
+      "background": {
+        "type": "gradient",
+        "colors": [
+          "#0d2732",
+          "#0b151e",
+          "#070c11"
+        ],
+        "angle": 110,
+        "vignette": 0.34
+      },
+      "camera": {
+        "from": {
+          "scale": 1,
+          "x": 0,
+          "y": 0
+        },
+        "to": {
+          "scale": 1.02,
+          "x": 0,
+          "y": -0.6
+        },
+        "easing": "easeInOut"
+      },
+      "transition": {
+        "type": "wipe",
+        "durationMs": 700,
+        "direction": "right"
+      },
+      "layers": [
+        {
+          "id": "scene-5b44b977-1225-4142-b0aa-94d9e1021abb-grid",
+          "timing": {
+            "fromMs": 0,
+            "toMs": 7000
+          },
+          "animation": {
+            "type": "fade",
+            "delayMs": 0,
+            "durationMs": 900,
+            "easing": "easeOut"
+          },
+          "opacity": 0.2,
+          "x": 48,
+          "y": 7,
+          "width": 46,
+          "height": 42,
+          "rotation": 0,
+          "type": "svg",
+          "variant": "grid",
+          "color": "#79a9ff",
+          "strokeWidth": 0.8,
+          "intensity": 0.8
+        },
+        {
+          "id": "scene-5b44b977-1225-4142-b0aa-94d9e1021abb-wave",
+          "timing": {
+            "fromMs": 0,
+            "toMs": 7000
+          },
+          "animation": {
+            "type": "slideIn",
+            "delayMs": 200,
+            "durationMs": 1000,
+            "easing": "easeOut"
+          },
+          "opacity": 0.72,
+          "x": 53,
+          "y": 36,
+          "width": 38,
+          "height": 30,
+          "rotation": 0,
+          "type": "svg",
+          "variant": "wave",
+          "color": "#79a9ff",
+          "strokeWidth": 2.4,
+          "intensity": 0.82
+        },
+        {
+          "id": "scene-5b44b977-1225-4142-b0aa-94d9e1021abb-headline",
+          "timing": {
+            "fromMs": 0,
+            "toMs": 7000
+          },
+          "animation": {
+            "type": "fadeUp",
+            "delayMs": 80,
+            "durationMs": 650,
+            "easing": "spring"
+          },
+          "opacity": 1,
+          "x": 8,
+          "y": 69,
+          "width": 52,
+          "height": 18,
+          "rotation": 0,
+          "type": "text",
+          "content": "宇宙并非空无一物",
+          "color": "#f3f7f4",
+          "fontSize": 46,
+          "fontWeight": 650,
+          "align": "left",
+          "letterSpacing": -1
+        },
+        {
+          "id": "scene-5b44b977-1225-4142-b0aa-94d9e1021abb-narration",
+          "timing": {
+            "fromMs": 850,
+            "toMs": 7000
+          },
+          "animation": {
+            "type": "fadeUp",
+            "delayMs": 0,
+            "durationMs": 580,
+            "easing": "easeOut"
+          },
+          "opacity": 0.78,
+          "x": 8,
+          "y": 81,
+          "width": 70,
+          "height": 14,
+          "rotation": 0,
+          "type": "text",
+          "content": "如果宇宙里布满恒星，为什么夜空没有被无数星光点亮？这个问题曾让天文学家争论了数百年。",
+          "color": "#aebcc7",
+          "fontSize": 20,
+          "fontWeight": 400,
+          "align": "left",
+          "letterSpacing": 0
+        }
+      ]
+    },
+    {
+      "schemaVersion": "1.0",
+      "id": "scene-b2fac321-9109-49fe-a662-84f5e2212089",
+      "styleVariant": "data",
+      "title": "光，也有自己的方向",
+      "narration": "宇宙膨胀会把遥远星光拉向更长的波长。可见光逐渐变成红外光，最终离开我们眼睛能够感知的范围。",
+      "durationMs": 8000,
+      "background": {
+        "type": "gradient",
+        "colors": [
+          "#10253d",
+          "#0d1723",
+          "#070b10"
+        ],
+        "angle": 145,
+        "vignette": 0.34
+      },
+      "camera": {
+        "from": {
+          "scale": 1,
+          "x": 0,
+          "y": 0
+        },
+        "to": {
+          "scale": 1.025,
+          "x": 0.8,
+          "y": 0
+        },
+        "easing": "easeInOut"
+      },
+      "transition": {
+        "type": "slide",
+        "durationMs": 700,
+        "direction": "left"
+      },
+      "layers": [
+        {
+          "id": "scene-b2fac321-9109-49fe-a662-84f5e2212089-chart",
+          "timing": {
+            "fromMs": 180,
+            "toMs": 8000
+          },
+          "animation": {
+            "type": "slideIn",
+            "delayMs": 0,
+            "durationMs": 900,
+            "easing": "easeOut"
+          },
+          "opacity": 0.92,
+          "x": 53,
+          "y": 16,
+          "width": 37,
+          "height": 38,
+          "rotation": 0,
+          "type": "chart",
+          "chartType": "bar",
+          "data": [
+            {
+              "label": "钩子",
+              "value": 6,
+              "color": "#ffbc66"
+            },
+            {
+              "label": "解释",
+              "value": 9,
+              "color": "#79a9ff"
+            },
+            {
+              "label": "收束",
+              "value": 5,
+              "color": "#ffbc66"
+            }
+          ],
+          "accent": "#ffbc66",
+          "showValues": true
+        },
+        {
+          "id": "scene-b2fac321-9109-49fe-a662-84f5e2212089-headline",
+          "timing": {
+            "fromMs": 0,
+            "toMs": 8000
+          },
+          "animation": {
+            "type": "fadeUp",
+            "delayMs": 80,
+            "durationMs": 650,
+            "easing": "spring"
+          },
+          "opacity": 1,
+          "x": 8,
+          "y": 69,
+          "width": 74,
+          "height": 18,
+          "rotation": 0,
+          "type": "text",
+          "content": "光，也有自己的方向",
+          "color": "#f3f7f4",
+          "fontSize": 46,
+          "fontWeight": 650,
+          "align": "left",
+          "letterSpacing": -1
+        },
+        {
+          "id": "scene-b2fac321-9109-49fe-a662-84f5e2212089-narration",
+          "timing": {
+            "fromMs": 850,
+            "toMs": 8000
+          },
+          "animation": {
+            "type": "fadeUp",
+            "delayMs": 0,
+            "durationMs": 580,
+            "easing": "easeOut"
+          },
+          "opacity": 0.78,
+          "x": 8,
+          "y": 81,
+          "width": 62,
+          "height": 14,
+          "rotation": 0,
+          "type": "text",
+          "content": "宇宙膨胀会把遥远星光拉向更长的波长。可见光逐渐变成红外光，最终离开我们眼睛能够感知的范围。",
+          "color": "#aebcc7",
+          "fontSize": 20,
+          "fontWeight": 400,
+          "align": "left",
+          "letterSpacing": 0
+        }
+      ]
+    },
+    {
+      "schemaVersion": "1.0",
+      "id": "scene-c85db0ac-17d8-4a3d-8230-50239333825a",
+      "styleVariant": "editorial",
+      "title": "看见人眼看不见的光",
+      "narration": "现代望远镜不只观察可见光。它们接收红外线、无线电波和微波，把宇宙另一面的信息重新翻译给我们。",
+      "durationMs": 7000,
+      "background": {
+        "type": "gradient",
+        "colors": [
+          "#2b2a24",
+          "#141713",
+          "#080b0a"
+        ],
+        "angle": 145,
+        "vignette": 0.34
+      },
+      "camera": {
+        "from": {
+          "scale": 1,
+          "x": 0,
+          "y": 0
+        },
+        "to": {
+          "scale": 1.02,
+          "x": 0,
+          "y": -0.6
+        },
+        "easing": "easeInOut"
+      },
+      "transition": {
+        "type": "fade",
+        "durationMs": 700,
+        "direction": "right"
+      },
+      "layers": [
+        {
+          "id": "scene-c85db0ac-17d8-4a3d-8230-50239333825a-headline",
+          "timing": {
+            "fromMs": 0,
+            "toMs": 7000
+          },
+          "animation": {
+            "type": "fadeUp",
+            "delayMs": 80,
+            "durationMs": 650,
+            "easing": "spring"
+          },
+          "opacity": 1,
+          "x": 8,
+          "y": 69,
+          "width": 74,
+          "height": 18,
+          "rotation": 0,
+          "type": "text",
+          "content": "看见人眼看不见的光",
+          "color": "#f3f7f4",
+          "fontSize": 46,
+          "fontWeight": 650,
+          "align": "left",
+          "letterSpacing": -1
+        },
+        {
+          "id": "scene-c85db0ac-17d8-4a3d-8230-50239333825a-narration",
+          "timing": {
+            "fromMs": 850,
+            "toMs": 7000
+          },
+          "animation": {
+            "type": "fadeUp",
+            "delayMs": 0,
+            "durationMs": 580,
+            "easing": "easeOut"
+          },
+          "opacity": 0.78,
+          "x": 8,
+          "y": 81,
+          "width": 62,
+          "height": 14,
+          "rotation": 0,
+          "type": "text",
+          "content": "现代望远镜不只观察可见光。它们接收红外线、无线电波和微波，把宇宙另一面的信息重新翻译给我们。",
+          "color": "#aebcc7",
+          "fontSize": 20,
+          "fontWeight": 400,
+          "align": "left",
+          "letterSpacing": 0
+        }
+      ]
+    },
+    {
+      "schemaVersion": "1.0",
+      "id": "scene-246df65e-241f-47ce-bcca-9b783b6411ef",
+      "styleVariant": "minimal",
+      "title": "黑暗是一张信息地图",
+      "narration": "所以，夜空的黑暗不是空白。它是时间、距离和宇宙历史共同留下的边界，也是下一场发现的入口。",
+      "durationMs": 6000,
+      "background": {
+        "type": "gradient",
+        "colors": [
+          "#1a2423",
+          "#0d1214",
+          "#070a0b"
+        ],
+        "angle": 145,
+        "vignette": 0.5
+      },
+      "camera": {
+        "from": {
+          "scale": 1,
+          "x": 0,
+          "y": 0
+        },
+        "to": {
+          "scale": 1.02,
+          "x": 0,
+          "y": -0.6
+        },
+        "easing": "easeInOut"
+      },
+      "transition": {
+        "type": "fade",
+        "durationMs": 600,
+        "direction": "left"
+      },
+      "layers": [
+        {
+          "id": "scene-246df65e-241f-47ce-bcca-9b783b6411ef-orbit",
+          "timing": {
+            "fromMs": 0,
+            "toMs": 6000
+          },
+          "animation": {
+            "type": "fade",
+            "delayMs": 100,
+            "durationMs": 1200,
+            "easing": "easeOut"
+          },
+          "opacity": 0.36,
+          "x": 54,
+          "y": 9,
+          "width": 33,
+          "height": 33,
+          "rotation": 0,
+          "type": "svg",
+          "variant": "orbit",
+          "color": "#a78bfa",
+          "strokeWidth": 1.6,
+          "intensity": 0.65
+        },
+        {
+          "id": "scene-246df65e-241f-47ce-bcca-9b783b6411ef-headline",
+          "timing": {
+            "fromMs": 0,
+            "toMs": 6000
+          },
+          "animation": {
+            "type": "fadeUp",
+            "delayMs": 80,
+            "durationMs": 650,
+            "easing": "spring"
+          },
+          "opacity": 1,
+          "x": 16,
+          "y": 69,
+          "width": 74,
+          "height": 18,
+          "rotation": 0,
+          "type": "text",
+          "content": "黑暗是一张信息地图",
+          "color": "#f3f7f4",
+          "fontSize": 52,
+          "fontWeight": 650,
+          "align": "left",
+          "letterSpacing": -1
+        },
+        {
+          "id": "scene-246df65e-241f-47ce-bcca-9b783b6411ef-narration",
+          "timing": {
+            "fromMs": 850,
+            "toMs": 6000
+          },
+          "animation": {
+            "type": "fadeUp",
+            "delayMs": 0,
+            "durationMs": 580,
+            "easing": "easeOut"
+          },
+          "opacity": 0.78,
+          "x": 16,
+          "y": 81,
+          "width": 62,
+          "height": 14,
+          "rotation": 0,
+          "type": "text",
+          "content": "所以，夜空的黑暗不是空白。它是时间、距离和宇宙历史共同留下的边界，也是下一场发现的入口。",
+          "color": "#aebcc7",
+          "fontSize": 20,
+          "fontWeight": 400,
+          "align": "left",
+          "letterSpacing": 0
+        }
+      ]
+    }
+  ]
+}

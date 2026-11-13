@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { AppShell, ProjectGuard } from "./components/AppShell";
 import AnimationEditor from "./pages/AnimationEditor";
@@ -12,6 +13,8 @@ import RenderPage from "./pages/RenderPage";
 import ScriptEditor from "./pages/ScriptEditor";
 import Storyboard from "./pages/Storyboard";
 import TimelineEditor from "./pages/TimelineEditor";
+
+const RemotionStudio = lazy(() => import("./pages/RemotionStudio"));
 
 function ProjectOutlet() {
   return (
@@ -36,6 +39,14 @@ export default function App() {
           <Route path="storyboard" element={<Storyboard />} />
           <Route path="assets" element={<ImageAssets />} />
           <Route path="animation" element={<AnimationEditor />} />
+          <Route
+            path="remotion"
+            element={
+              <Suspense fallback={<div className="workflow-loading">正在加载 Remotion Player…</div>}>
+                <RemotionStudio />
+              </Suspense>
+            }
+          />
           <Route path="timeline" element={<TimelineEditor />} />
           <Route path="audio" element={<AudioSubtitles />} />
           <Route path="render" element={<RenderPage />} />

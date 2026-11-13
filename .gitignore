@@ -8,3 +8,4 @@ dashboard.png
 .chrome-test*/
 .edge-test*/
 src-tauri/target/
+renders/

@@ -176,7 +176,7 @@ export default function AnimationEditor() {
       <PageHeading
         eyebrow="ANIMATION WORKBENCH"
         title="让每个信息在正确的时刻出现"
-        description="当前页面使用浏览器场景预览进行布局与运动编辑。正式 Remotion 渲染将在桌面运行时接入。"
+        description="在这里调整结构化图层和属性；Remotion Studio 使用同一份场景数据生成实时预览与完整视频。"
         actions={
           <>
             <Button
@@ -189,9 +189,9 @@ export default function AnimationEditor() {
             <Button
               variant="primary"
               icon={<ArrowRight size={16} />}
-              onClick={() => navigate(`/projects/${project.id}/timeline`)}
+              onClick={() => navigate(`/projects/${project.id}/remotion`)}
             >
-              打开时间轴
+              打开 Remotion Studio
             </Button>
           </>
         }
@@ -527,8 +527,8 @@ export default function AnimationEditor() {
           <div className="remotion-note">
             <ImageIcon size={16} />
             <p>
-              <strong>渲染边界</strong>
-              此预览用于交互设计；正式 MP4 需要 Node + Remotion Renderer。
+              <strong>共享数据</strong>
+              Scene DSL 会自动把当前图层编译到 Remotion Studio，无需生成新的 React 项目。
             </p>
           </div>
         </aside>
