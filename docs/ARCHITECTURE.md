@@ -471,6 +471,8 @@ Remotion 的 `ensureBrowser()` 支持传入已有浏览器可执行文件路径�
 - 每个 job 使用独立临时目录；启动和恢复时清理超过保留期的 `.partial` 文件。
 - 应用重启时，数据库中标记为 `running` 的渲染任务转为 `interrupted`，默认让用户重试，不假装任务仍在运行。
 
+当前实现已为每个正式渲染 Job 创建独立 Windows Job Object，并设置 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 与最多 64 个进程的 `JOB_OBJECT_LIMIT_ACTIVE_PROCESS`。Node Worker 在启动后立即加入 Job，后续 Chromium、FFmpeg 等子进程自动继承作业树。取消时先等待 4 秒协作式退出，随后调用 `TerminateJobObject`；Tauri 崩溃或正常退出时，内核关闭最后一个 Job 句柄并回收整棵树。
+
 ### 7.8 场景 DSL，而不是任意生成代码
 
 `scene-dsl` 是固定 Schema 的判别联合，例如 `text`、`image`、`shape`、`chart`、`video`、`group`、`particle`。动画参数通过 keyframe/easing 数据表达，而不是执行 AI 返回的 JavaScript。

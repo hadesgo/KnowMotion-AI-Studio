@@ -1,6 +1,7 @@
 mod agent;
 mod capabilities;
 mod database;
+mod job_object;
 mod media;
 mod render;
 mod storage;

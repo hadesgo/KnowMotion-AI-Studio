@@ -15,6 +15,7 @@ AI-powered knowledge animation studio. 用户从一个知识主题开始，在�
 - 确定性 Canvas 2D 动画图层：粒子流、动态波形、知识网络和轨道拖尾。
 - 帧驱动 GSAP 运动：漂浮、呼吸、摆动、环绕和弹性入场，Player 与 Renderer 结果一致。
 - 持久渲染 Job、真实 `render.progress`、取消、恢复、FFprobe、SHA-256 与原子提交。
+- Windows Job Object 监管 Node/Chrome/FFmpeg 进程树，取消、崩溃或应用退出时不残留渲染子进程。
 - 构建时打包固定 Node sidecar、Chrome Headless Shell、FFmpeg/FFprobe，并校验 runtime manifest。
 - OpenAI Compatible / ComfyUI 图片、云端与本地 TTS、ASR、Embedding/RAG 和网页来源正文抓取。
 - 项目文件锁、素材落盘、缺失扫描、可恢复归档删除及含素材的 ZIP 项目包导入导出。

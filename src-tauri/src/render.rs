@@ -1,4 +1,4 @@
-use crate::{safe_identifier, write_atomic};
+use crate::{job_object::RenderJobObject, safe_identifier, write_atomic};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -78,6 +78,7 @@ struct ActiveRender {
     stdin: Mutex<Option<ChildStdin>>,
     child: Arc<Mutex<Child>>,
     canceled: Arc<AtomicBool>,
+    job_object: RenderJobObject,
 }
 
 struct RenderEnvironment {
@@ -284,6 +285,26 @@ impl RenderManager {
         let mut child = command
             .spawn()
             .map_err(|error| format!("Unable to start renderer: {error}"))?;
+        let job_object = match RenderJobObject::attach(&child) {
+            Ok(job_object) => job_object,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = fs::remove_file(&manifest_path);
+                let _ = self.finish_job(
+                    &job_id,
+                    &task_id,
+                    "failed",
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some("RENDER_JOB_OBJECT_FAILED"),
+                    Some(&error),
+                );
+                return Err(error);
+            }
+        };
         let pid = child.id() as i64;
         let stdin = child
             .stdin
@@ -310,6 +331,7 @@ impl RenderManager {
                     stdin: Mutex::new(Some(stdin)),
                     child: child.clone(),
                     canceled: canceled.clone(),
+                    job_object: job_object.clone(),
                 },
             );
         }
@@ -332,6 +354,7 @@ impl RenderManager {
                 expected_duration_ms,
                 child,
                 canceled,
+                job_object,
                 stdout,
                 stderr,
             );
@@ -381,7 +404,7 @@ impl RenderManager {
             return Ok(job);
         }
         self.update_job_status(job_id, "canceling", None)?;
-        let (stdin, child, canceled) = {
+        let (stdin, child, canceled, job_object) = {
             let active = self
                 .active
                 .lock()
@@ -397,7 +420,12 @@ impl RenderManager {
                     .map_err(|_| "Renderer stdin is unavailable".to_string())?;
                 stdin.take()
             };
-            (stdin, process.child.clone(), process.canceled.clone())
+            (
+                stdin,
+                process.child.clone(),
+                process.canceled.clone(),
+                process.job_object.clone(),
+            )
         };
         if let Some(mut stdin) = stdin {
             stdin
@@ -410,6 +438,7 @@ impl RenderManager {
             thread::sleep(Duration::from_secs(4));
             if let Ok(mut child) = child.lock() {
                 if matches!(child.try_wait(), Ok(None)) {
+                    let _ = job_object.terminate();
                     let _ = child.kill();
                 }
             }
@@ -430,6 +459,7 @@ impl RenderManager {
         expected_duration_ms: i64,
         child: Arc<Mutex<Child>>,
         canceled: Arc<AtomicBool>,
+        _job_object: RenderJobObject,
         stdout: impl Read + Send + 'static,
         stderr: impl Read + Send + 'static,
     ) {

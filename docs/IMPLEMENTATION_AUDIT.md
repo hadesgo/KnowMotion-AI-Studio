@@ -149,6 +149,7 @@
 - Node Worker 以 stdout JSONL 输出 `started/progress/completed/error/canceled`。
 - Rust 通过 Tauri `render.progress` 转发真实百分比、已渲染帧和编码帧。
 - `render_cancel` 通过 stdin 触发 Remotion 官方 `cancelSignal`，超时后终止进程。
+- 每个渲染 Job 使用独立 Windows Job Object；设置 `KILL_ON_JOB_CLOSE` 和 64 进程上限，取消超时后通过 `TerminateJobObject` 回收 Node、Chrome、FFmpeg 整棵树。
 - 应用重启时，未完成渲染转为 `interrupted`，临时文件可重新发起。
 - 成功渲染先写 `.partial.mp4`，FFprobe 验证视频流和时长，计算 SHA-256，原子重命名后再提交数据库。
 - 输出旁挂 JSON 元数据，`artifact_refs` 与 `usage_records` 可追溯。
@@ -156,6 +157,7 @@
 - `renderer:smoke` 已用随包资源生成 966,517 字节真实 MP4 并通过。
 - Canvas smoke 已用随包 Renderer 生成 980,685 字节 MP4；抽帧确认 `network` 图层实际进入 H.264 成片。
 - GSAP smoke 已用随包 Renderer 生成 991,445 字节 MP4；`orbit` 运动与 Canvas 图层共同进入最终成片。
+- Windows Job Object 两项真实进程树测试通过：显式 `TerminateJobObject` 与关闭最后一个 Job 句柄都会终止后代进程。
 - NSIS `0.1.0` 安装包已实际生成，包含离线渲染资源。
 - Release EXE 在 Windows 上完成运行时 manifest 校验并稳定启动；Windows 主线程栈设为 8 MB，避免 release 构建启动时栈溢出。
 
@@ -194,7 +196,7 @@
 | 项目版本 | Agent 修订与保存快照 | 手动 UI 编辑没有同等全局 undo/redo 栈 |
 | 项目复制 | 本地素材与项目数据可复制 | 数据库工作流/渲染历史不复制到新项目 |
 | 项目导出 | 含素材、渲染和修订的 ZIP 包 | 无独立迁移工具和跨设备自动升级 |
-| 渲染 | 持久 Job、进度、取消、离线 runtime、验证和原子提交 | 无 Windows Job Object；取消依赖 stdin + 超时 kill，极小子进程树仍可能残留 |
+| 渲染 | 持久 Job、进度、取消、Windows Job Object、离线 runtime、验证和原子提交 | 尚无跨平台进程树容器；当前发行目标是 Windows |
 | 4K/60 FPS | Composition 与 Renderer 支持参数 | UI 只验证了 1080P；没有 4K/60 实测和资源限制 |
 | 动画组件 | 文本、SVG、图片、图表、Canvas 2D 与确定性 GSAP 已实现 | 没有专用视频图层 |
 | 质量检查 | `status=fail` 在 UI 与 Rust 渲染入口双重阻断 | 没有自动修复、逐项修复按钮或可配置发布规则 |
@@ -208,7 +210,6 @@
 - 角色一致性、场景一致性、参考图管理。
 - 批量图片生成队列、图片局部重绘。
 - 视频素材图层与视频剪辑。
-- Windows Job Object/渲染子进程树监管。
 - Authenticode 签名、时间戳和 signed updater。
 - Windows 干净虚拟机 smoke test。
 - 组件测试和自动化桌面端 E2E。
