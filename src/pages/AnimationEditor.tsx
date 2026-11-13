@@ -16,9 +16,10 @@ import {
   Square,
   Trash2,
   Type,
+  Waves,
   WandSparkles,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageHeading, useCurrentProject } from "../components/AppShell";
 import { ScenePreview } from "../components/ScenePreview";
@@ -74,11 +75,12 @@ export default function AnimationEditor() {
     };
   }, [playing, scene]);
 
-  const displayScale = useMemo(() => {
-    if (!scene) return "1.00";
-    const entrance = Math.min(1, time / Math.min(1.2, scene.duration * 0.3));
-    return (0.96 + entrance * 0.04).toFixed(2);
-  }, [scene, time]);
+  const displayScale = scene
+    ? (
+        0.96 +
+        Math.min(1, time / Math.min(1.2, scene.duration * 0.3)) * 0.04
+      ).toFixed(2)
+    : "1.00";
 
   if (!project || !scene) return null;
 
@@ -109,7 +111,7 @@ export default function AnimationEditor() {
     }));
   };
 
-  const addLayer = (type: "text" | "shape") => {
+  const addLayer = (type: "text" | "shape" | "canvas") => {
     const next = createLayer(type, scene.layers.length);
     next.end = scene.duration;
     if (type === "shape") {
@@ -120,6 +122,33 @@ export default function AnimationEditor() {
       next.width = 20;
       next.height = 35;
     }
+    if (type === "canvas") {
+      const variants = [
+        "particleFlow",
+        "waveform",
+        "network",
+        "orbitTrails",
+      ] as const;
+      next.canvasVariant =
+        variants[
+          scene.layers.filter((item) => item.type === "canvas").length %
+            variants.length
+        ];
+      next.name =
+        next.canvasVariant === "particleFlow"
+          ? "Canvas 粒子流"
+          : next.canvasVariant === "waveform"
+            ? "Canvas 动态波形"
+            : next.canvasVariant === "network"
+              ? "Canvas 知识网络"
+              : "Canvas 轨道拖尾";
+      next.color = scene.accent;
+      next.secondaryColor = "#79a9ff";
+      next.x = 48;
+      next.y = 8;
+      next.width = 46;
+      next.height = 54;
+    }
     updateProject(project.id, (current) => ({
       ...current,
       scenes: current.scenes.map((item) =>
@@ -129,7 +158,10 @@ export default function AnimationEditor() {
       ),
     }));
     setLayerId(next.id);
-    pushToast({ type: "success", title: `已添加${type === "text" ? "文字" : "图形"}图层` });
+    pushToast({
+      type: "success",
+      title: `已添加${type === "text" ? "文字" : type === "canvas" ? "Canvas 动画" : "图形"}图层`,
+    });
   };
 
   const duplicateLayer = () => {
@@ -247,6 +279,9 @@ export default function AnimationEditor() {
                 <IconButton label="添加图形图层" onClick={() => addLayer("shape")}>
                   <Shapes size={15} />
                 </IconButton>
+                <IconButton label="添加 Canvas 动画图层" onClick={() => addLayer("canvas")}>
+                  <Waves size={15} />
+                </IconButton>
               </div>
             </header>
             <div className="layer-list">
@@ -258,14 +293,22 @@ export default function AnimationEditor() {
                   onClick={() => setLayerId(item.id)}
                 >
                   <span className="layer-list__type">
-                    {item.type === "text" ? <Type size={14} /> : <Square size={14} />}
+                    {item.type === "text" ? (
+                      <Type size={14} />
+                    ) : item.type === "canvas" ? (
+                      <Waves size={14} />
+                    ) : (
+                      <Square size={14} />
+                    )}
                   </span>
                   <div>
                     <strong>{item.name}</strong>
                     <small>
                       {item.type === "text"
                         ? item.content || "空文字"
-                        : item.shape}
+                        : item.type === "canvas"
+                          ? item.canvasVariant ?? "particleFlow"
+                          : item.shape}
                     </small>
                   </div>
                   <span className="layer-list__eye">
@@ -484,6 +527,130 @@ export default function AnimationEditor() {
                         }
                       />
                       <code>{layer.color}</code>
+                    </label>
+                  </>
+                ) : layer.type === "canvas" ? (
+                  <>
+                    <label className="inspector-field">
+                      <span>动画模式</span>
+                      <select
+                        value={layer.canvasVariant ?? "particleFlow"}
+                        onChange={(event) =>
+                          updateLayer({
+                            canvasVariant: event.target
+                              .value as SceneLayer["canvasVariant"],
+                          })
+                        }
+                      >
+                        <option value="particleFlow">粒子流场</option>
+                        <option value="waveform">动态波形</option>
+                        <option value="network">知识网络</option>
+                        <option value="orbitTrails">轨道拖尾</option>
+                      </select>
+                    </label>
+                    <label className="inspector-field color-row">
+                      <span>主色</span>
+                      <input
+                        type="color"
+                        value={layer.color}
+                        onChange={(event) =>
+                          updateLayer({ color: event.target.value })
+                        }
+                      />
+                      <code>{layer.color}</code>
+                    </label>
+                    <label className="inspector-field color-row">
+                      <span>辅色</span>
+                      <input
+                        type="color"
+                        value={layer.secondaryColor ?? "#79a9ff"}
+                        onChange={(event) =>
+                          updateLayer({ secondaryColor: event.target.value })
+                        }
+                      />
+                      <code>{layer.secondaryColor ?? "#79a9ff"}</code>
+                    </label>
+                    <label className="inspector-field">
+                      <span>粒子/节点密度</span>
+                      <div className="property-range">
+                        <input
+                          type="range"
+                          min={6}
+                          max={160}
+                          step={1}
+                          value={layer.density ?? 64}
+                          onChange={(event) =>
+                            updateLayer({ density: Number(event.target.value) })
+                          }
+                        />
+                        <em>{layer.density ?? 64}</em>
+                      </div>
+                    </label>
+                    <label className="inspector-field">
+                      <span>运动速度</span>
+                      <div className="property-range">
+                        <input
+                          type="range"
+                          min={0}
+                          max={3}
+                          step={0.05}
+                          value={layer.speed ?? 1}
+                          onChange={(event) =>
+                            updateLayer({ speed: Number(event.target.value) })
+                          }
+                        />
+                        <em>{(layer.speed ?? 1).toFixed(2)}×</em>
+                      </div>
+                    </label>
+                    <label className="inspector-field">
+                      <span>线条强度</span>
+                      <div className="property-range">
+                        <input
+                          type="range"
+                          min={0.2}
+                          max={8}
+                          step={0.1}
+                          value={layer.lineWidth ?? 1.8}
+                          onChange={(event) =>
+                            updateLayer({
+                              lineWidth: Number(event.target.value),
+                            })
+                          }
+                        />
+                        <em>{(layer.lineWidth ?? 1.8).toFixed(1)}</em>
+                      </div>
+                    </label>
+                    <label className="inspector-field">
+                      <span>整体亮度</span>
+                      <div className="property-range">
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={layer.intensity ?? 0.85}
+                          onChange={(event) =>
+                            updateLayer({
+                              intensity: Number(event.target.value),
+                            })
+                          }
+                        />
+                        <em>
+                          {Math.round((layer.intensity ?? 0.85) * 100)}%
+                        </em>
+                      </div>
+                    </label>
+                    <label className="inspector-field">
+                      <span>确定性种子</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={2_147_483_647}
+                        value={layer.seed ?? 41}
+                        onChange={(event) =>
+                          updateLayer({ seed: Number(event.target.value) })
+                        }
+                      />
                     </label>
                   </>
                 ) : (

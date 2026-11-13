@@ -38,6 +38,7 @@ AI 不生成新的 React 项目或任意 Remotion 代码。AI 和项目编辑器
 | `svg` | 轨道、波形、网格、粒子、进度环 | 路径绘制、旋转、波形运动、粒子环绕 |
 | `image` | `assetId`、cover/contain、圆角、调色 | 淡入、缩放、镜头运动 |
 | `chart` | bar、line、donut 与结构化数据 | 柱高增长、折线绘制、环形进度 |
+| `canvas` | particleFlow、waveform、network、orbitTrails；密度、速度、线宽、强度、种子 | 确定性 Canvas 2D 粒子、波形、节点连线和轨道拖尾 |
 
 每个图层有独立的 `fromMs` / `toMs` 时间范围、透明度、位置、尺寸、旋转和动画参数。
 
@@ -77,6 +78,8 @@ interface CompositionDsl {
 - `SvgRenderer`：程序化 SVG。
 - `ImageRenderer`：使用 Remotion `Img` 加载本地或生成素材。
 - `ChartRenderer`：数据可视化。
+- `CanvasRenderer`：Canvas 2D 专用动画，绘制完成后通过 `delayRender`/`continueRender` 保证 Renderer 不在空白帧截取。
+- `CanvasLayer`：浏览器场景预览与 Remotion 共用的 Canvas 绘制表面。
 - `AnimationShell`：统一图层入场和透明度。
 
 同一组组件同时服务 Player 和 Renderer，避免预览与成片使用两套实现。

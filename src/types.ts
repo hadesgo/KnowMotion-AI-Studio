@@ -39,7 +39,7 @@ export interface ResearchSource {
 
 export interface SceneLayer {
   id: string;
-  type: "text" | "shape";
+  type: "text" | "shape" | "canvas";
   name: string;
   content: string;
   x: number;
@@ -52,6 +52,17 @@ export interface SceneLayer {
   color: string;
   fontSize: number;
   shape?: "circle" | "rectangle" | "line";
+  canvasVariant?:
+    | "particleFlow"
+    | "waveform"
+    | "network"
+    | "orbitTrails";
+  secondaryColor?: string;
+  density?: number;
+  speed?: number;
+  lineWidth?: number;
+  intensity?: number;
+  seed?: number;
 }
 
 export interface Scene {

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import {
   AbsoluteFill,
@@ -5,12 +6,16 @@ import {
   Easing,
   Img,
   Sequence,
+  continueRender,
+  delayRender,
   interpolate,
   spring,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
+import { CanvasLayer } from "../canvas/CanvasLayer";
 import type {
+  CanvasLayerDsl,
   ChartLayerDsl,
   CompositionDsl,
   ImageLayerDsl,
@@ -446,6 +451,40 @@ function ChartRenderer({ layer }: { layer: ChartLayerDsl }) {
   );
 }
 
+function CanvasRenderer({ layer }: { layer: CanvasLayerDsl }) {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const timeMs = (frame / fps) * 1000;
+
+  useEffect(() => {
+    const handle = delayRender("Drawing Canvas animation layer");
+    let continued = false;
+    const nextPaint = requestAnimationFrame(() => {
+      continued = true;
+      continueRender(handle);
+    });
+    return () => {
+      cancelAnimationFrame(nextPaint);
+      if (!continued) continueRender(handle);
+    };
+  }, [frame, layer.id, layer.variant]);
+
+  return (
+    <CanvasLayer
+      timeMs={timeMs}
+      variant={layer.variant}
+      color={layer.color}
+      secondaryColor={layer.secondaryColor}
+      density={layer.density}
+      speed={layer.speed}
+      lineWidth={layer.lineWidth}
+      intensity={layer.intensity}
+      seed={layer.seed}
+      borderRadius={layer.borderRadius}
+    />
+  );
+}
+
 function LayerRenderer({
   layer,
   scene,
@@ -463,8 +502,10 @@ function LayerRenderer({
         <SvgRenderer layer={layer} />
       ) : layer.type === "image" ? (
         <ImageRenderer layer={layer} composition={composition} />
-      ) : (
+      ) : layer.type === "chart" ? (
         <ChartRenderer layer={layer} />
+      ) : (
+        <CanvasRenderer layer={layer} />
       )}
     </AnimationShell>
   );

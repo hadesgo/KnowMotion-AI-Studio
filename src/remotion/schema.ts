@@ -100,11 +100,33 @@ const chartLayerSchema = z
   })
   .strict();
 
+const canvasLayerSchema = z
+  .object({
+    ...baseLayerShape,
+    type: z.literal("canvas"),
+    variant: z.enum([
+      "particleFlow",
+      "waveform",
+      "network",
+      "orbitTrails",
+    ]),
+    color: colorSchema,
+    secondaryColor: colorSchema.optional(),
+    density: z.number().int().min(6).max(160).default(64),
+    speed: z.number().finite().min(0).max(3).default(1),
+    lineWidth: z.number().finite().min(0.2).max(8).default(1.8),
+    intensity: z.number().finite().min(0).max(1).default(0.85),
+    seed: z.number().int().min(0).max(2_147_483_647).default(41),
+    borderRadius: z.number().finite().min(0).max(100).default(0),
+  })
+  .strict();
+
 export const sceneLayerSchema = z.discriminatedUnion("type", [
   textLayerSchema,
   svgLayerSchema,
   imageLayerSchema,
   chartLayerSchema,
+  canvasLayerSchema,
 ]);
 
 const cameraPointSchema = z
@@ -287,6 +309,7 @@ export type TextLayerDsl = z.infer<typeof textLayerSchema>;
 export type SvgLayerDsl = z.infer<typeof svgLayerSchema>;
 export type ImageLayerDsl = z.infer<typeof imageLayerSchema>;
 export type ChartLayerDsl = z.infer<typeof chartLayerSchema>;
+export type CanvasLayerDsl = z.infer<typeof canvasLayerSchema>;
 export type SceneDsl = z.infer<typeof sceneDslSchema>;
 export type CompositionDsl = z.infer<typeof compositionSchema>;
 
@@ -321,7 +344,11 @@ export function sceneToRemotionDsl(
 ): SceneDsl {
   if (scene.remotion) {
     const parsed = sceneDslSchema.safeParse(scene.remotion);
-    if (parsed.success) return parsed.data;
+    if (parsed.success) {
+      return sceneDslSchema.parse(
+        overlayEditorCanvasLayers(parsed.data, scene),
+      );
+    }
   }
   const style = (
     ["cinematic", "diagram", "data", "editorial", "minimal"] as const
@@ -561,6 +588,8 @@ export function sceneToRemotionDsl(
     });
   }
 
+  layers.push(...editorCanvasLayers(scene, durationMs));
+
   const defaultBackgrounds: Record<
     SceneDsl["styleVariant"],
     SceneDsl["background"]["colors"]
@@ -645,6 +674,62 @@ export function sceneToRemotionDsl(
     },
     layers,
   });
+}
+
+function overlayEditorCanvasLayers(sceneDsl: SceneDsl, scene: Scene): SceneDsl {
+  const canvasLayers = editorCanvasLayers(scene, sceneDsl.durationMs);
+  if (!canvasLayers.length) return sceneDsl;
+  const ids = new Set(canvasLayers.map((layer) => layer.id));
+  return {
+    ...sceneDsl,
+    layers: [
+      ...sceneDsl.layers.filter(
+        (layer) => layer.type !== "canvas" || !ids.has(layer.id),
+      ),
+      ...canvasLayers,
+    ],
+  };
+}
+
+function editorCanvasLayers(scene: Scene, durationMs: number): CanvasLayerDsl[] {
+  return scene.layers
+    .filter((layer) => layer.type === "canvas")
+    .map((layer) => {
+      const fromMs = Math.min(
+        Math.max(0, durationMs - 250),
+        Math.max(0, layer.start * 1000),
+      );
+      const toMs = Math.max(
+        fromMs + 250,
+        Math.min(durationMs, Math.max(fromMs + 250, layer.end * 1000)),
+      );
+      return {
+        type: "canvas" as const,
+        id: layer.id,
+        timing: { fromMs, toMs },
+        animation: {
+          type: "fade" as const,
+          delayMs: 0,
+          durationMs: 500,
+          easing: "easeOut" as const,
+        },
+        opacity: layer.opacity,
+        x: layer.x,
+        y: layer.y,
+        width: layer.width,
+        height: layer.height,
+        rotation: 0,
+        variant: layer.canvasVariant ?? "particleFlow",
+        color: layer.color,
+        secondaryColor: layer.secondaryColor,
+        density: layer.density ?? 64,
+        speed: layer.speed ?? 1,
+        lineWidth: layer.lineWidth ?? 1.8,
+        intensity: layer.intensity ?? 0.85,
+        seed: layer.seed ?? 41,
+        borderRadius: 0,
+      };
+    });
 }
 
 function ensureFallbackAsset(

@@ -305,11 +305,11 @@ impl Agent for AnimationAgent {
 如果用户指定了目标场景，只返回这些场景的 patch；如果目标场景为空，才为所有场景生成动画 patch。
 绝对不要改写 id、title、narration、description、visualPrompt、duration 或 assetId。
 你可以设置 layers、accent、transition、motionPreset。motionPreset 只能是 pushIn、pullOut、panLeft、panRight、none。
-只使用 text 和 shape 图层；禁止生成代码、CSS、脚本或 Remotion 组件。
+可使用 text、shape 和 canvas 图层。canvas 只允许 particleFlow、waveform、network、orbitTrails 四种内置动画，不得生成 JavaScript、Canvas 绘图代码、CSS 或任意 Remotion 组件。
 {}
 
 工具输入格式：
-{{"tool":"patchScenes","input":{{"scenes":[{{"id":"scene-id","accent":"#c8ff65","transition":"柔光淡入","motionPreset":"pushIn","layers":[{{"id":"layer-id","type":"text","name":"主标题","content":"...","x":8,"y":64,"width":70,"height":18,"opacity":1,"start":0,"end":6,"color":"#ffffff","fontSize":42}}]}}]}}}}"##,
+{{"tool":"patchScenes","input":{{"scenes":[{{"id":"scene-id","accent":"#c8ff65","transition":"柔光淡入","motionPreset":"pushIn","layers":[{{"id":"layer-id","type":"text","name":"主标题","content":"...","x":8,"y":64,"width":70,"height":18,"opacity":1,"start":0,"end":6,"color":"#ffffff","fontSize":42}},{{"id":"canvas-id","type":"canvas","name":"知识网络","canvasVariant":"network","x":48,"y":8,"width":46,"height":54,"opacity":0.9,"start":0,"end":6,"color":"#79a9ff","secondaryColor":"#c8ff65","density":64,"speed":1,"lineWidth":1.8,"intensity":0.85,"seed":41}}]}}]}}}}"##,
             common_output_contract(&descriptor)
         );
         run_structured(

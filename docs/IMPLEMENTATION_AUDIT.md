@@ -154,6 +154,7 @@
 - 输出旁挂 JSON 元数据，`artifact_refs` 与 `usage_records` 可追溯。
 - `renderer:prepare` 生成固定 Node、Chrome Headless Shell、FFmpeg/FFprobe、Remotion 依赖和哈希 manifest。
 - `renderer:smoke` 已用随包资源生成 966,517 字节真实 MP4 并通过。
+- Canvas smoke 已用随包 Renderer 生成 980,685 字节 MP4；抽帧确认 `network` 图层实际进入 H.264 成片。
 - NSIS `0.1.0` 安装包已实际生成，包含离线渲染资源。
 - Release EXE 在 Windows 上完成运行时 manifest 校验并稳定启动；Windows 主线程栈设为 8 MB，避免 release 构建启动时栈溢出。
 
@@ -194,7 +195,7 @@
 | 项目导出 | 含素材、渲染和修订的 ZIP 包 | 无独立迁移工具和跨设备自动升级 |
 | 渲染 | 持久 Job、进度、取消、离线 runtime、验证和原子提交 | 无 Windows Job Object；取消依赖 stdin + 超时 kill，极小子进程树仍可能残留 |
 | 4K/60 FPS | Composition 与 Renderer 支持参数 | UI 只验证了 1080P；没有 4K/60 实测和资源限制 |
-| 动画组件 | 文本、SVG、图片、图表已实现 | 没有专用视频图层；Canvas 和 GSAP 没有独立组件实现 |
+| 动画组件 | 文本、SVG、图片、图表和 Canvas 2D 已实现 | 没有专用视频图层；GSAP 没有集成 |
 | 质量检查 | `status=fail` 在 UI 与 Rust 渲染入口双重阻断 | 没有自动修复、逐项修复按钮或可配置发布规则 |
 | 错误恢复 | Agent 自动指数退避重试；App 重启安全暂停/中断 | 尚无租约调度器和统一 `tasks` worker 消费器 |
 | 用量统计 | LLM token、图片数、音频时长写入 `usage_records` | 无价格表、成本估算、额度与预算限制 |
@@ -206,7 +207,6 @@
 - 角色一致性、场景一致性、参考图管理。
 - 批量图片生成队列、图片局部重绘。
 - 视频素材图层与视频剪辑。
-- Canvas 专用动画组件。
 - GSAP 集成。
 - Windows Job Object/渲染子进程树监管。
 - Authenticode 签名、时间戳和 signed updater。

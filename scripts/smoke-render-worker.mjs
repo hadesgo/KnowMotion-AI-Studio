@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,8 +16,40 @@ const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "knowmotion-render-")
 
 try {
   const full = buildProjectComposition(makeSampleProject());
+  const canvasScene = {
+    ...full.scenes[0],
+    layers: [
+      ...full.scenes[0].layers,
+      {
+        type: "canvas",
+        id: "canvas-smoke",
+        timing: { fromMs: 0, toMs: full.scenes[0].durationMs },
+        animation: {
+          type: "fade",
+          delayMs: 0,
+          durationMs: 300,
+          easing: "easeOut",
+        },
+        opacity: 0.9,
+        x: 54,
+        y: 8,
+        width: 40,
+        height: 46,
+        rotation: 0,
+        variant: "network",
+        color: "#c8ff65",
+        secondaryColor: "#79a9ff",
+        density: 44,
+        speed: 1,
+        lineWidth: 1.4,
+        intensity: 0.9,
+        seed: 41,
+        borderRadius: 0,
+      },
+    ],
+  };
   const composition = buildSceneComposition(
-    full.scenes[0],
+    canvasScene,
     full.width,
     full.height,
     full.fps,
@@ -83,6 +115,9 @@ try {
   const bytes = await readFile(output);
   if (bytes.length === 0) {
     throw new Error("Renderer smoke test produced an empty file.");
+  }
+  if (process.env.KNOWMOTION_SMOKE_OUTPUT) {
+    await copyFile(output, path.resolve(process.env.KNOWMOTION_SMOKE_OUTPUT));
   }
   console.log(`Renderer worker smoke test passed (${bytes.length} bytes).`);
 } finally {

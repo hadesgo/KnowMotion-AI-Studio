@@ -28,9 +28,33 @@ export const visualStyles = [
 ];
 
 export function createLayer(
-  type: "text" | "shape",
+  type: "text" | "shape" | "canvas",
   index = 0,
 ): Scene["layers"][number] {
+  if (type === "canvas") {
+    return {
+      id: makeId("layer"),
+      type,
+      name: `Canvas 动画 ${index + 1}`,
+      content: "",
+      x: 48,
+      y: 8,
+      width: 44,
+      height: 46,
+      opacity: 0.9,
+      start: 0,
+      end: 100,
+      color: "#79a9ff",
+      secondaryColor: "#c8ff65",
+      fontSize: 42,
+      canvasVariant: "particleFlow",
+      density: 64,
+      speed: 1,
+      lineWidth: 1.8,
+      intensity: 0.85,
+      seed: index * 997 + 41,
+    };
+  }
   return {
     id: makeId("layer"),
     type,

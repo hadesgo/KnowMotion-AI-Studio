@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { CanvasLayer } from "../canvas/CanvasLayer";
 import type { Asset, AspectRatio, Scene } from "../types";
 import "./ScenePreview.css";
 
@@ -61,6 +62,33 @@ export function ScenePreview({
         const visible = localTime >= layer.start && localTime <= layer.end;
         const entrance = Math.min(1, Math.max(0, (localTime - layer.start) / 0.7));
         if (!visible) return null;
+        if (layer.type === "canvas") {
+          return (
+            <div
+              key={layer.id}
+              className="scene-layer scene-layer--canvas"
+              style={{
+                left: `${layer.x}%`,
+                top: `${layer.y}%`,
+                width: `${layer.width}%`,
+                height: `${layer.height}%`,
+                opacity: layer.opacity * entrance,
+              }}
+            >
+              <CanvasLayer
+                timeMs={localTime * 1000}
+                variant={layer.canvasVariant ?? "particleFlow"}
+                color={layer.color}
+                secondaryColor={layer.secondaryColor}
+                density={layer.density ?? 64}
+                speed={layer.speed ?? 1}
+                lineWidth={layer.lineWidth ?? 1.8}
+                intensity={layer.intensity ?? 0.85}
+                seed={layer.seed ?? 41}
+              />
+            </div>
+          );
+        }
         if (layer.type === "shape") {
           return (
             <span

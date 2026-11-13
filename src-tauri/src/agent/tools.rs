@@ -414,12 +414,12 @@ fn normalize_layer(
     if !layer.is_object() {
         return Err("Layer must be an object".to_string());
     }
-    let layer_type = if text(layer, "type", "text") == "shape" {
-        "shape"
-    } else {
-        "text"
+    let layer_type = match text(layer, "type", "text").as_str() {
+        "shape" => "shape",
+        "canvas" => "canvas",
+        _ => "text",
     };
-    Ok(json!({
+    let mut normalized = json!({
         "id": text(layer, "id", &format!("layer-{}", Uuid::new_v4())),
         "type": layer_type,
         "name": clip_text(&text(layer, "name", if index == 0 { title } else { "图层" }), 120),
@@ -438,7 +438,27 @@ fn normalize_layer(
         } else {
             Value::Null
         }
-    }))
+    });
+    if layer_type == "canvas" {
+        let variant = text(layer, "canvasVariant", "particleFlow");
+        normalized["canvasVariant"] = Value::String(
+            if ["particleFlow", "waveform", "network", "orbitTrails"]
+                .contains(&variant.as_str())
+            {
+                variant
+            } else {
+                "particleFlow".to_string()
+            },
+        );
+        normalized["secondaryColor"] = Value::String(color(layer, "secondaryColor", "#79a9ff"));
+        normalized["density"] = json!(number(layer, "density", 64.0).clamp(6.0, 160.0) as i64);
+        normalized["speed"] = json!(number(layer, "speed", 1.0).clamp(0.0, 3.0));
+        normalized["lineWidth"] = json!(number(layer, "lineWidth", 1.8).clamp(0.2, 8.0));
+        normalized["intensity"] = json!(number(layer, "intensity", 0.85).clamp(0.0, 1.0));
+        normalized["seed"] = json!(number(layer, "seed", 41.0).max(0.0) as i64);
+        normalized["content"] = Value::String(String::new());
+    }
+    Ok(normalized)
 }
 
 fn normalize_timeline_clip(clip: &Value, index: usize) -> Result<Value, String> {
@@ -786,6 +806,32 @@ mod tests {
         .expect("structured output must deserialize");
         assert_eq!(output.changes.len(), 1);
         assert_eq!(output.changes[0].tool_name(), "replaceOutline");
+    }
+
+    #[test]
+    fn canvas_layer_normalization_preserves_bounded_animation_config() {
+        let layer = normalize_layer(
+            &json!({
+                "id": "canvas-1",
+                "type": "canvas",
+                "canvasVariant": "network",
+                "density": 500,
+                "speed": 9,
+                "lineWidth": 0.1,
+                "intensity": 2,
+                "seed": 123
+            }),
+            "Scene",
+            6.0,
+            0,
+        )
+        .expect("canvas layer");
+        assert_eq!(layer["type"], "canvas");
+        assert_eq!(layer["canvasVariant"], "network");
+        assert_eq!(layer["density"], 160);
+        assert_eq!(layer["speed"], 3.0);
+        assert_eq!(layer["lineWidth"], 0.2);
+        assert_eq!(layer["intensity"], 1.0);
     }
 
     #[test]

@@ -12,6 +12,7 @@ AI-powered knowledge animation studio. 用户从一个知识主题开始，在�
 - 九个持久化 AI Agent 与 DAG Workflow：模型路由、审批、暂停恢复、局部重跑、受控项目工具、修订和撤销。
 - 原生 GGUF 本地推理：可直接选择 `.gguf` 模型文件，支持 CPU 与 DirectX 12 GPU 加速。
 - Remotion Scene/Composition DSL、可复用动画组件、实时 Player 和完整 H.264 渲染。
+- 确定性 Canvas 2D 动画图层：粒子流、动态波形、知识网络和轨道拖尾。
 - 持久渲染 Job、真实 `render.progress`、取消、恢复、FFprobe、SHA-256 与原子提交。
 - 构建时打包固定 Node sidecar、Chrome Headless Shell、FFmpeg/FFprobe，并校验 runtime manifest。
 - OpenAI Compatible / ComfyUI 图片、云端与本地 TTS、ASR、Embedding/RAG 和网页来源正文抓取。
