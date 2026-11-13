@@ -22,7 +22,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeading, useCurrentProject } from "../components/AppShell";
 import {
@@ -140,29 +140,30 @@ export default function AgentWorkflow() {
   const [busyAction, setBusyAction] = useState("");
   const [error, setError] = useState("");
   const currentRunRef = useRef("");
+  const projectId = project?.id;
 
-  const loadRun = async (runId: string) => {
+  const loadRun = useCallback(async (runId: string) => {
     const next = await getWorkflow(runId);
     currentRunRef.current = next.id;
     setRun(next);
     setSelectedStepKey((current) => current || next.steps[0]?.key || "");
-    if (next.project && project) {
-      updateProject(project.id, () => ({
+    if (next.project && projectId) {
+      updateProject(projectId, () => ({
         ...(next.project as VideoProject),
-        id: project.id,
+        id: projectId,
       }));
     }
-  };
+  }, [projectId, updateProject]);
 
   useEffect(() => {
-    if (!isTauriDesktop || !project) return;
+    if (!isTauriDesktop || !projectId) return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
     const initialize = async () => {
       try {
         const [workflowDefinition, history] = await Promise.all([
           getWorkflowDefinition(),
-          listWorkflows(project.id, 15),
+          listWorkflows(projectId, 15),
         ]);
         if (disposed) return;
         setDefinition(workflowDefinition);
@@ -177,9 +178,9 @@ export default function AgentWorkflow() {
             history[0].currentStepKey ?? history[0].steps[0]?.key ?? "",
           );
           if (history[0].project) {
-            updateProject(project.id, () => ({
+            updateProject(projectId, () => ({
               ...(history[0].project as VideoProject),
-              id: project.id,
+              id: projectId,
             }));
           }
         }
@@ -187,7 +188,7 @@ export default function AgentWorkflow() {
           if (event.runId === currentRunRef.current || !currentRunRef.current) {
             void loadRun(event.runId);
           }
-          void listWorkflows(project.id, 15).then(setRuns);
+          void listWorkflows(projectId, 15).then(setRuns);
         });
       } catch (initError) {
         setError(
@@ -202,7 +203,13 @@ export default function AgentWorkflow() {
       disposed = true;
       unlisten?.();
     };
-  }, [llmProviderId, project?.id]);
+  }, [
+    llmProviderId,
+    loadRun,
+    projectId,
+    providers,
+    updateProject,
+  ]);
 
   useEffect(() => {
     if (Object.keys(routes).length) {

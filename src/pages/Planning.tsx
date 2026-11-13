@@ -58,13 +58,14 @@ export default function Planning() {
   const [sourceUrl, setSourceUrl] = useState("");
   const [generating, setGenerating] = useState(false);
 
+  const totalSeconds = useMemo(
+    () =>
+      project?.outline.reduce((sum, section) => sum + section.seconds, 0) ?? 0,
+    [project?.outline],
+  );
+
   if (!project) return null;
   const sources = project.researchSources ?? [];
-
-  const totalSeconds = useMemo(
-    () => project.outline.reduce((sum, section) => sum + section.seconds, 0),
-    [project.outline],
-  );
 
   const generate = () => {
     setGenerating(true);

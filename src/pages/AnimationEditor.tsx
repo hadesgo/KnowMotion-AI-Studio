@@ -52,13 +52,9 @@ export default function AnimationEditor() {
   const frame = useRef<number | null>(null);
 
   const scene = project?.scenes.find((item) => item.id === sceneId);
-  const layer = scene?.layers.find((item) => item.id === layerId);
+  const layer =
+    scene?.layers.find((item) => item.id === layerId) ?? scene?.layers[0];
   const asset = project?.assets.find((item) => item.id === scene?.assetId);
-
-  useEffect(() => {
-    setTime(0);
-    setLayerId(scene?.layers[0]?.id ?? "");
-  }, [sceneId, scene]);
 
   useEffect(() => {
     if (!playing || !scene) return;
@@ -172,6 +168,14 @@ export default function AnimationEditor() {
     setLayerId(scene.layers.find((entry) => entry.id !== layer.id)?.id ?? "");
   };
 
+  const selectScene = (nextSceneId: string) => {
+    const nextScene = project?.scenes.find((item) => item.id === nextSceneId);
+    setSceneId(nextSceneId);
+    setTime(0);
+    setPlaying(false);
+    setLayerId(nextScene?.layers[0]?.id ?? "");
+  };
+
   const saveSnapshot = () => {
     downloadText(
       sceneSvg(scene),
@@ -219,7 +223,7 @@ export default function AnimationEditor() {
                 type="button"
                 key={item.id}
                 className={item.id === sceneId ? "is-active" : ""}
-                onClick={() => setSceneId(item.id)}
+                onClick={() => selectScene(item.id)}
               >
                 <span>{String(index + 1).padStart(2, "0")}</span>
                 <div>
@@ -250,7 +254,7 @@ export default function AnimationEditor() {
                 <button
                   type="button"
                   key={item.id}
-                  className={item.id === layerId ? "is-active" : ""}
+                  className={item.id === layer?.id ? "is-active" : ""}
                   onClick={() => setLayerId(item.id)}
                 >
                   <span className="layer-list__type">
@@ -368,7 +372,7 @@ export default function AnimationEditor() {
               {scene.layers.map((item) => (
                 <span
                   key={item.id}
-                  className={item.id === layerId ? "is-active" : ""}
+                  className={item.id === layer?.id ? "is-active" : ""}
                   style={{
                     left: `${(item.start / scene.duration) * 100}%`,
                     width: `${Math.max(4, ((item.end - item.start) / scene.duration) * 100)}%`,

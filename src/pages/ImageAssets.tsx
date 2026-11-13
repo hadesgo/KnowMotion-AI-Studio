@@ -11,7 +11,6 @@ import {
   WandSparkles,
 } from "lucide-react";
 import {
-  useEffect,
   useRef,
   useState,
   type ChangeEvent,
@@ -62,11 +61,14 @@ export default function ImageAssets() {
     project?.assets.find((asset) => asset.id === selectedAssetId) ??
     sceneAssets[0];
 
-  useEffect(() => {
-    if (scene) setPrompt(scene.visualPrompt);
-  }, [scene]);
-
   if (!project || !scene) return null;
+
+  const selectScene = (nextSceneId: string) => {
+    const nextScene = project.scenes.find((item) => item.id === nextSceneId);
+    setSceneId(nextSceneId);
+    setPrompt(nextScene?.visualPrompt ?? "");
+    setSelectedAssetId("");
+  };
 
   const generate = () => {
     if (!prompt.trim()) {
@@ -203,7 +205,10 @@ export default function ImageAssets() {
           </header>
           <label className="inspector-field">
             <span>当前场景</span>
-            <select value={sceneId} onChange={(event) => setSceneId(event.target.value)}>
+            <select
+              value={sceneId}
+              onChange={(event) => selectScene(event.target.value)}
+            >
               {project.scenes.map((item, index) => (
                 <option key={item.id} value={item.id}>
                   {String(index + 1).padStart(2, "0")} · {item.title}

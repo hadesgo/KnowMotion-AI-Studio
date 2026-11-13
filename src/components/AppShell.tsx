@@ -231,6 +231,8 @@ export function ProjectGuard({ children }: { children: React.ReactNode }) {
   return children;
 }
 
+// This module already exports React components whose refresh boundary owns this hook.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useCurrentProject() {
   const { projectId } = useParams();
   const projects = useStudioStore((state) => state.projects);

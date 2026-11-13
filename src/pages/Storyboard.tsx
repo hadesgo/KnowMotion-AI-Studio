@@ -12,7 +12,7 @@ import {
   Trash2,
   WandSparkles,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageHeading, useCurrentProject } from "../components/AppShell";
 import { ScenePreview } from "../components/ScenePreview";
@@ -44,14 +44,15 @@ export default function Storyboard() {
   const [selectedId, setSelectedId] = useState(project?.scenes[0]?.id ?? "");
   const [dragIndex, setDragIndex] = useState<number | null>(null);
 
-  useEffect(() => {
-    if (project && !project.scenes.some((scene) => scene.id === selectedId)) {
-      setSelectedId(project.scenes[0]?.id ?? "");
-    }
-  }, [project, selectedId]);
-
   if (!project) return null;
-  const selectedIndex = project.scenes.findIndex((scene) => scene.id === selectedId);
+  const effectiveSelectedId = project.scenes.some(
+    (scene) => scene.id === selectedId,
+  )
+    ? selectedId
+    : (project.scenes[0]?.id ?? "");
+  const selectedIndex = project.scenes.findIndex(
+    (scene) => scene.id === effectiveSelectedId,
+  );
   const selected = project.scenes[selectedIndex];
 
   const patchScene = (patch: Partial<Scene>) => {
@@ -59,7 +60,7 @@ export default function Storyboard() {
       ...current,
       stage: "storyboard",
       scenes: current.scenes.map((scene) =>
-        scene.id === selectedId ? { ...scene, ...patch } : scene,
+        scene.id === effectiveSelectedId ? { ...scene, ...patch } : scene,
       ),
     }));
   };
@@ -189,7 +190,7 @@ export default function Storyboard() {
               const asset = project.assets.find((item) => item.id === scene.assetId);
               return (
                 <article
-                  className={`story-card ${selectedId === scene.id ? "is-selected" : ""} ${
+                  className={`story-card ${effectiveSelectedId === scene.id ? "is-selected" : ""} ${
                     dragIndex === index ? "is-dragging" : ""
                   }`}
                   key={scene.id}

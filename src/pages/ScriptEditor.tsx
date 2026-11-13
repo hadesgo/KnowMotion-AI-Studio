@@ -37,17 +37,16 @@ export default function ScriptEditor() {
   const [speaking, setSpeaking] = useState(false);
 
   useEffect(() => {
-    if (project && !project.scenes.some((scene) => scene.id === activeId)) {
-      setActiveId(project.scenes[0]?.id ?? "");
-    }
-  }, [activeId, project]);
-
-  useEffect(() => {
     return () => window.speechSynthesis?.cancel();
   }, []);
 
   if (!project) return null;
-  const activeIndex = project.scenes.findIndex((scene) => scene.id === activeId);
+  const effectiveActiveId = project.scenes.some((scene) => scene.id === activeId)
+    ? activeId
+    : (project.scenes[0]?.id ?? "");
+  const activeIndex = project.scenes.findIndex(
+    (scene) => scene.id === effectiveActiveId,
+  );
   const scene = project.scenes[Math.max(0, activeIndex)];
   const totalDuration = project.scenes.reduce((sum, item) => sum + item.duration, 0);
   const estimate = scene ? estimateSpeechSeconds(scene.narration) : 0;
@@ -222,7 +221,7 @@ export default function ScriptEditor() {
                 <button
                   type="button"
                   key={item.id}
-                  className={item.id === activeId ? "is-active" : ""}
+                  className={item.id === effectiveActiveId ? "is-active" : ""}
                   onClick={() => {
                     setActiveId(item.id);
                     stopSpeaking();

@@ -53,9 +53,12 @@ function animationProgress(
   });
 }
 
-function layerOpacity(scene: SceneDsl, layer: SceneLayerDsl) {
-  const { fps } = useVideoConfig();
-  const localFrame = useCurrentFrame();
+function layerOpacity(
+  scene: SceneDsl,
+  layer: SceneLayerDsl,
+  localFrame: number,
+  fps: number,
+) {
   const start = (layer.timing.fromMs / 1000) * fps;
   const end = (layer.timing.toMs / 1000) * fps;
   const entrance = animationProgress(
@@ -95,7 +98,7 @@ function AnimationShell({
     layer.animation.durationMs,
     layer.animation.easing,
   );
-  const opacity = layerOpacity(scene, layer);
+  const opacity = layerOpacity(scene, layer, localFrame, fps);
   const translateX = layer.animation.type === "slideIn" ? (1 - progress) * -5 : 0;
   const translateY = layer.animation.type === "fadeUp" ? (1 - progress) * 5 : 0;
   const scale = layer.animation.type === "scaleIn" ? 0.9 + progress * 0.1 : 1;
@@ -337,13 +340,19 @@ function ChartRenderer({ layer }: { layer: ChartLayerDsl }) {
   const max = Math.max(1, ...layer.data.map((item) => Math.abs(item.value)));
   if (layer.chartType === "donut") {
     const total = layer.data.reduce((sum, item) => sum + Math.abs(item.value), 0);
-    let cursor = 0;
+    const portions = layer.data.map(
+      (item) => Math.abs(item.value) / Math.max(1, total),
+    );
+    const offsets = portions.map((_, index) =>
+      portions
+        .slice(0, index)
+        .reduce((sum, portion) => sum + portion, 0),
+    );
     return (
       <svg viewBox="0 0 300 220" style={{ width: "100%", height: "100%" }}>
         {layer.data.map((item, index) => {
-          const portion = Math.abs(item.value) / Math.max(1, total);
-          const start = cursor;
-          cursor += portion;
+          const portion = portions[index];
+          const start = offsets[index];
           const color = item.color ?? [layer.accent, "#79a9ff", "#ffbc66"][index % 3];
           return (
             <circle
@@ -593,7 +602,14 @@ export function KnowledgeComposition({
   composition: CompositionDsl;
 }) {
   const { fps } = useVideoConfig();
-  let cursor = 0;
+  const sceneDurations = composition.scenes.map((scene) =>
+    Math.max(1, Math.round((scene.durationMs / 1000) * fps)),
+  );
+  const sceneOffsets = sceneDurations.map((_, index) =>
+    sceneDurations
+      .slice(0, index)
+      .reduce((sum, duration) => sum + duration, 0),
+  );
   return (
     <AbsoluteFill style={{ background: "#06090c" }}>
       {composition.audioTracks.map((track) => {
@@ -624,12 +640,8 @@ export function KnowledgeComposition({
         );
       })}
       {composition.scenes.map((scene, index) => {
-        const durationInFrames = Math.max(
-          1,
-          Math.round((scene.durationMs / 1000) * fps),
-        );
-        const from = cursor;
-        cursor += durationInFrames;
+        const durationInFrames = sceneDurations[index];
+        const from = sceneOffsets[index];
         return (
           <Sequence
             key={scene.id}
