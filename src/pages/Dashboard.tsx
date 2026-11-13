@@ -11,15 +11,19 @@ import {
   Search,
   Sparkles,
   Trash2,
+  Upload,
   WandSparkles,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { open } from "@tauri-apps/plugin-dialog";
 import { ScenePreview } from "../components/ScenePreview";
 import { Button, EmptyState, IconButton, Pill } from "../components/ui";
 import { useStudioStore } from "../store/studio";
 import type { ProjectStage, VideoProject } from "../types";
 import { projectDuration, truncate } from "../utils";
+import { isTauriDesktop } from "../services/desktop";
+import { importDesktopProjectPackage } from "../services/desktop";
 import "./Dashboard.css";
 
 const starters = [
@@ -175,6 +179,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const projects = useStudioStore((state) => state.projects);
   const duplicateProject = useStudioStore((state) => state.duplicateProject);
+  const addProject = useStudioStore((state) => state.addProject);
   const deleteProject = useStudioStore((state) => state.deleteProject);
   const updateProject = useStudioStore((state) => state.updateProject);
   const pushToast = useStudioStore((state) => state.pushToast);
@@ -234,6 +239,40 @@ export default function Dashboard() {
     navigate(clean ? `/projects/new?topic=${encodeURIComponent(clean)}` : "/projects/new");
   };
 
+  const importProject = async () => {
+    if (!isTauriDesktop) {
+      pushToast({
+        type: "info",
+        title: "项目包导入需要桌面版",
+        message: "桌面版可以导入包含素材的 .knowmotion.zip。",
+      });
+      return;
+    }
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "KnowMotion 项目包", extensions: ["zip"] }],
+    });
+    if (typeof selected !== "string") return;
+    try {
+      const project = await importDesktopProjectPackage(selected);
+      if (!project) return;
+      addProject(project);
+      pushToast({
+        type: "success",
+        title: "项目包已导入",
+        message: "项目与素材已复制到本地项目目录。",
+      });
+      navigate(projectRoute(project));
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: "项目包导入失败",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   return (
     <div className="dashboard-page mx-auto w-full max-w-[1530px] px-4 pb-10 pt-7 xl:px-8">
       <div className="dashboard-topline">
@@ -262,6 +301,14 @@ export default function Dashboard() {
             onClick={() => setAssistantOpen(true)}
           >
             工作区助手
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Upload size={15} />}
+            onClick={() => void importProject()}
+          >
+            导入项目包
           </Button>
         </div>
       </div>
@@ -418,7 +465,7 @@ export default function Dashboard() {
                   onDelete={() => {
                     if (
                       window.confirm(
-                        `删除「${project.title}」？此操作仅影响浏览器本地项目。`,
+                        `删除「${project.title}」？桌面版会把完整项目目录移入可恢复归档。`,
                       )
                     ) {
                       deleteProject(project.id);

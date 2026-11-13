@@ -27,6 +27,7 @@ interface StudioState {
   toasts: ToastMessage[];
   assistantOpen: boolean;
   createProject: (input: CreateProjectInput) => string;
+  addProject: (project: VideoProject) => void;
   updateProject: (
     id: string,
     patch: Partial<VideoProject> | ((project: VideoProject) => VideoProject),
@@ -89,6 +90,14 @@ export const useStudioStore = create<StudioState>()(
           projects: [project, ...state.projects],
         }));
         return project.id;
+      },
+      addProject: (project) => {
+        set((state) => ({
+          projects: [
+            project,
+            ...state.projects.filter((item) => item.id !== project.id),
+          ],
+        }));
       },
       updateProject: (id, patch) => {
         set((state) => ({

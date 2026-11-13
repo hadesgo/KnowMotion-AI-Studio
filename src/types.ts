@@ -33,6 +33,8 @@ export interface ResearchSource {
   url: string;
   note: string;
   verified: boolean;
+  content?: string;
+  indexedAt?: string;
 }
 
 export interface SceneLayer {

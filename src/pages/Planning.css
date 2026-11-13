@@ -454,6 +454,39 @@
   align-self: flex-start;
 }
 
+.knowledge-results {
+  display: grid;
+  gap: 7px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.knowledge-results article {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.knowledge-results article span {
+  color: var(--accent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.knowledge-results article p {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 .planning-note {
   display: flex;
   align-items: flex-start;

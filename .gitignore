@@ -8,4 +8,9 @@ dashboard.png
 .chrome-test*/
 .edge-test*/
 src-tauri/target/
+src-tauri/resources/renderer/
+src-tauri/resources/browser/
+src-tauri/resources/ffmpeg/
+src-tauri/resources/runtime-manifest.json
+src-tauri/binaries/
 renders/

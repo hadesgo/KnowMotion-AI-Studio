@@ -34,7 +34,7 @@ impl AgentRuntime {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
         fs::create_dir_all(&projects_root).map_err(|error| error.to_string())?;
-        let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+        let connection = crate::database::open_database(database_path)?;
         initialize_database(&connection)?;
         recover_interrupted_runs(&connection)?;
         Ok(Arc::new(Self {
@@ -579,6 +579,52 @@ impl AgentRuntime {
                     }
                 }
                 Err(error) => {
+                    let retry = {
+                        let db = self.lock_db()?;
+                        db.query_row(
+                            r#"
+                            SELECT attempt, max_attempts
+                            FROM workflow_steps
+                            WHERE run_id = ?1 AND step_key = ?2
+                            "#,
+                            params![run_id, step.step_key],
+                            |row| Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?)),
+                        )
+                        .map_err(|error| error.to_string())?
+                    };
+                    if retry.0 < retry.1 {
+                        let delay_seconds = 1_u64 << (retry.0.saturating_sub(1).min(3));
+                        {
+                            let db = self.lock_db()?;
+                            db.execute(
+                                r#"
+                                UPDATE workflow_steps
+                                SET status = 'pending', error_code = NULL,
+                                    error_message = NULL, updated_at = ?1
+                                WHERE run_id = ?2 AND step_key = ?3
+                                "#,
+                                params![
+                                    Utc::now().to_rfc3339(),
+                                    run_id,
+                                    step.step_key
+                                ],
+                            )
+                            .map_err(|error| error.to_string())?;
+                        }
+                        self.emit_event(
+                            &app,
+                            &run_id,
+                            Some(&step.step_key),
+                            "step_retry_scheduled",
+                            &format!(
+                                "{} 将在 {} 秒后自动重试（{}/{}）",
+                                step.title, delay_seconds, retry.0 + 1, retry.1
+                            ),
+                            "running",
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(delay_seconds)).await;
+                        continue;
+                    }
                     self.mark_step_failed(&run_id, &step, &error)?;
                     self.emit_event(
                         &app,
@@ -689,14 +735,14 @@ impl AgentRuntime {
         }
 
         let call_started = std::time::Instant::now();
-        let output = self
+        let execution = self
             .registry
             .execute(&step.agent_key, agent_input, provider.as_ref(), &model)
             .await;
         let latency_ms = call_started.elapsed().as_millis() as i64;
-        match &output {
-            Ok(_) => {
-                self.log_provider_call(ProviderCallRecord {
+        match &execution {
+            Ok(execution) => {
+                let call_id = self.log_provider_call(ProviderCallRecord {
                     run_id,
                     step_key: &step.step_key,
                     provider_id: &provider_config.id,
@@ -705,9 +751,15 @@ impl AgentRuntime {
                     latency_ms,
                     error: None,
                 })?;
+                self.log_usage(
+                    &call_id,
+                    &step.project_id,
+                    execution.input_tokens,
+                    execution.output_tokens,
+                )?;
             }
             Err(error) => {
-                self.log_provider_call(ProviderCallRecord {
+                let _ = self.log_provider_call(ProviderCallRecord {
                     run_id,
                     step_key: &step.step_key,
                     provider_id: &provider_config.id,
@@ -718,7 +770,7 @@ impl AgentRuntime {
                 })?;
             }
         }
-        let output = output?;
+        let output = execution?.output;
         enforce_scene_scope(&output, &target_scene_ids)?;
 
         {
@@ -950,8 +1002,9 @@ impl AgentRuntime {
         Ok(())
     }
 
-    fn log_provider_call(&self, call: ProviderCallRecord<'_>) -> Result<(), String> {
+    fn log_provider_call(&self, call: ProviderCallRecord<'_>) -> Result<String, String> {
         let db = self.lock_db()?;
+        let call_id = Uuid::new_v4().to_string();
         db.execute(
             r#"
             INSERT INTO provider_calls(
@@ -960,7 +1013,7 @@ impl AgentRuntime {
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
             "#,
             params![
-                Uuid::new_v4().to_string(),
+                call_id,
                 call.run_id,
                 call.step_key,
                 call.provider_id,
@@ -968,6 +1021,35 @@ impl AgentRuntime {
                 call.status,
                 call.latency_ms,
                 call.error,
+                Utc::now().to_rfc3339()
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(call_id)
+    }
+
+    fn log_usage(
+        &self,
+        provider_call_id: &str,
+        project_id: &str,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+    ) -> Result<(), String> {
+        let db = self.lock_db()?;
+        db.execute(
+            r#"
+            INSERT INTO usage_records(
+                id, provider_call_id, project_id, capability, input_tokens,
+                output_tokens, image_count, audio_ms, estimated_cost_micros,
+                currency, created_at
+            ) VALUES (?1, ?2, ?3, 'LLM', ?4, ?5, 0, 0, 0, 'USD', ?6)
+            "#,
+            params![
+                Uuid::new_v4().to_string(),
+                provider_call_id,
+                project_id,
+                input_tokens.map(|value| value as i64),
+                output_tokens.map(|value| value as i64),
                 Utc::now().to_rfc3339()
             ],
         )

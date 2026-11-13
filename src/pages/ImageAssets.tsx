@@ -30,6 +30,8 @@ import {
 import { useStudioStore } from "../store/studio";
 import type { Asset } from "../types";
 import { createVisualDraftSvg, formatBytes, makeId, nowIso } from "../utils";
+import { isTauriDesktop } from "../services/desktop";
+import { generateProjectImages } from "../services/capabilities";
 import "./ImageAssets.css";
 
 const styles = ["编辑部极简", "电影感纪录片", "复古科学杂志", "未来主义数据"];
@@ -41,6 +43,8 @@ export default function ImageAssets() {
   const addAsset = useStudioStore((state) => state.addAsset);
   const updateProject = useStudioStore((state) => state.updateProject);
   const pushToast = useStudioStore((state) => state.pushToast);
+  const providers = useStudioStore((state) => state.providers);
+  const taskRoutes = useStudioStore((state) => state.taskRoutes);
   const initialScene =
     project?.scenes.find((scene) => scene.id === params.get("sceneId")) ??
     project?.scenes[0];
@@ -60,6 +64,14 @@ export default function ImageAssets() {
   const selectedAsset =
     project?.assets.find((asset) => asset.id === selectedAssetId) ??
     sceneAssets[0];
+  const imageProvider = providers.find(
+    (provider) =>
+      provider.enabled &&
+      provider.capabilities.includes("Image") &&
+      provider.id ===
+        (taskRoutes.Image ??
+          providers.find((item) => item.capabilities.includes("Image"))?.id),
+  );
 
   if (!project || !scene) return null;
 
@@ -70,13 +82,50 @@ export default function ImageAssets() {
     setSelectedAssetId("");
   };
 
-  const generate = () => {
+  const generate = async () => {
     if (!prompt.trim()) {
       pushToast({ type: "error", title: "先写下画面描述" });
       return;
     }
     setGenerating(true);
     setProgress(8);
+    if (imageProvider && isTauriDesktop) {
+      try {
+        setProgress(18);
+        const result = await generateProjectImages({
+          projectId: project.id,
+          sceneId,
+          provider: imageProvider,
+          prompt,
+          style,
+          size:
+            ratio === "square"
+              ? "1024x1024"
+              : ratio === "portrait"
+                ? "1024x1536"
+                : "1536x1024",
+          count,
+        });
+        result.assets.forEach((asset) => addAsset(project.id, asset));
+        setSelectedAssetId(result.assets[0]?.id ?? "");
+        setProgress(100);
+        pushToast({
+          type: "success",
+          title: `${result.assets.length} 张真实图片已生成并落盘`,
+          message: `${imageProvider.name} · ${result.model} · ${Math.round(result.elapsedMs / 1000)} 秒`,
+        });
+      } catch (error) {
+        pushToast({
+          type: "error",
+          title: "图片生成失败",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        setGenerating(false);
+        window.setTimeout(() => setProgress(0), 700);
+      }
+      return;
+    }
     const timer = window.setInterval(() => {
       setProgress((current) =>
         current >= 92 ? current : Math.min(92, current + Math.random() * 15),
@@ -284,15 +333,21 @@ export default function ImageAssets() {
                 <Sparkles size={17} />
               )
             }
-            onClick={generate}
+            onClick={() => void generate()}
             disabled={generating}
           >
-            {generating ? "正在构建视觉…" : "生成本地视觉草案"}
+            {generating
+              ? "正在生成视觉…"
+              : imageProvider
+                ? `使用 ${imageProvider.name} 生成`
+                : "生成本地视觉草案"}
           </Button>
           {progress > 0 && <Progress value={progress} />}
           <p className="generation-note">
             <ImageIcon size={14} />
-            浏览器原型生成可编辑的 SVG 构图，不调用在线图片模型。
+            {imageProvider
+              ? `任务路由到 ${imageProvider.name}；结果通过 MIME、大小和文件头校验后写入 assets/images。`
+              : "未配置 Image Provider 时，浏览器和桌面版都会生成可编辑的 SVG 构图。"}
           </p>
         </section>
 
@@ -358,7 +413,7 @@ export default function ImageAssets() {
               title="这个场景还没有视觉素材"
               description="写下画面需求并生成本地视觉草案，或导入自己的图片。"
               action={
-                <Button variant="primary" onClick={generate}>
+                <Button variant="primary" onClick={() => void generate()}>
                   生成第一张草案
                 </Button>
               }

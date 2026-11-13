@@ -36,6 +36,10 @@ import {
   generateNarrationAudio,
 } from "../services/media";
 import {
+  generateCloudNarration,
+  transcribeProjectAudio,
+} from "../services/capabilities";
+import {
   downloadText,
   formatBytes,
   makeId,
@@ -51,6 +55,8 @@ export default function AudioSubtitles() {
   const addAsset = useStudioStore((state) => state.addAsset);
   const addTimelineClip = useStudioStore((state) => state.addTimelineClip);
   const pushToast = useStudioStore((state) => state.pushToast);
+  const providers = useStudioStore((state) => state.providers);
+  const taskRoutes = useStudioStore((state) => state.taskRoutes);
   const [activeSceneId, setActiveSceneId] = useState(project?.scenes[0]?.id ?? "");
   const [speaking, setSpeaking] = useState(false);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -58,11 +64,33 @@ export default function AudioSubtitles() {
   const [audioUrl, setAudioUrl] = useState("");
   const [generatingAudio, setGeneratingAudio] = useState(false);
   const [generatingMusic, setGeneratingMusic] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const scene = project?.scenes.find((item) => item.id === activeSceneId);
   const asset = project?.assets.find((item) => item.id === scene?.assetId);
   const cue = project?.subtitles.find((item) => item.id === selectedCueId);
+  const cloudTtsProvider = providers.find(
+    (provider) =>
+      provider.enabled &&
+      provider.protocol === "OpenAI Compatible" &&
+      provider.capabilities.includes("TTS") &&
+      provider.id ===
+        (taskRoutes.TTS ??
+          providers.find((item) => item.capabilities.includes("TTS"))?.id),
+  );
+  const asrProvider = providers.find(
+    (provider) =>
+      provider.enabled &&
+      provider.protocol === "OpenAI Compatible" &&
+      provider.capabilities.includes("ASR") &&
+      provider.id ===
+        (taskRoutes.ASR ??
+          providers.find((item) => item.capabilities.includes("ASR"))?.id),
+  );
+  const sceneNarrationAsset = project?.assets.find(
+    (item) => item.kind === "audio" && item.sceneId === scene?.id,
+  );
 
   useEffect(() => {
     if (!("speechSynthesis" in window)) return;
@@ -163,12 +191,26 @@ export default function AudioSubtitles() {
     }
     setGeneratingAudio(true);
     try {
-      const generated = await generateNarrationAudio(
-        project.id,
-        project.scenes,
-        project.audio.voice,
-        project.audio.rate,
-      );
+      const generated = cloudTtsProvider
+        ? (
+            await generateCloudNarration({
+              projectId: project.id,
+              provider: cloudTtsProvider,
+              scenes: project.scenes.map((scene) => ({
+                id: scene.id,
+                title: scene.title,
+                narration: scene.narration,
+              })),
+              voice: project.audio.voice,
+              rate: project.audio.rate,
+            })
+          ).assets
+        : await generateNarrationAudio(
+            project.id,
+            project.scenes,
+            project.audio.voice,
+            project.audio.rate,
+          );
       const generatedByScene = new Map(
         generated.map((item) => [item.sceneId, item]),
       );
@@ -264,8 +306,8 @@ export default function AudioSubtitles() {
       setSelectedCueId(cues[0]?.id ?? "");
       pushToast({
         type: "success",
-        title: "真实旁白 WAV 已生成",
-        message: `${generated.length} 段旁白已写入项目，并同步字幕与时间轴。`,
+        title: cloudTtsProvider ? "云端旁白 WAV 已生成" : "本地旁白 WAV 已生成",
+        message: `${generated.length} 段旁白已写入项目，并同步字幕与时间轴。${cloudTtsProvider ? ` Provider：${cloudTtsProvider.name}` : ""}`,
       });
     } catch (error) {
       pushToast({
@@ -329,6 +371,79 @@ export default function AudioSubtitles() {
       });
     } finally {
       setGeneratingMusic(false);
+    }
+  };
+
+  const transcribeCurrentScene = async () => {
+    if (!scene || !sceneNarrationAsset || !asrProvider) return;
+    setTranscribing(true);
+    try {
+      const result = await transcribeProjectAudio({
+        projectId: project.id,
+        assetId: sceneNarrationAsset.id,
+        provider: asrProvider,
+      });
+      const sceneStart = project.scenes
+        .slice(0, project.scenes.findIndex((item) => item.id === scene.id))
+        .reduce((sum, item) => sum + item.duration, 0);
+      const cues = result.cues.length
+        ? result.cues.map((cue) => ({
+            id: makeId("sub"),
+            sceneId: scene.id,
+            start: Number((sceneStart + cue.start).toFixed(2)),
+            end: Number((sceneStart + cue.end).toFixed(2)),
+            text: cue.text,
+          }))
+        : String(result.text)
+            .split(/(?<=[。！？.!?])/)
+            .map((part) => part.trim())
+            .filter(Boolean)
+            .map((text, index, all) => ({
+              id: makeId("sub"),
+              sceneId: scene.id,
+              start: Number(
+                (sceneStart + (scene.duration / all.length) * index).toFixed(2),
+              ),
+              end: Number(
+                (sceneStart + (scene.duration / all.length) * (index + 1)).toFixed(2),
+              ),
+              text,
+            }));
+      const nextSubtitles = [
+        ...project.subtitles.filter((item) => item.sceneId !== scene.id),
+        ...cues,
+      ].sort((left, right) => left.start - right.start);
+      updateProject(project.id, (current) => ({
+        ...current,
+        subtitles: nextSubtitles,
+        timeline: [
+          ...current.timeline.filter(
+            (item) => !(item.track === "subtitle" && item.sceneId === scene.id),
+          ),
+          ...cues.map((cue) => ({
+            id: makeId("clip"),
+            track: "subtitle" as const,
+            sceneId: cue.sceneId,
+            label: cue.text,
+            start: cue.start,
+            duration: Math.max(0.4, cue.end - cue.start),
+            color: "#c8ff65",
+          })),
+        ],
+      }));
+      pushToast({
+        type: "success",
+        title: "语音听写已写入字幕",
+        message: `${asrProvider.name} · ${result.cues.length || cues.length} 个时间片段`,
+      });
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: "语音识别失败",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setTranscribing(false);
     }
   };
 
@@ -418,8 +533,28 @@ export default function AudioSubtitles() {
               disabled={generatingAudio || !isTauriDesktop}
               onClick={() => void generateAllNarration()}
             >
-              {generatingAudio ? "正在合成旁白…" : "生成全部旁白"}
+              {generatingAudio
+                ? "正在合成旁白…"
+                : cloudTtsProvider
+                  ? `使用 ${cloudTtsProvider.name} 合成`
+                  : "生成全部旁白"}
             </Button>
+            {asrProvider && sceneNarrationAsset && (
+              <Button
+                variant="secondary"
+                icon={
+                  transcribing ? (
+                    <LoaderCircle size={15} className="spin" />
+                  ) : (
+                    <Captions size={15} />
+                  )
+                }
+                disabled={transcribing}
+                onClick={() => void transcribeCurrentScene()}
+              >
+                {transcribing ? "听写中…" : "AI 听写当前旁白"}
+              </Button>
+            )}
             <Button
               variant="secondary"
               icon={<Download size={15} />}

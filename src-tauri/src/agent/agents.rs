@@ -13,7 +13,13 @@ pub trait Agent: Send + Sync {
         input: AgentInput,
         provider: &dyn LlmProvider,
         model: &str,
-    ) -> Result<AgentOutput, String>;
+    ) -> Result<AgentExecution, String>;
+}
+
+pub struct AgentExecution {
+    pub output: AgentOutput,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
 }
 
 pub struct AgentRegistry {
@@ -41,7 +47,7 @@ impl AgentRegistry {
         input: AgentInput,
         provider: &dyn LlmProvider,
         model: &str,
-    ) -> Result<AgentOutput, String> {
+    ) -> Result<AgentExecution, String> {
         match key {
             "research" => ResearchAgent.execute(input, provider, model).await,
             "director" => DirectorAgent.execute(input, provider, model).await,
@@ -78,7 +84,7 @@ impl Agent for ResearchAgent {
         input: AgentInput,
         provider: &dyn LlmProvider,
         model: &str,
-    ) -> Result<AgentOutput, String> {
+    ) -> Result<AgentExecution, String> {
         let descriptor = self.descriptor();
         let system = format!(
             r#"你是 KnowMotion 的 Research Agent。你负责为知识科普动画建立可核验的研究底稿。
@@ -113,7 +119,7 @@ impl Agent for DirectorAgent {
         input: AgentInput,
         provider: &dyn LlmProvider,
         model: &str,
-    ) -> Result<AgentOutput, String> {
+    ) -> Result<AgentExecution, String> {
         let descriptor = self.descriptor();
         let system = format!(
             r#"你是 KnowMotion 的 Director Agent。你负责把研究结果转成适合动画观看的知识叙事结构。
@@ -148,7 +154,7 @@ impl Agent for ScriptAgent {
         input: AgentInput,
         provider: &dyn LlmProvider,
         model: &str,
-    ) -> Result<AgentOutput, String> {
+    ) -> Result<AgentExecution, String> {
         let descriptor = self.descriptor();
         let system = format!(
             r##"你是 KnowMotion 的 Script Agent。把已批准大纲写成可朗读、可视化的场景脚本。
@@ -183,7 +189,7 @@ impl Agent for StoryboardAgent {
         input: AgentInput,
         provider: &dyn LlmProvider,
         model: &str,
-    ) -> Result<AgentOutput, String> {
+    ) -> Result<AgentExecution, String> {
         let descriptor = self.descriptor();
         let system = format!(
             r##"你是 KnowMotion 的 Storyboard Agent。把脚本拆成可独立制作的视觉场景。
@@ -218,7 +224,7 @@ impl Agent for ArtDirectorAgent {
         input: AgentInput,
         provider: &dyn LlmProvider,
         model: &str,
-    ) -> Result<AgentOutput, String> {
+    ) -> Result<AgentExecution, String> {
         let descriptor = self.descriptor();
         let system = format!(
             r#"你是 KnowMotion 的 Art Director Agent。为整支知识动画建立一致但不过度重复的视觉方向。
@@ -254,7 +260,7 @@ impl Agent for AssetAgent {
         input: AgentInput,
         provider: &dyn LlmProvider,
         model: &str,
-    ) -> Result<AgentOutput, String> {
+    ) -> Result<AgentExecution, String> {
         let descriptor = self.descriptor();
         let system = format!(
             r#"你是 KnowMotion 的 Asset Agent。按镜头内容选择最合适的表现方式：
@@ -292,7 +298,7 @@ impl Agent for AnimationAgent {
         input: AgentInput,
         provider: &dyn LlmProvider,
         model: &str,
-    ) -> Result<AgentOutput, String> {
+    ) -> Result<AgentExecution, String> {
         let descriptor = self.descriptor();
         let system = format!(
             r##"你是 KnowMotion 的 Animation Agent。你只能通过 patchScenes 修改动画配置。
@@ -329,7 +335,7 @@ impl Agent for AudioAgent {
         input: AgentInput,
         provider: &dyn LlmProvider,
         model: &str,
-    ) -> Result<AgentOutput, String> {
+    ) -> Result<AgentExecution, String> {
         let descriptor = self.descriptor();
         let system = format!(
             r##"你是 KnowMotion 的 Audio Agent。根据最终场景旁白生成字幕时间线和音轨时间轴。
@@ -366,7 +372,7 @@ impl Agent for QualityAgent {
         input: AgentInput,
         provider: &dyn LlmProvider,
         model: &str,
-    ) -> Result<AgentOutput, String> {
+    ) -> Result<AgentExecution, String> {
         let descriptor = self.descriptor();
         let system = format!(
             r#"你是 KnowMotion 的 Quality Agent。你负责在导出前审查内容和制作完整性。
@@ -397,7 +403,7 @@ async fn run_structured(
     model: &str,
     system: &str,
     task: &str,
-) -> Result<AgentOutput, String> {
+) -> Result<AgentExecution, String> {
     let context = compact_project(&input.project);
     let user = format!(
         "{task}\n\n项目上下文：\n{}\n\n上游 Agent 结果：\n{}\n\n用户指令：{}\n目标场景：{}",
@@ -430,7 +436,11 @@ async fn run_structured(
     if output.summary.trim().is_empty() {
         return Err(format!("{} returned an empty summary", descriptor.title));
     }
-    Ok(output)
+    Ok(AgentExecution {
+        output,
+        input_tokens: response.input_tokens,
+        output_tokens: response.output_tokens,
+    })
 }
 
 fn parse_agent_output(text: &str) -> Result<AgentOutput, String> {

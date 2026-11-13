@@ -12,6 +12,8 @@ export default defineConfig([
     'node_modules/**',
     'renders/**',
     'src-tauri/target/**',
+    'src-tauri/resources/**',
+    'src-tauri/binaries/**',
   ]),
   {
     files: ['**/*.{js,mjs,cjs,ts,tsx}'],
@@ -33,7 +35,12 @@ export default defineConfig([
     ],
   },
   {
-    files: ['eslint.config.js', 'scripts/**/*.ts', 'vite.config.ts'],
+    files: [
+      'eslint.config.js',
+      'scripts/**/*.{ts,mjs}',
+      'tests/**/*.ts',
+      'vite.config.ts',
+    ],
     languageOptions: {
       globals: globals.node,
     },

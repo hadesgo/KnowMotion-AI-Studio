@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
+    "test:frontend": "node --import tsx --test tests/*.test.ts",
     "preview": "vite preview",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
@@ -16,6 +17,8 @@
     "remotion:render": "tsx scripts/render-remotion.ts",
     "remotion:validate": "tsx scripts/validate-remotion.ts",
     "remotion:example": "tsx scripts/export-remotion-example.ts",
+    "renderer:prepare": "node scripts/prepare-render-runtime.mjs",
+    "renderer:smoke": "node --import tsx scripts/smoke-render-worker.mjs",
     "mvp:render": "tsx scripts/render-sky-blue-mvp.ts"
   },
   "dependencies": {

@@ -1,5 +1,6 @@
 import {
   ArrowRight,
+  Ban,
   CheckCircle2,
   CircleAlert,
   Clipboard,
@@ -16,7 +17,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeading, useCurrentProject } from "../components/AppShell";
 import { RemotionPlayer } from "../components/RemotionPlayer";
-import { Button, Pill, Segmented } from "../components/ui";
+import { Button, Pill, Progress, Segmented } from "../components/ui";
 import {
   buildProjectComposition,
   buildSceneComposition,
@@ -24,8 +25,14 @@ import {
   validateComposition,
 } from "../remotion/schema";
 import { useStudioStore } from "../store/studio";
-import { isTauriDesktop } from "../services/desktop";
-import { renderRemotionComposition } from "../services/remotion";
+import { flushDesktopStorage, isTauriDesktop } from "../services/desktop";
+import {
+  cancelRemotionRender,
+  listenRenderProgress,
+  startRemotionRender,
+  waitForRender,
+  type RenderJob,
+} from "../services/remotion";
 import {
   downloadText,
   formatBytes,
@@ -46,6 +53,9 @@ export default function RemotionStudio() {
   );
   const [validatedAt, setValidatedAt] = useState("");
   const [rendering, setRendering] = useState(false);
+  const [activeJobId, setActiveJobId] = useState("");
+  const [renderProgress, setRenderProgress] = useState(0);
+  const [renderStage, setRenderStage] = useState("");
   const [renderResult, setRenderResult] = useState<{
     outputPath: string;
     bytes: number;
@@ -70,6 +80,7 @@ export default function RemotionStudio() {
         )
       : null;
   const validation = composition ? validateComposition(composition) : null;
+  const qualityBlocked = project?.qualityReport?.status === "fail";
   const previewComposition =
     mode === "scene" && singleComposition ? singleComposition : composition;
 
@@ -123,6 +134,16 @@ export default function RemotionStudio() {
   };
 
   const renderMp4 = async () => {
+    if (qualityBlocked) {
+      pushToast({
+        type: "error",
+        title: "发布前质量检查未通过",
+        message:
+          project.qualityReport?.summary ??
+          "请修复 Quality Agent 报告中的错误项后重新检查。",
+      });
+      return;
+    }
     const result = validateComposition(composition);
     if (!result.valid) {
       pushToast({
@@ -133,9 +154,48 @@ export default function RemotionStudio() {
       return;
     }
     setRendering(true);
+    setRenderProgress(0);
+    setRenderStage("正在创建持久渲染任务");
+    setActiveJobId("");
+    let unlisten: (() => void) | undefined;
     try {
-      const output = await renderRemotionComposition(project.id, composition);
+      await flushDesktopStorage();
+      const started = await startRemotionRender(
+        project.id,
+        composition,
+        Date.parse(project.updatedAt),
+      );
+      setActiveJobId(started.jobId);
+      unlisten = await listenRenderProgress((progress) => {
+        if (progress.jobId !== started.jobId) return;
+        setRenderProgress(progress.percent);
+        setRenderStage(progress.stage);
+      });
+      const job: RenderJob = await waitForRender(
+        project.id,
+        started.jobId,
+        (current) => {
+          setRenderProgress(current.percent);
+          setRenderStage(current.stage);
+        },
+      );
+      if (job.status === "canceled") {
+        throw new Error("MP4 渲染已取消，临时文件已清理。");
+      }
+      if (job.status !== "succeeded" || !job.outputPath || !job.bytes) {
+        throw new Error(job.error ?? `渲染结束状态：${job.status}`);
+      }
+      const output = {
+        outputPath: job.outputPath,
+        bytes: job.bytes,
+        elapsedMs: Math.max(
+          0,
+          Date.parse(job.updatedAt) - Date.parse(job.createdAt),
+        ),
+      };
       setRenderResult(output);
+      setRenderProgress(100);
+      setRenderStage("completed");
       updateProject(project.id, (current) => ({
         ...current,
         stage: "render",
@@ -156,7 +216,7 @@ export default function RemotionStudio() {
       pushToast({
         type: "success",
         title: "MP4 渲染完成",
-        message: `真实 Rendermedia 输出 · ${formatBytes(output.bytes)} · ${Math.round(output.elapsedMs / 1000)} 秒`,
+        message: `已验证并原子提交 · ${formatBytes(output.bytes)} · SHA-256 ${job.sha256?.slice(0, 12) ?? "已记录"}`,
       });
     } catch (error) {
       pushToast({
@@ -165,7 +225,23 @@ export default function RemotionStudio() {
         message: error instanceof Error ? error.message : String(error),
       });
     } finally {
+      unlisten?.();
+      setActiveJobId("");
       setRendering(false);
+    }
+  };
+
+  const cancelRender = async () => {
+    if (!activeJobId) return;
+    try {
+      await cancelRemotionRender(project.id, activeJobId);
+      setRenderStage("canceling");
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: "无法取消渲染",
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
@@ -204,10 +280,27 @@ export default function RemotionStudio() {
                 )
               }
               onClick={() => void renderMp4()}
-              disabled={!isTauriDesktop || rendering || !validation?.valid}
+              disabled={
+                !isTauriDesktop ||
+                rendering ||
+                !validation?.valid ||
+                qualityBlocked
+              }
             >
-              {rendering ? "Renderer 正在逐帧渲染…" : "渲染完整 MP4"}
+              {rendering
+                ? `Renderer ${Math.round(renderProgress)}%`
+                : "渲染完整 MP4"}
             </Button>
+            {rendering && (
+              <Button
+                variant="danger"
+                icon={<Ban size={15} />}
+                onClick={() => void cancelRender()}
+                disabled={!activeJobId}
+              >
+                取消渲染
+              </Button>
+            )}
           </>
         }
       />
@@ -389,10 +482,27 @@ export default function RemotionStudio() {
                 )
               }
               onClick={() => void renderMp4()}
-              disabled={!isTauriDesktop || rendering || !validation?.valid}
+              disabled={
+                !isTauriDesktop ||
+                rendering ||
+                !validation?.valid ||
+                qualityBlocked
+              }
             >
-              {rendering ? "真实渲染中…" : "渲染 MP4"}
+              {rendering
+                ? `真实渲染中 · ${Math.round(renderProgress)}%`
+                : "渲染 MP4"}
             </Button>
+            {rendering && (
+              <Button
+                variant="danger"
+                icon={<Ban size={14} />}
+                onClick={() => void cancelRender()}
+                disabled={!activeJobId}
+              >
+                取消
+              </Button>
+            )}
             <Button
               variant="secondary"
               icon={<Clipboard size={14} />}
@@ -408,7 +518,23 @@ export default function RemotionStudio() {
               先导出 JSON
             </Button>
           </div>
+          {qualityBlocked && (
+            <div className="inline-error">
+              <CircleAlert size={15} />
+              Quality Agent 的结构化报告为 fail，正式渲染已被阻断。
+            </div>
+          )}
           <code>npm run remotion:render -- --composition composition.json</code>
+          {rendering && (
+            <div className="render-handoff__result">
+              <LoaderCircle size={15} className="spin" />
+              <span>
+                <strong>{Math.round(renderProgress)}%</strong>
+                <small>{renderStage || "Renderer 正在工作"}</small>
+              </span>
+            </div>
+          )}
+          {rendering && <Progress value={renderProgress} />}
           {renderResult && (
             <div className="render-handoff__result">
               <CheckCircle2 size={15} />

@@ -14,6 +14,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 
 pub use model::workflow_definition;
+pub(crate) use provider::get_provider_secret;
 
 #[tauri::command]
 pub fn agent_workflow_definition() -> WorkflowDefinition {

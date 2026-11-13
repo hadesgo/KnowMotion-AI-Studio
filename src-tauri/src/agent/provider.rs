@@ -382,6 +382,63 @@ pub async fn test_provider(config: ProviderConfig) -> Result<ProviderTestResult,
     if !config.enabled {
         return Err("Provider is disabled".to_string());
     }
+    if !config
+        .capabilities
+        .iter()
+        .any(|capability| capability == "LLM")
+    {
+        let started = Instant::now();
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .connect_timeout(Duration::from_secs(10))
+            .user_agent("KnowMotion-AI-Studio/0.1")
+            .build()
+            .map_err(|error| error.to_string())?;
+        let mut endpoint = if config.protocol == "ComfyUI" {
+            format!("{}/system_stats", config.base_url.trim_end_matches('/'))
+        } else {
+            format!("{}/models", config.base_url.trim_end_matches('/'))
+        };
+        if config.protocol == "Gemini" {
+            let secret = get_provider_secret(&config.id).ok_or_else(|| {
+                format!("No API key is stored for provider {}", config.name)
+            })?;
+            endpoint = format!(
+                "{}?key={}",
+                endpoint,
+                utf8_percent_encode(&secret, NON_ALPHANUMERIC)
+            );
+        }
+        let mut request = client.get(endpoint);
+        if config.protocol == "OpenAI Compatible" {
+            let secret = get_provider_secret(&config.id).ok_or_else(|| {
+                format!("No API key is stored for provider {}", config.name)
+            })?;
+            request = request.bearer_auth(secret);
+        } else if config.protocol == "Anthropic" {
+            let secret = get_provider_secret(&config.id).ok_or_else(|| {
+                format!("No API key is stored for provider {}", config.name)
+            })?;
+            request = request
+                .header("x-api-key", secret)
+                .header("anthropic-version", "2023-06-01");
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| format_provider_error(&error.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!("Provider returned {status}"));
+        }
+        return Ok(ProviderTestResult {
+            ok: true,
+            message: "能力端点连接成功".to_string(),
+            latency_ms: started.elapsed().as_millis(),
+            model: config.model,
+            backend: config.protocol,
+        });
+    }
     let provider = resolve_provider(&config, None).await?;
     let backend = provider
         .backend_label()

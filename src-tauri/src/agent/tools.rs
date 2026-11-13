@@ -42,12 +42,12 @@ pub fn apply_agent_changes(
         .map_err(|error| error.to_string())?;
     let created_at = Utc::now().to_rfc3339();
     let before_json = serde_json::to_string(before).map_err(|error| error.to_string())?;
+    let (project_root, candidate) = mirror_project_files(projects_root, &candidate)?;
     let after_json = serde_json::to_string(&candidate).map_err(|error| error.to_string())?;
     if before_json.len() + after_json.len() > 16 * 1024 * 1024 {
         return Err("Project revision exceeds the 16 MB safety limit".to_string());
     }
 
-    let project_root = mirror_project_files(projects_root, &candidate)?;
     let revision_file = Path::new(&project_root)
         .join("revisions")
         .join(format!("{revision_number:04}-{step_key}.json"));
@@ -59,7 +59,7 @@ pub fn apply_agent_changes(
         "revision": revision_number,
         "summary": output.summary,
         "before": before,
-        "after": candidate,
+        "after": &candidate,
         "createdAt": created_at
     });
     write_atomic(
@@ -731,8 +731,9 @@ pub fn undo_revision(
         )
         .map_err(|error| format!("Revision not found: {error}"))?;
     let before: Value = serde_json::from_str(&before_json).map_err(|error| error.to_string())?;
-    let before_text = serde_json::to_string_pretty(&before).map_err(|error| error.to_string())?;
-    let project_root = mirror_project_files(projects_root, &before)?;
+    let (project_root, before) = mirror_project_files(projects_root, &before)?;
+    let before_text = serde_json::to_string_pretty(&before)
+        .map_err(|error| error.to_string())?;
     write_atomic(
         &Path::new(&project_root)
             .join("revisions")

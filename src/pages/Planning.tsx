@@ -8,6 +8,7 @@ import {
   Link2,
   Plus,
   RefreshCw,
+  Search,
   Sparkles,
   Trash2,
   WandSparkles,
@@ -28,6 +29,12 @@ import { generateOutlineDraft } from "../data/demo";
 import { useStudioStore } from "../store/studio";
 import type { OutlineSection, ResearchSource } from "../types";
 import { makeId } from "../utils";
+import {
+  embedProjectKnowledge,
+  fetchResearchSource,
+  searchProjectKnowledge,
+} from "../services/capabilities";
+import { isTauriDesktop } from "../services/desktop";
 import "./Planning.css";
 
 const strategies = [
@@ -53,10 +60,18 @@ export default function Planning() {
   const navigate = useNavigate();
   const updateProject = useStudioStore((state) => state.updateProject);
   const pushToast = useStudioStore((state) => state.pushToast);
+  const providers = useStudioStore((state) => state.providers);
+  const taskRoutes = useStudioStore((state) => state.taskRoutes);
   const [strategy, setStrategy] = useState("悬念驱动");
   const [sourceTitle, setSourceTitle] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [indexingSourceId, setIndexingSourceId] = useState("");
+  const [ragQuery, setRagQuery] = useState("");
+  const [searchingKnowledge, setSearchingKnowledge] = useState(false);
+  const [knowledgeResults, setKnowledgeResults] = useState<
+    Array<{ sourceId: string; chunkIndex: number; text: string; score: number }>
+  >([]);
 
   const totalSeconds = useMemo(
     () =>
@@ -66,6 +81,15 @@ export default function Planning() {
 
   if (!project) return null;
   const sources = project.researchSources ?? [];
+  const embeddingProvider = providers.find(
+    (provider) =>
+      provider.enabled &&
+      provider.protocol === "OpenAI Compatible" &&
+      provider.capabilities.includes("Embedding") &&
+      provider.id ===
+        (taskRoutes.Embedding ??
+          providers.find((item) => item.capabilities.includes("Embedding"))?.id),
+  );
 
   const generate = () => {
     setGenerating(true);
@@ -140,6 +164,81 @@ export default function Planning() {
     setSourceTitle("");
     setSourceUrl("");
     pushToast({ type: "success", title: "来源已添加，标记为待核验" });
+  };
+
+  const fetchAndIndexSource = async (source: ResearchSource) => {
+    if (!source.url || !isTauriDesktop) return;
+    setIndexingSourceId(source.id);
+    try {
+      const fetched = await fetchResearchSource(source.url);
+      let indexedAt: string | undefined;
+      if (embeddingProvider) {
+        await embedProjectKnowledge({
+          projectId: project.id,
+          sourceId: source.id,
+          texts: [fetched.title, fetched.text],
+          provider: embeddingProvider,
+        });
+        indexedAt = new Date().toISOString();
+      }
+      updateProject(project.id, {
+        researchSources: sources.map((item) =>
+          item.id === source.id
+            ? {
+                ...item,
+                title: item.title || fetched.title,
+                content: fetched.text,
+                indexedAt,
+                note: embeddingProvider
+                  ? `已抓取 ${fetched.text.length} 字并建立向量索引，仍需人工核验。`
+                  : `已抓取 ${fetched.text.length} 字正文，尚未配置 Embedding Provider。`,
+              }
+            : item,
+        ),
+      });
+      pushToast({
+        type: "success",
+        title: embeddingProvider ? "来源已抓取并索引" : "来源正文已抓取",
+        message: `${fetched.title} · ${fetched.text.length} 字`,
+      });
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: "来源抓取失败",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setIndexingSourceId("");
+    }
+  };
+
+  const searchKnowledge = async () => {
+    if (!ragQuery.trim() || !embeddingProvider) return;
+    setSearchingKnowledge(true);
+    try {
+      const results = await searchProjectKnowledge({
+        projectId: project.id,
+        query: ragQuery.trim(),
+        provider: embeddingProvider,
+        limit: 6,
+      });
+      setKnowledgeResults(results);
+      pushToast({
+        type: results.length ? "success" : "info",
+        title: results.length ? "找到相关知识片段" : "没有匹配的知识片段",
+        message: results.length
+          ? results.slice(0, 2).map((result) => result.text.slice(0, 70)).join(" · ")
+          : "先抓取来源并建立向量索引。",
+      });
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: "知识检索失败",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setSearchingKnowledge(false);
+    }
   };
 
   const approve = () => {
@@ -372,7 +471,24 @@ export default function Planning() {
               <div className="source-list">
                 {sources.map((source) => (
                   <div key={source.id}>
-                    <span><FileSearch size={15} /></span>
+                    <button
+                      type="button"
+                      title={
+                        source.url
+                          ? embeddingProvider
+                            ? "抓取正文并建立向量索引"
+                            : "抓取正文"
+                          : "这个来源没有可抓取链接"
+                      }
+                      disabled={!source.url || indexingSourceId === source.id}
+                      onClick={() => void fetchAndIndexSource(source)}
+                    >
+                      {indexingSourceId === source.id ? (
+                        <RefreshCw size={15} className="spin" />
+                      ) : (
+                        <FileSearch size={15} />
+                      )}
+                    </button>
                     <div>
                       <strong>{source.title}</strong>
                       <small>{source.url || source.note}</small>
@@ -425,6 +541,45 @@ export default function Planning() {
                 添加待核验来源
               </Button>
             </div>
+            {embeddingProvider && (
+              <div className="source-form">
+                <Field label="知识检索" hint="使用项目内已索引的事实片段">
+                  <TextInput
+                    value={ragQuery}
+                    onChange={(event) => setRagQuery(event.target.value)}
+                    placeholder="例如：为什么短波散射更强？"
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void searchKnowledge();
+                    }}
+                  />
+                </Field>
+                <Button
+                  variant="soft"
+                  size="sm"
+                  icon={
+                    searchingKnowledge ? (
+                      <RefreshCw size={14} className="spin" />
+                    ) : (
+                      <Search size={14} />
+                    )
+                  }
+                  disabled={searchingKnowledge || !ragQuery.trim()}
+                  onClick={() => void searchKnowledge()}
+                >
+                  检索项目知识库
+                </Button>
+                {knowledgeResults.length > 0 && (
+                  <div className="knowledge-results">
+                    {knowledgeResults.map((result) => (
+                      <article key={`${result.sourceId}-${result.chunkIndex}`}>
+                        <span>{Math.round(result.score * 100)}%</span>
+                        <p>{result.text}</p>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </section>
 
           <section className="planning-note">

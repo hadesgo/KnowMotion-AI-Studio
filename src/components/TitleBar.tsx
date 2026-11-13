@@ -16,7 +16,11 @@ import {
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useStudioStore } from "../store/studio";
 import { downloadText } from "../utils";
-import { exportDesktopProject, isTauriDesktop } from "../services/desktop";
+import {
+  exportDesktopProject,
+  flushDesktopStorage,
+  isTauriDesktop,
+} from "../services/desktop";
 import { Button, IconButton, Pill } from "./ui";
 import "./TitleBar.css";
 
@@ -85,11 +89,12 @@ export function TitleBar() {
     if (!project) return;
     if (isTauriDesktop) {
       try {
+        await flushDesktopStorage();
         const path = await exportDesktopProject(project);
         pushToast({
           type: "success",
-          title: "项目已导出",
-          message: path ? `文件已写入 ${path}` : undefined,
+          title: "可迁移项目包已导出",
+          message: path ? `包含项目 JSON、素材与渲染记录：${path}` : undefined,
         });
       } catch (error) {
         pushToast({
