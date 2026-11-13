@@ -38,11 +38,14 @@ npm run test:components
 cd src-tauri && cargo test
 npm run renderer:smoke
 npm run test:e2e:desktop:full
+npm run test:smoke:windows:sandbox
 ```
 
 `renderer:smoke` 需要先执行 `npm run renderer:prepare`，会启动随包 Node/Chrome/FFmpeg 渲染一个短视频片段。
 
 桌面 E2E 使用 Tauri WebDriver 和匹配当前 Edge 版本的 `msedgedriver`。完整命令会自动构建应用；也可先运行 `npm run test:e2e:desktop` 复用已有 release EXE。测试使用隔离的临时应用数据目录，并在重启后验证项目持久化。
+
+Windows 干净 VM smoke 会安装 NSIS、校验 runtime 哈希、离线渲染短视频、启动应用检查日志并静默卸载。当前主机未启用 Windows Sandbox 时，可在干净 VM 中直接运行 `scripts/windows-vm/run-install-smoke.ps1`；CI 使用全新 Windows runner 自动执行。
 
 ## 桌面应用
 

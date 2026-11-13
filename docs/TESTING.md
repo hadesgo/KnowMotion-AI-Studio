@@ -52,3 +52,32 @@ npm run test:e2e:desktop
 ## CI
 
 `.github/workflows/test.yml` 在 Windows runner 上安装 Node 24、Rust、npm 依赖和 `tauri-driver`，随后依次运行 Rust 测试、前端与组件测试、Lint 和完整桌面 E2E。失败时上传 E2E 截图和 DOM。
+
+## Windows 干净 VM smoke
+
+`windows-clean-vm-smoke` job 在全新的 `windows-latest` VM 中构建 NSIS，然后执行：
+
+```powershell
+.\scripts\windows-vm\run-install-smoke.ps1 `
+  -InstallerPath <NSIS路径> `
+  -ResultPath .\e2e-artifacts\windows-clean-vm-result.json `
+  -EnforceOffline
+```
+
+验证阶段：
+
+1. 确认机器没有既有 KnowMotion 安装。
+2. 静默安装并校验 20 个 runtime 文件哈希。
+3. 为 Node、Chrome、FFmpeg、FFprobe 和应用进程添加外网络阻断规则。
+4. 使用安装目录内运行时渲染 1.5 秒视频，FFprobe 校验 H.264 视频流与时长。
+5. 启动应用并检查结构化日志初始化标记。
+6. 静默卸载并检查关键运行文件消失。
+7. 在 finally 中移除防火墙规则、停止残留进程并写入 JSON 证据。
+
+本机启用 Windows Sandbox 后，可使用自动拉起脚本：
+
+```powershell
+npm run test:smoke:windows:sandbox
+```
+
+Sandbox 配置禁用网络，并将安装包、smoke 脚本与结果目录映射到一次性桌面环境。没有 Sandbox 时脚本会明确失败，不会退化成非干净测试。

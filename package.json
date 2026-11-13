@@ -13,6 +13,8 @@
     "e2e:driver": "node scripts/ensure-msedgedriver.mjs",
     "test:e2e:desktop": "node scripts/run-desktop-e2e.mjs",
     "test:e2e:desktop:full": "npm run tauri -- build --no-bundle && node scripts/run-desktop-e2e.mjs",
+    "test:smoke:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-vm/run-install-smoke.ps1",
+    "test:smoke:windows:sandbox": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-vm/run-windows-sandbox-smoke.ps1",
     "preview": "vite preview",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",

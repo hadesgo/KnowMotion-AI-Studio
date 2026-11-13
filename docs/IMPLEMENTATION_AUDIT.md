@@ -202,6 +202,20 @@
 - 失败时保存页面截图与 DOM，成功时清理旧诊断文件；应用会话、WebDriver 和临时数据在 finally 中回收。
 - GitHub Actions Windows workflow 运行 Rust、Node 单元测试、组件测试、Lint、构建与桌面 E2E。
 
+### 3.12 Windows 干净 VM smoke
+
+- 提供 `scripts/windows-vm/run-install-smoke.ps1`，可在任意干净 Windows 主机/VM 执行。
+- 脚本拒绝已有 KnowMotion 安装，静默安装 NSIS 并定位实际布局。
+- 校验应用、Node、Chrome、FFmpeg/FFprobe、Renderer 与 runtime manifest 的 SHA-256 哈希。
+- 使用安装目录内固定运行时离线渲染 1.5 秒 H.264，通过 FFprobe 校验视频流与时长并计算成品 SHA-256。
+- 启动安装后的应用，验证进程保持运行且生产 JSONL 日志出现 `Desktop services initialized`。
+- 静默卸载后验证 EXE、Node、Chrome、FFmpeg 和 Renderer Worker 等关键运行文件已移除。
+- `-EnforceOffline` 可在管理员 VM 中为安装应用和渲染二进制添加入站外网络阻断，测试结束自动移除防火墙规则。
+- 提供 Windows Sandbox 自动编排脚本；本机未启用 Sandbox 时明确失败并提示改用干净 VM。
+- GitHub Actions 使用全新 Windows runner 构建 NSIS，并执行强制离线安装 smoke。
+- 实际本机验收：20 个 runtime 文件校验通过；离线视频 127,085 字节、1.5 秒、SHA-256 `7C799D0EEDDB87AE56E20531F9F48D548B7CCF6BDB79C32DE4D8A2CE1D4E3B28`；启动与卸载均通过。
+- smoke 发现并修复了 FFmpeg/FFprobe 单独复制而未携带 compositor DLL 的发布缺陷；现在 15 个 DLL 一并打包并纳入哈希 manifest。
+
 ## 4. 部分实现
 
 | 功能 | 当前状态 | 缺口 |
@@ -231,7 +245,6 @@
 - 批量图片生成队列、图片局部重绘。
 - 视频素材图层与视频剪辑。
 - Authenticode 签名、时间戳和 signed updater。
-- Windows 干净虚拟机 smoke test。
 - 真实外部 LLM/Image/TTS/ASR/Embedding 服务端到端验收。
 
 ## 6. 与架构文档不一致的关键项
@@ -295,4 +308,4 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 1. 生成 IPC TypeScript 类型与 JSON Schema，消除手工重复模型。
 2. 扩展桌面 E2E 到审批流、真实媒体任务和取消/重启恢复场景。
 3. 增加发布 CI 日志聚合与远程诊断导出。
-4. 增加发布签名、signed updater、SBOM 和 VM smoke test。
+4. 增加发布签名、signed updater 和 SBOM；干净 Windows VM smoke 已实现。

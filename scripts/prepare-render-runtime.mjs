@@ -3,6 +3,7 @@ import {
   copyFile,
   cp,
   mkdir,
+  readdir,
   readFile,
   rm,
   stat,
@@ -100,6 +101,12 @@ async function main() {
     path.join(compositorRoot, "ffprobe.exe"),
     path.join(ffmpegRoot, "ffprobe.exe"),
   );
+  const compositorDependencies = (await readdir(compositorRoot))
+    .filter((entry) => entry.toLowerCase().endsWith(".dll"))
+    .map((entry) => path.join(compositorRoot, entry));
+  for (const dependency of compositorDependencies) {
+    await copyFile(dependency, path.join(ffmpegRoot, path.basename(dependency)));
+  }
 
   const nodeTarget = path.join(
     binariesRoot,
@@ -112,6 +119,9 @@ async function main() {
     path.join(browserRoot, "chrome-headless-shell.exe"),
     path.join(ffmpegRoot, "ffmpeg.exe"),
     path.join(ffmpegRoot, "ffprobe.exe"),
+    ...compositorDependencies.map((dependency) =>
+      path.join(ffmpegRoot, path.basename(dependency)),
+    ),
     path.join(rendererRoot, "scripts/render-worker.ts"),
     path.join(rendererRoot, "package.json"),
   ];
