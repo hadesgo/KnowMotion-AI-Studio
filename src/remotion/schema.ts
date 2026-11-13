@@ -419,7 +419,11 @@ export function sceneToRemotionDsl(
     });
   }
 
-  if (style === "cinematic" || style === "editorial") {
+  if (
+    scene.visualMode === "image" ||
+    style === "cinematic" ||
+    style === "editorial"
+  ) {
     const fallbackAsset = ensureFallbackAsset(project, scene, assets);
     if (fallbackAsset) {
       layers.unshift({
@@ -579,6 +583,37 @@ export function sceneToRemotionDsl(
   };
   const backgrounds = isSkyTopic ? skyBackgrounds : defaultBackgrounds;
 
+  const cameraPreset =
+    scene.motionPreset === "pushIn"
+      ? {
+          from: { scale: 1, x: 0, y: 0 },
+          to: { scale: 1.08, x: -1.5, y: -1 },
+        }
+      : scene.motionPreset === "pullOut"
+        ? {
+            from: { scale: 1.08, x: -1.5, y: -1 },
+            to: { scale: 1, x: 0, y: 0 },
+          }
+        : scene.motionPreset === "panLeft"
+          ? {
+              from: { scale: 1.04, x: 2.5, y: 0 },
+              to: { scale: 1.04, x: -2.5, y: 0 },
+            }
+          : scene.motionPreset === "panRight"
+            ? {
+                from: { scale: 1.04, x: -2.5, y: 0 },
+                to: { scale: 1.04, x: 2.5, y: 0 },
+              }
+            : {
+                from: { scale: 1, x: 0, y: 0 },
+                to:
+                  style === "cinematic"
+                    ? { scale: 1.07, x: -1.5, y: -1 }
+                    : style === "data"
+                      ? { scale: 1.025, x: 0.8, y: 0 }
+                      : { scale: 1.02, x: 0, y: -0.6 },
+              };
+
   return sceneDslSchema.parse({
     schemaVersion: "1.0",
     id: scene.id,
@@ -593,13 +628,7 @@ export function sceneToRemotionDsl(
       vignette: style === "minimal" ? 0.5 : 0.34,
     },
     camera: {
-      from: { scale: 1, x: 0, y: 0 },
-      to:
-        style === "cinematic"
-          ? { scale: 1.07, x: -1.5, y: -1 }
-          : style === "data"
-            ? { scale: 1.025, x: 0.8, y: 0 }
-            : { scale: 1.02, x: 0, y: -0.6 },
+      ...cameraPreset,
       easing: "easeInOut",
     },
     transition: {

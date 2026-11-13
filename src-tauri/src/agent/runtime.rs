@@ -1,7 +1,8 @@
 use super::agents::AgentRegistry;
 use super::model::{
-    AgentInput, AgentModelRoute, ProviderConfig, WorkflowEventPayload, WorkflowRunView,
-    WorkflowStartRequest, WorkflowStepView, AGENT_KEYS, WORKFLOW_KEY, WORKFLOW_VERSION,
+    AgentInput, AgentModelRoute, ProjectToolCall, ProviderConfig, WorkflowEventPayload,
+    WorkflowRunView, WorkflowStartRequest, WorkflowStepView, AGENT_KEYS, WORKFLOW_KEY,
+    WORKFLOW_VERSION,
 };
 use super::provider::resolve_provider;
 use super::tools::{apply_agent_changes, list_revisions, undo_revision};
@@ -655,11 +656,12 @@ impl AgentRuntime {
             )
             .map_err(|error| error.to_string())?
         };
+        let target_scene_ids = extract_target_scene_ids(Some(&project), instruction.as_deref());
         let agent_input = AgentInput {
             project: project.clone(),
             instruction,
             dependency_outputs,
-            target_scene_ids: vec![],
+            target_scene_ids: target_scene_ids.clone(),
             agent_key: step.agent_key.clone(),
         };
         let input_json = serde_json::to_string(&agent_input).map_err(|error| error.to_string())?;
@@ -717,6 +719,7 @@ impl AgentRuntime {
             }
         }
         let output = output?;
+        enforce_scene_scope(&output, &target_scene_ids)?;
 
         {
             let mut db = self.lock_db()?;
@@ -1038,6 +1041,85 @@ struct StepRow {
     dependencies: Vec<String>,
 }
 
+fn extract_target_scene_ids(project: Option<&Value>, instruction: Option<&str>) -> Vec<String> {
+    let Some(project) = project else {
+        return Vec::new();
+    };
+    let Some(instruction) = instruction.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Vec::new();
+    };
+    let scenes = project
+        .get("scenes")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    if scenes.is_empty() {
+        return Vec::new();
+    }
+    let chinese = [
+        "第一", "第二", "第三", "第四", "第五", "第六", "第七", "第八", "第九", "第十",
+    ];
+    let mut target_indices = Vec::new();
+    for (index, word) in chinese.iter().enumerate() {
+        if instruction.contains(word) {
+            target_indices.push(index);
+        }
+    }
+    for index in 1..=10 {
+        let markers = [
+            format!("第{index}"),
+            format!("scene {index}"),
+            format!("scene{index}"),
+        ];
+        if markers.iter().any(|marker| {
+            instruction
+                .to_ascii_lowercase()
+                .contains(&marker.to_ascii_lowercase())
+        }) {
+            target_indices.push(index - 1);
+        }
+    }
+    if instruction.contains("最后一个场景")
+        || instruction.to_ascii_lowercase().contains("last scene")
+    {
+        target_indices.push(scenes.len() - 1);
+    }
+    target_indices.sort_unstable();
+    target_indices.dedup();
+    target_indices
+        .into_iter()
+        .filter_map(|index| {
+            scenes
+                .get(index)
+                .and_then(|scene| scene.get("id"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+fn enforce_scene_scope(
+    output: &super::model::AgentOutput,
+    target_ids: &[String],
+) -> Result<(), String> {
+    if target_ids.is_empty() {
+        return Ok(());
+    }
+    for change in &output.changes {
+        if let ProjectToolCall::PatchScenes(input) = change {
+            for scene in &input.scenes {
+                let scene_id = scene.get("id").and_then(Value::as_str).unwrap_or_default();
+                if !target_ids.iter().any(|target| target == scene_id) {
+                    return Err(format!(
+                        "Agent attempted to patch a scene outside the requested scope: {scene_id}"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn initialize_database(connection: &Connection) -> Result<(), String> {
     connection
         .execute_batch(
@@ -1317,5 +1399,35 @@ mod tests {
             .expect("step status");
         assert_eq!(run_status, "paused");
         assert_eq!(step_status, "pending");
+    }
+
+    #[test]
+    fn natural_language_scene_scope_is_enforced() {
+        let project = json!({
+            "scenes": [
+                {"id": "scene-1"},
+                {"id": "scene-2"},
+                {"id": "scene-3"}
+            ]
+        });
+        assert_eq!(
+            extract_target_scene_ids(Some(&project), Some("把第二个场景的动画改得更有趣")),
+            vec!["scene-2".to_string()]
+        );
+        assert_eq!(
+            extract_target_scene_ids(Some(&project), Some("change scene 3 to be faster")),
+            vec!["scene-3".to_string()]
+        );
+        let output = super::super::model::AgentOutput {
+            summary: "animation".to_string(),
+            changes: vec![ProjectToolCall::PatchScenes(
+                super::super::model::ScenesInput {
+                    scenes: vec![json!({"id": "scene-1"}), json!({"id": "scene-2"})],
+                },
+            )],
+            warnings: vec![],
+            needs_attention: false,
+        };
+        assert!(enforce_scene_scope(&output, &["scene-2".to_string()]).is_err());
     }
 }

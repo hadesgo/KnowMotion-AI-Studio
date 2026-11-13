@@ -105,6 +105,7 @@ pub enum ProjectToolCall {
     SetResearchSources(ResearchSourcesInput),
     ReplaceOutline(OutlineInput),
     ReplaceScenes(ScenesInput),
+    PatchScenes(ScenesInput),
     ReplaceAssets(AssetsInput),
     GenerateSceneAssets(GenerateAssetsInput),
     ReplaceTimeline(TimelineInput),
@@ -121,6 +122,7 @@ impl ProjectToolCall {
             Self::SetResearchSources(_) => "setResearchSources",
             Self::ReplaceOutline(_) => "replaceOutline",
             Self::ReplaceScenes(_) => "replaceScenes",
+            Self::PatchScenes(_) => "patchScenes",
             Self::ReplaceAssets(_) => "replaceAssets",
             Self::GenerateSceneAssets(_) => "generateSceneAssets",
             Self::ReplaceTimeline(_) => "replaceTimeline",
@@ -355,7 +357,7 @@ pub fn workflow_definition() -> WorkflowDefinition {
                 vec!["art_director"],
                 false,
                 None,
-                vec!["generateSceneAssets", "replaceAssets"],
+                vec!["generateSceneAssets", "replaceAssets", "patchScenes"],
             ),
             descriptor(
                 "animation",
@@ -364,7 +366,7 @@ pub fn workflow_definition() -> WorkflowDefinition {
                 vec!["asset"],
                 false,
                 None,
-                vec!["replaceScenes"],
+                vec!["patchScenes"],
             ),
             descriptor(
                 "audio",

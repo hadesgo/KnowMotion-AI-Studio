@@ -65,6 +65,8 @@ export interface Scene {
   assetId?: string;
   layers: SceneLayer[];
   remotion?: Record<string, unknown>;
+  motionPreset?: "pushIn" | "pullOut" | "panLeft" | "panRight" | "none";
+  visualMode?: "programmatic" | "image";
 }
 
 export interface Asset {

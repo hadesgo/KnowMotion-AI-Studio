@@ -41,6 +41,8 @@ AI 不生成新的 React 项目或任意 Remotion 代码。AI 和项目编辑器
 
 每个图层有独立的 `fromMs` / `toMs` 时间范围、透明度、位置、尺寸、旋转和动画参数。
 
+项目 Scene 还包含受控的 `motionPreset`（推近、拉远、左右平移）和 `visualMode`（programmatic/image）。AI 只能修改这些结构化字段或图层 Patch，不能直接生成 Remotion 代码。
+
 ## 4. Composition Schema
 
 ```ts

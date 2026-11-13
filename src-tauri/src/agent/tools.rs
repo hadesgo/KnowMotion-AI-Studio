@@ -137,6 +137,9 @@ fn apply_change(project: &mut Value, change: &ProjectToolCall) -> Result<(), Str
                 .collect::<Result<Vec<_>, _>>()?;
             project["scenes"] = Value::Array(scenes);
         }
+        ProjectToolCall::PatchScenes(input) => {
+            patch_scenes(project, &input.scenes)?;
+        }
         ProjectToolCall::ReplaceAssets(input) => {
             if input.assets.len() > 300 {
                 return Err("Asset limit is 300".to_string());
@@ -333,8 +336,73 @@ fn normalize_scene(scene: &Value, index: usize) -> Result<Value, String> {
         "duration": (duration * 10.0).round() / 10.0,
         "accent": accent,
         "assetId": scene.get("assetId").cloned().unwrap_or(Value::Null),
+        "motionPreset": scene
+            .get("motionPreset")
+            .and_then(Value::as_str)
+            .filter(|value| ["pushIn", "pullOut", "panLeft", "panRight", "none"].contains(value))
+            .unwrap_or("none"),
+        "visualMode": if scene.get("visualMode").and_then(Value::as_str) == Some("image") {
+            "image"
+        } else {
+            "programmatic"
+        },
+        "remotion": scene
+            .get("remotion")
+            .filter(|value| value.is_object())
+            .cloned()
+            .unwrap_or(Value::Null),
         "layers": layers
     }))
+}
+
+fn patch_scenes(project: &mut Value, patches: &[Value]) -> Result<(), String> {
+    if patches.is_empty() || patches.len() > 30 {
+        return Err("Scene patch requires between 1 and 30 scenes".to_string());
+    }
+    let scenes = project
+        .get("scenes")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| "Project has no scenes to patch".to_string())?;
+    let protected = [
+        "title",
+        "narration",
+        "description",
+        "visualPrompt",
+        "duration",
+        "assetId",
+    ];
+    let mut matched = 0;
+    let updated = scenes
+        .iter()
+        .enumerate()
+        .map(|(index, scene)| {
+            let scene_id = scene.get("id").and_then(Value::as_str).unwrap_or_default();
+            let Some(patch) = patches
+                .iter()
+                .find(|patch| patch.get("id").and_then(Value::as_str) == Some(scene_id))
+            else {
+                return Ok(scene.clone());
+            };
+            matched += 1;
+            let mut merged = scene.clone();
+            if let (Some(base), Some(patch_object)) = (merged.as_object_mut(), patch.as_object()) {
+                for (key, value) in patch_object {
+                    base.insert(key.clone(), value.clone());
+                }
+            }
+            let mut normalized = normalize_scene(&merged, index)?;
+            for field in protected {
+                normalized[field] = scene.get(field).cloned().unwrap_or(Value::Null);
+            }
+            Ok(normalized)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    if matched == 0 {
+        return Err("Scene patch did not match any project scene".to_string());
+    }
+    project["scenes"] = Value::Array(updated);
+    Ok(())
 }
 
 fn normalize_layer(
@@ -469,6 +537,7 @@ fn generate_assets(project: &mut Value, briefs: &[AssetBrief]) -> Result<(), Str
             scene_id,
             asset["id"].as_str().unwrap_or_default().to_string(),
             accent,
+            brief.kind.clone(),
         ));
         assets.push(asset);
     }
@@ -478,11 +547,20 @@ fn generate_assets(project: &mut Value, briefs: &[AssetBrief]) -> Result<(), Str
             let Some(scene_id) = scene.get("id").and_then(Value::as_str) else {
                 continue;
             };
-            if let Some((_, asset_id, accent)) =
-                generated_by_scene.iter().find(|(id, _, _)| id == scene_id)
+            if let Some((_, asset_id, accent, kind)) = generated_by_scene
+                .iter()
+                .find(|(id, _, _, _)| id == scene_id)
             {
                 scene["assetId"] = Value::String(asset_id.clone());
                 scene["accent"] = Value::String(accent.clone());
+                scene["visualMode"] = Value::String(
+                    if matches!(kind.as_str(), "illustration" | "photo") {
+                        "image"
+                    } else {
+                        "programmatic"
+                    }
+                    .to_string(),
+                );
             }
         }
     }
@@ -760,5 +838,63 @@ mod tests {
             .expect("generated asset must have a data URL");
         assert!(asset_src.starts_with("data:image/svg+xml"));
         assert_eq!(project["scenes"][0]["assetId"], project["assets"][0]["id"]);
+    }
+
+    #[test]
+    fn animation_patch_preserves_content_and_only_changes_requested_scene() {
+        let mut project = json!({
+            "id": "project-test",
+            "title": "Test",
+            "settings": {},
+            "scenes": [
+                {
+                    "id": "scene-1",
+                    "title": "First",
+                    "narration": "First narration",
+                    "description": "First visual",
+                    "visualPrompt": "first prompt",
+                    "duration": 5,
+                    "layers": []
+                },
+                {
+                    "id": "scene-2",
+                    "title": "Second",
+                    "narration": "Second narration",
+                    "description": "Second visual",
+                    "visualPrompt": "second prompt",
+                    "duration": 6,
+                    "layers": []
+                }
+            ]
+        });
+        let first_before = project["scenes"][0].clone();
+        patch_scenes(
+            &mut project,
+            &[json!({
+                "id": "scene-2",
+                "narration": "This must not replace the existing narration",
+                "title": "This must not replace the existing title",
+                "motionPreset": "pushIn",
+                "layers": [{
+                    "id": "layer-push",
+                    "type": "text",
+                    "content": "Animated label",
+                    "x": 20,
+                    "y": 30,
+                    "width": 40,
+                    "height": 20,
+                    "opacity": 1,
+                    "start": 0,
+                    "end": 6,
+                    "color": "#ffffff",
+                    "fontSize": 42
+                }]
+            })],
+        )
+        .expect("scene patch");
+        assert_eq!(project["scenes"][0], first_before);
+        assert_eq!(project["scenes"][1]["title"], "Second");
+        assert_eq!(project["scenes"][1]["narration"], "Second narration");
+        assert_eq!(project["scenes"][1]["motionPreset"], "pushIn");
     }
 }

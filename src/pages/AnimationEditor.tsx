@@ -104,6 +104,15 @@ export default function AnimationEditor() {
     }));
   };
 
+  const updateScene = (patch: Partial<typeof scene>) => {
+    updateProject(project.id, (current) => ({
+      ...current,
+      scenes: current.scenes.map((item) =>
+        item.id === sceneId ? { ...item, ...patch } : item,
+      ),
+    }));
+  };
+
   const addLayer = (type: "text" | "shape") => {
     const next = createLayer(type, scene.layers.length);
     next.end = scene.duration;
@@ -390,6 +399,45 @@ export default function AnimationEditor() {
               助手
             </Button>
           </header>
+
+          <div className="property-section">
+            <span className="eyebrow">SCENE MOTION</span>
+            <label className="inspector-field">
+              <span>镜头运动</span>
+              <select
+                value={scene.motionPreset ?? "none"}
+                onChange={(event) =>
+                  updateScene({
+                    motionPreset: event.target.value as NonNullable<
+                      typeof scene.motionPreset
+                    >,
+                  })
+                }
+              >
+                <option value="none">自动</option>
+                <option value="pushIn">缓慢推近</option>
+                <option value="pullOut">缓慢拉远</option>
+                <option value="panLeft">向左平移</option>
+                <option value="panRight">向右平移</option>
+              </select>
+            </label>
+            <label className="inspector-field">
+              <span>画面策略</span>
+              <select
+                value={scene.visualMode ?? "programmatic"}
+                onChange={(event) =>
+                  updateScene({
+                    visualMode: event.target.value as NonNullable<
+                      typeof scene.visualMode
+                    >,
+                  })
+                }
+              >
+                <option value="programmatic">SVG / 图表 / 程序化</option>
+                <option value="image">图片素材</option>
+              </select>
+            </label>
+          </div>
 
           {layer ? (
             <>

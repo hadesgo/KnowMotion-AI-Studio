@@ -257,13 +257,16 @@ impl Agent for AssetAgent {
     ) -> Result<AgentOutput, String> {
         let descriptor = self.descriptor();
         let system = format!(
-            r#"你是 KnowMotion 的 Asset Agent。你只规划可由运行时安全生成的本地视觉草案。
-按场景选择 diagram、illustration、chart 或 vector 形式，不要声称已经调用在线图片模型。
-使用 generateSceneAssets 工具提交素材草案，运行时会把它们生成为本地 SVG 并关联到场景。
+            r#"你是 KnowMotion 的 Asset Agent。按镜头内容选择最合适的表现方式：
+科学原理、数据、流程、物理结构和文字信息优先使用 vector、diagram、chart；
+只有人物、复杂实景或艺术性插画才选择 illustration，并说明为什么需要位图。
+当前 MVP 的 illustration 会生成可替换的本地 SVG 构图，不要声称已经调用在线图片模型。
+使用 generateSceneAssets 提交素材草案；必要时使用 patchScenes 只更新目标场景的 visualMode 与 visualPrompt。
 {}
 
 工具输入格式：
-{{"tool":"generateSceneAssets","input":{{"briefs":[{{"sceneId":"scene-id","title":"素材标题","prompt":"构图与视觉描述","style":"整体视觉风格","kind":"diagram"}}]}}}}"#,
+{{"tool":"generateSceneAssets","input":{{"briefs":[{{"sceneId":"scene-id","title":"素材标题","prompt":"构图与视觉描述","style":"整体视觉风格","kind":"diagram|chart|vector|illustration"}}]}}}}
+{{"tool":"patchScenes","input":{{"scenes":[{{"id":"scene-id","visualMode":"programmatic|image"}}]}}}}"#,
             common_output_contract(&descriptor)
         );
         run_structured(
@@ -292,14 +295,15 @@ impl Agent for AnimationAgent {
     ) -> Result<AgentOutput, String> {
         let descriptor = self.descriptor();
         let system = format!(
-            r##"你是 KnowMotion 的 Animation Agent。为每个场景生成结构化图层和入场时间。
-只使用 text 和 shape 图层。每场至少一个主标题图层；不得生成代码、CSS、脚本或 Remotion 组件。
-坐标和尺寸使用相对百分比；start/end 使用场景秒数。
-返回完整 scenes 数组并保留已有的 assetId、id、narration 与画面方向。
+            r##"你是 KnowMotion 的 Animation Agent。你只能通过 patchScenes 修改动画配置。
+如果用户指定了目标场景，只返回这些场景的 patch；如果目标场景为空，才为所有场景生成动画 patch。
+绝对不要改写 id、title、narration、description、visualPrompt、duration 或 assetId。
+你可以设置 layers、accent、transition、motionPreset。motionPreset 只能是 pushIn、pullOut、panLeft、panRight、none。
+只使用 text 和 shape 图层；禁止生成代码、CSS、脚本或 Remotion 组件。
 {}
 
 工具输入格式：
-{{"tool":"replaceScenes","input":{{"scenes":[{{"id":"scene-id","title":"...","narration":"...","description":"...","visualPrompt":"...","shotType":"...","transition":"...","duration":6,"accent":"#c8ff65","assetId":"optional","layers":[{{"id":"layer-id","type":"text","name":"主标题","content":"...","x":8,"y":64,"width":70,"height":18,"opacity":1,"start":0,"end":6,"color":"#ffffff","fontSize":42}}]}}]}}}}"##,
+{{"tool":"patchScenes","input":{{"scenes":[{{"id":"scene-id","accent":"#c8ff65","transition":"柔光淡入","motionPreset":"pushIn","layers":[{{"id":"layer-id","type":"text","name":"主标题","content":"...","x":8,"y":64,"width":70,"height":18,"opacity":1,"start":0,"end":6,"color":"#ffffff","fontSize":42}}]}}]}}}}"##,
             common_output_contract(&descriptor)
         );
         run_structured(

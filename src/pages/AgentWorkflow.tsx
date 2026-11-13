@@ -573,6 +573,25 @@ export default function AgentWorkflow() {
               执行修改
             </Button>
           </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {[
+              "把第二个场景增加镜头推进，旁白保持不变",
+              "让第三个场景更有趣，但不要改旁白",
+              "只调整最后一个场景的转场",
+            ].map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                className="rounded-full border border-[var(--border-soft)] bg-white/[.018] px-2.5 py-1 text-[7px] text-[var(--muted)] transition-colors hover:border-[rgba(200,255,101,.24)] hover:text-[var(--accent)]"
+                onClick={() => {
+                  setTargetAgent("animation");
+                  setInstruction(suggestion);
+                }}
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
         </section>
       </div>
 
