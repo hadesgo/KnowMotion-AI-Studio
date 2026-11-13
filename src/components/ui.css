@@ -67,7 +67,7 @@
   max-width: 460px;
   margin-top: 6px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -117,7 +117,7 @@
   max-width: 420px;
   margin: 7px 0 17px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.7;
 }
 
@@ -172,14 +172,14 @@
 }
 
 .toast strong {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .toast p {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -200,7 +200,7 @@ kbd {
   color: var(--subtext);
   background: #101721;
   font-family: inherit;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .spin {

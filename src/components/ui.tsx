@@ -29,11 +29,11 @@ export function Button({
   icon?: ReactNode;
 }) {
   const base =
-    "inline-flex shrink-0 cursor-pointer items-center justify-center gap-[7px] whitespace-nowrap rounded-[9px] border border-transparent font-medium transition-colors duration-150 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45";
+    "inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border border-transparent font-medium transition-colors duration-150 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45";
   const sizeClass = {
-    sm: "h-[31px] px-2.5 text-[10px]",
-    md: "h-[37px] px-[13px] text-[11px]",
-    lg: "h-11 px-[18px] text-xs",
+    sm: "h-9 px-3 text-[12px]",
+    md: "h-[42px] px-4 text-[13px]",
+    lg: "h-12 px-5 text-[14px]",
   }[size];
   const variantClass = {
     primary:
@@ -70,7 +70,7 @@ export function IconButton({
   const active = className.includes("is-active");
   return (
     <button
-      className={`icon-button inline-grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg border p-0 text-[var(--muted)] transition-colors duration-150 ${
+      className={`icon-button inline-grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-[10px] border p-0 text-[var(--muted)] transition-colors duration-150 ${
         active
           ? "border-[var(--border)] bg-[var(--raised)] text-[var(--text)]"
           : "border-transparent bg-transparent hover:border-[var(--border)] hover:bg-[var(--raised)] hover:text-[var(--text)]"
@@ -99,17 +99,17 @@ export function Field({
 }) {
   return (
     <label className={`field flex flex-col gap-[7px] ${className}`}>
-      <span className="text-[10px] font-medium text-[var(--subtext)]">
+      <span className="text-[12px] font-medium text-[var(--subtext)]">
         {label}
       </span>
       {children}
       {error ? (
-        <span className="flex items-center gap-1 text-[9px] leading-[1.45] text-[var(--danger)]">
+        <span className="flex items-center gap-1 text-[11px] leading-[1.5] text-[var(--danger)]">
           <AlertCircle size={13} />
           {error}
         </span>
       ) : hint ? (
-        <span className="flex items-center gap-1 text-[9px] leading-[1.45] text-[var(--faint)]">
+        <span className="flex items-center gap-1 text-[11px] leading-[1.5] text-[var(--faint)]">
           {hint}
         </span>
       ) : null}
@@ -123,7 +123,7 @@ export function TextInput({
 }: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
-      className={`input h-10 w-full rounded-lg border border-[var(--border)] bg-[#0d131b] px-3 text-[11px] text-[var(--text)] transition-colors placeholder:text-[#4d5968] hover:border-[#344255] focus:border-[rgba(200,255,101,.45)] focus:bg-[#0f1720] focus:outline-none ${className}`}
+      className={`input h-11 w-full rounded-[9px] border border-[var(--border)] bg-[#0d131b] px-3 text-[13px] text-[var(--text)] transition-colors placeholder:text-[#4d5968] hover:border-[#344255] focus:border-[rgba(200,255,101,.45)] focus:bg-[#0f1720] focus:outline-none ${className}`}
       {...props}
     />
   );
@@ -135,7 +135,7 @@ export function TextArea({
 }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea
-      className={`textarea min-h-[84px] w-full resize-y rounded-lg border border-[var(--border)] bg-[#0d131b] px-3 py-2.5 text-[11px] leading-[1.6] text-[var(--text)] transition-colors placeholder:text-[#4d5968] hover:border-[#344255] focus:border-[rgba(200,255,101,.45)] focus:bg-[#0f1720] focus:outline-none ${className}`}
+      className={`textarea min-h-[96px] w-full resize-y rounded-[9px] border border-[var(--border)] bg-[#0d131b] px-3 py-2.5 text-[13px] leading-[1.65] text-[var(--text)] transition-colors placeholder:text-[#4d5968] hover:border-[#344255] focus:border-[rgba(200,255,101,.45)] focus:bg-[#0f1720] focus:outline-none ${className}`}
       {...props}
     />
   );
@@ -149,7 +149,7 @@ export function Select({
   return (
     <span className="select-wrap relative block">
       <select
-        className={`select h-10 w-full appearance-none rounded-lg border border-[var(--border)] bg-[#0d131b] py-0 pl-[11px] pr-[34px] text-[11px] text-[var(--text)] transition-colors hover:border-[#344255] focus:border-[rgba(200,255,101,.45)] focus:bg-[#0f1720] focus:outline-none ${className}`}
+        className={`select h-11 w-full appearance-none rounded-[9px] border border-[var(--border)] bg-[#0d131b] py-0 pl-3 pr-9 text-[13px] text-[var(--text)] transition-colors hover:border-[#344255] focus:border-[rgba(200,255,101,.45)] focus:bg-[#0f1720] focus:outline-none ${className}`}
         {...props}
       >
         {children}
@@ -175,7 +175,7 @@ export function Segmented<T extends string>({
 }) {
   return (
     <div
-      className="segmented inline-flex gap-0.5 rounded-[9px] border border-[var(--border)] bg-[#0b1118] p-[3px]"
+      className="segmented inline-flex gap-1 rounded-[10px] border border-[var(--border)] bg-[#0b1118] p-1"
       role="group"
       aria-label={label}
     >
@@ -183,7 +183,7 @@ export function Segmented<T extends string>({
         <button
           key={option.value}
           type="button"
-          className={`inline-flex h-7 cursor-pointer items-center justify-center gap-[5px] rounded-md border-0 px-2.5 text-[9px] ${
+          className={`inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md border-0 px-3 text-[12px] ${
             value === option.value
               ? "bg-[var(--raised-2)] text-[var(--text)] shadow-[0_2px_8px_rgba(0,0,0,.22)]"
               : "bg-transparent text-[var(--muted)] hover:text-[var(--subtext)]"
@@ -222,7 +222,7 @@ export function Pill({
   };
   return (
     <span
-      className={`pill inline-flex min-h-[21px] items-center gap-[5px] whitespace-nowrap rounded-full border px-2 text-[8px] font-semibold tracking-[.4px] ${tones[tone]}`}
+      className={`pill inline-flex min-h-[24px] items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 text-[10px] font-semibold tracking-[.2px] ${tones[tone]}`}
     >
       {dot && <span className="h-[5px] w-[5px] rounded-full bg-current" />}
       {children}

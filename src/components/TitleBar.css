@@ -41,7 +41,7 @@
 }
 
 .brand__type small {
-  @apply mt-[5px] font-bold text-[var(--accent)] tracking-[2.4px];
+  @apply mt-[5px] text-[10px] font-bold text-[var(--accent)] tracking-[2px];
 }
 
 .window-titlebar {
@@ -62,7 +62,7 @@
 }
 
 .brand.titlebar-brand .brand__type small {
-  @apply mt-1 text-[7px] tracking-[2px];
+  @apply mt-1 text-[10px] tracking-[1.6px];
 }
 
 .titlebar-separator {
@@ -70,7 +70,7 @@
 }
 
 .titlebar-context {
-  @apply flex min-w-0 flex-1 items-center gap-2 text-[9px] font-semibold tracking-[.8px] text-[var(--faint)];
+  @apply flex min-w-0 flex-1 items-center gap-2 text-[11px] font-semibold tracking-[.6px] text-[var(--faint)];
 }
 
 .titlebar-context i {
@@ -78,7 +78,7 @@
 }
 
 .titlebar-context strong {
-  @apply max-w-[360px] overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-medium tracking-normal text-[var(--subtext)];
+  @apply max-w-[360px] overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-medium tracking-normal text-[var(--subtext)];
 }
 
 .titlebar-actions {

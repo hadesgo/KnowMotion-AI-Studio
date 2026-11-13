@@ -1,8 +1,9 @@
 @reference "../styles.css";
 
-@media (max-width: 1180px) {
+@media (max-width: 1280px) {
   .create-layout {
-    grid-template-columns: minmax(560px, 1.5fr) minmax(290px, 0.7fr);
+    grid-template-columns: minmax(0, 1fr) 270px;
+    gap: 14px;
   }
 
   .type-grid {
@@ -36,7 +37,7 @@
   border-radius: 7px;
   color: var(--accent);
   background: var(--accent-soft);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 650;
 }
 
@@ -52,7 +53,7 @@
 .form-section__head p {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .form-section .field + .field {
@@ -106,7 +107,7 @@
 
 .type-grid strong {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 550;
 }
 
@@ -115,7 +116,7 @@
   margin-top: 6px;
   padding-right: 13px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -174,18 +175,18 @@
 }
 
 .ratio-grid strong {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 550;
 }
 
 .ratio-grid small {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .ratio-grid em {
   color: var(--faint);
-  font-size: 8px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -200,7 +201,7 @@
   display: flex;
   justify-content: space-between;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .create-form-footer {
@@ -306,7 +307,7 @@
   align-items: center;
   gap: 6px;
   color: var(--accent);
-  font-size: 7px;
+  font-size: 13px;
   font-weight: 650;
   letter-spacing: 1px;
 }
@@ -325,7 +326,7 @@
   position: relative;
   margin-top: 6px;
   color: #98aaa8;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .project-cover__line {
@@ -350,7 +351,7 @@
   align-items: center;
   justify-content: space-between;
   margin-bottom: 7px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 550;
 }
 
@@ -372,13 +373,13 @@
   align-items: center;
   gap: 6px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .blueprint-row strong {
   max-width: 190px;
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
   text-align: right;
 }
@@ -397,14 +398,14 @@
 
 .privacy-note strong {
   color: var(--subtext);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 550;
 }
 
 .privacy-note p {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.5;
 }
 

@@ -2,13 +2,13 @@
 
 @media (max-width: 1400px) {
   .script-layout {
-    grid-template-columns: 210px minmax(420px, 1fr) 220px;
+    grid-template-columns: 235px minmax(390px, 1fr) 245px;
   }
 }
 
 @media (max-width: 1180px) {
   .script-layout {
-    grid-template-columns: 190px minmax(390px, 1fr);
+    grid-template-columns: 210px minmax(360px, 1fr);
   }
 
   .script-inspector {
@@ -18,7 +18,7 @@
 
 /* Script */
 .script-layout {
-  @apply grid min-h-[calc(100vh-180px)] grid-cols-[230px_minmax(440px,1fr)_240px] items-start gap-3;
+  @apply grid min-h-[calc(100vh-180px)] grid-cols-[235px_minmax(440px,1fr)_260px] items-start gap-4;
 }
 
 .script-scenes,
@@ -74,7 +74,7 @@
 .script-scene-list__index {
   padding-top: 1px;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .script-scene-list button > span:nth-child(2) {
@@ -87,7 +87,7 @@
 .script-scene-list strong {
   overflow: hidden;
   color: var(--subtext);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 520;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -96,7 +96,7 @@
 .script-scene-list small {
   overflow: hidden;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -104,7 +104,7 @@
 
 .script-scene-list em {
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
   font-style: normal;
 }
 
@@ -118,11 +118,11 @@
 
 .script-scenes footer span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .script-scenes footer strong {
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 520;
 }
 
@@ -182,7 +182,7 @@
   display: flex;
   justify-content: space-between;
   color: var(--faint);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 550;
 }
 
@@ -220,7 +220,7 @@
   gap: 4px;
   margin-left: auto;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .script-notes-grid {
@@ -245,7 +245,7 @@
   align-items: center;
   gap: 5px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 550;
 }
 
@@ -255,7 +255,7 @@
   outline: 0;
   color: var(--subtext);
   background: transparent;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.65;
   resize: vertical;
 }
@@ -288,11 +288,11 @@
 
 .scene-health span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .scene-health strong {
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 520;
 }
 
@@ -311,7 +311,7 @@
 
 .compact-field > span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .compact-field select {
@@ -337,12 +337,12 @@
   outline: 0;
   color: var(--text);
   background: transparent;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .number-field span {
   color: var(--faint);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .script-tip {
@@ -358,7 +358,7 @@
 
 .script-tip p {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.55;
 }
 

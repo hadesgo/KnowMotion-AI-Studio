@@ -2,11 +2,11 @@
 
 @media (max-width: 1400px) {
   .render-layout {
-    grid-template-columns: 280px minmax(400px, 1fr) 225px;
+    grid-template-columns: 270px minmax(390px, 1fr) 250px;
   }
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1220px) {
   .render-layout {
     grid-template-columns: 250px minmax(390px, 1fr);
   }
@@ -18,7 +18,7 @@
 
 /* Render */
 .render-layout {
-  @apply grid grid-cols-[265px_minmax(470px,1fr)_255px] items-start gap-3;
+  @apply grid grid-cols-[265px_minmax(470px,1fr)_265px] items-start gap-4;
 }
 
 .render-settings,
@@ -52,12 +52,12 @@
 
 .render-setting > span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .render-setting > strong {
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -79,8 +79,8 @@
 }
 
 .render-setting--stack .select {
-  height: 34px;
-  font-size: 8px;
+  height: 40px;
+  font-size: 13px;
 }
 
 .desktop-render-card {
@@ -107,14 +107,14 @@
 
 .desktop-render-card strong {
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 550;
 }
 
 .desktop-render-card p {
   margin-top: 2px;
   color: var(--muted);
-  font-size: 7px;
+  font-size: 13px;
   line-height: 1.45;
 }
 
@@ -135,12 +135,12 @@
 
 .render-estimate span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .render-estimate strong {
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -233,7 +233,7 @@
   max-width: 260px;
   overflow: hidden;
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 550;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -241,7 +241,7 @@
 
 .render-poster__overlay small {
   color: var(--faint);
-  font-size: 6px;
+  font-size: 13px;
 }
 
 .render-progress-overlay {
@@ -267,7 +267,7 @@
 
 .render-progress-overlay span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .video-ready-badge {
@@ -281,7 +281,7 @@
   border-radius: 99px;
   color: #08100a;
   background: var(--accent);
-  font-size: 7px;
+  font-size: 13px;
   font-weight: 650;
 }
 
@@ -294,7 +294,7 @@
   justify-content: space-between;
   margin-top: 5px;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .render-actions {
@@ -356,13 +356,13 @@
 
 .render-check-grid strong {
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
 }
 
 .render-check-grid small {
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
   line-height: 1.4;
 }
 
@@ -401,7 +401,7 @@
 .render-log__item span {
   color: var(--faint);
   font-family: Consolas, monospace;
-  font-size: 6px;
+  font-size: 13px;
 }
 
 .render-log__item i {
@@ -422,7 +422,7 @@
 
 .render-log__item p {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 13px;
   line-height: 1.45;
 }
 
@@ -444,12 +444,12 @@
 
 .render-runtime span {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .render-runtime strong {
   color: var(--success);
-  font-size: 6px;
+  font-size: 13px;
   font-weight: 650;
   letter-spacing: 0.6px;
 }
@@ -487,13 +487,13 @@
 }
 
 .render-history strong {
-  font-size: 7px;
+  font-size: 13px;
   font-weight: 500;
 }
 
 .render-history small {
   color: var(--faint);
-  font-size: 6px;
+  font-size: 13px;
 }
 
 .render-history > div > svg {
@@ -503,7 +503,7 @@
 .render-history__empty {
   margin-top: 9px;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .render-security {
@@ -519,7 +519,7 @@
 
 .render-security p {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 13px;
   line-height: 1.5;
 }
 

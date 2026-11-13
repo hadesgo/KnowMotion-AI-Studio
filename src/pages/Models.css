@@ -27,14 +27,14 @@
 }
 
 .model-security-banner strong {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 550;
 }
 
 .model-security-banner p {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -67,7 +67,7 @@
   align-self: end;
   padding-bottom: 3px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .provider-section,
@@ -129,7 +129,7 @@
 .provider-card header p {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .switch {
@@ -186,7 +186,7 @@
   display: block;
   margin-bottom: 4px;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
   font-weight: 650;
   letter-spacing: 1px;
 }
@@ -196,7 +196,7 @@
   display: block;
   overflow: hidden;
   color: var(--subtext);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -227,7 +227,7 @@
   align-items: center;
   gap: 5px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .provider-health--healthy {
@@ -278,14 +278,14 @@
 .provider-add-card strong {
   margin-top: 12px;
   color: var(--subtext);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 550;
 }
 
 .provider-add-card small {
   max-width: 230px;
   margin-top: 5px;
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -326,13 +326,13 @@
 }
 
 .routing-row strong {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 520;
 }
 
 .routing-row small {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .routing-row .select {
@@ -365,7 +365,7 @@
   border-radius: 7px;
   color: var(--muted);
   background: #0c1219;
-  font-size: 9px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -383,6 +383,6 @@
   border-radius: 7px;
   color: var(--danger);
   background: var(--danger-soft);
-  font-size: 9px;
+  font-size: 12px;
 }
 

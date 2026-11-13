@@ -43,7 +43,7 @@
   --danger: #ff6b7d;
   --danger-soft: rgba(255, 107, 125, 0.12);
   --success: #83e7b0;
-  --sidebar-width: 236px;
+  --sidebar-width: 252px;
   --titlebar-height: 44px;
   --topbar-height: var(--titlebar-height);
   --radius: 12px;
@@ -72,6 +72,8 @@ body {
     radial-gradient(circle at 80% -20%, rgba(57, 112, 90, 0.13), transparent 30%),
     var(--bg);
   color: var(--text);
+  font-size: 14px;
+  line-height: 1.55;
   overflow: hidden;
 }
 
@@ -111,8 +113,8 @@ button:disabled {
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -136,6 +138,16 @@ h2,
 h3,
 p {
   margin: 0;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
 }
 
 a {

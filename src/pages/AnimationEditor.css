@@ -2,20 +2,20 @@
 
 @media (max-width: 1400px) {
   .animation-layout {
-    grid-template-columns: 190px minmax(470px, 1fr) 225px;
+    grid-template-columns: 190px minmax(440px, 1fr) 235px;
   }
 }
 
 @media (max-width: 1180px) {
   .animation-layout {
-    grid-template-columns: 180px minmax(400px, 1fr) 215px;
+    grid-template-columns: 165px minmax(340px, 1fr) 215px;
   }
 }
 
 /* Animation editor */
 .animation-layout {
   @apply grid min-h-[calc(100vh-180px)] overflow-hidden rounded-[14px] border border-[var(--border-soft)] bg-[var(--panel)];
-  grid-template-columns: 205px minmax(500px, 1fr) 245px;
+  grid-template-columns: 210px minmax(480px, 1fr) 260px;
 }
 
 .animation-left {
@@ -34,7 +34,7 @@
 
 .layer-scene-list header > span:last-child {
   color: var(--faint);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .layer-scene-list > button {
@@ -63,7 +63,7 @@
 
 .layer-scene-list > button > span {
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .layer-scene-list > button > div {
@@ -76,7 +76,7 @@
 
 .layer-scene-list strong {
   overflow: hidden;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -84,7 +84,7 @@
 
 .layer-scene-list small {
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .layers-panel header > div:last-child {
@@ -98,7 +98,7 @@
 
 .layers-panel header h3 {
   margin-top: 2px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 550;
 }
 
@@ -152,7 +152,7 @@
 .layer-list strong {
   overflow: hidden;
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -161,7 +161,7 @@
 .layer-list small {
   overflow: hidden;
   color: var(--faint);
-  font-size: 6px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -177,7 +177,7 @@
   padding: 10px;
   border-top: 1px solid var(--border-soft);
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .layers-panel footer span,
@@ -191,7 +191,7 @@
   border: 0;
   color: var(--accent);
   background: none;
-  font-size: 7px;
+  font-size: 13px;
   cursor: pointer;
 }
 
@@ -229,7 +229,7 @@
   align-items: center;
   gap: 5px;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
   letter-spacing: 0.8px;
 }
 
@@ -263,13 +263,13 @@
   align-items: baseline;
   gap: 3px;
   color: var(--subtext);
-  font-size: 9px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .timecode small {
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .timecode i {
@@ -286,7 +286,7 @@
   border-radius: 6px;
   color: var(--muted);
   background: #111821;
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .zoom-control button {
@@ -393,7 +393,7 @@
 .scene-transport__info strong {
   overflow: hidden;
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -443,7 +443,7 @@
 
 .mini-timeline__time {
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
   text-align: right;
 }
 
@@ -507,7 +507,7 @@
 .property-range em {
   width: 36px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   font-style: normal;
   text-align: right;
 }
@@ -534,7 +534,7 @@
 .color-row code {
   color: var(--muted);
   font-family: Consolas, monospace;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .property-grid {
@@ -548,7 +548,7 @@
   flex-direction: column;
   gap: 4px;
   color: var(--muted);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .property-grid input {
@@ -580,7 +580,7 @@
 
 .remotion-note p {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -588,7 +588,7 @@
   display: block;
   margin-bottom: 2px;
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 550;
 }
 
@@ -605,7 +605,7 @@
 
 .property-empty p {
   max-width: 150px;
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.55;
 }
 

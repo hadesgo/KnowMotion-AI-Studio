@@ -24,11 +24,11 @@
 
 @media (max-width: 1180px) {
   .dashboard-hero {
-    grid-template-columns: minmax(420px, 1.15fr) minmax(315px, 0.85fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .dashboard-hero__copy {
-    padding: 32px 20px 28px 28px;
+    padding: 34px 28px 30px;
   }
 
   .dashboard-hero h2 {
@@ -36,7 +36,7 @@
   }
 
   .dashboard-hero__visual {
-    min-height: 380px;
+    display: none;
   }
 
   .hero-visual__frame {
@@ -57,7 +57,7 @@
   }
 
   .dashboard-grid {
-    grid-template-columns: minmax(0, 1fr) 255px;
+    grid-template-columns: minmax(0, 1fr) 280px;
   }
 }
 
@@ -105,7 +105,7 @@
   align-items: center;
   gap: 7px;
   color: var(--accent);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 1.7px;
 }
@@ -127,7 +127,7 @@
   max-width: 530px;
   margin-top: 16px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.7;
 }
 
@@ -184,7 +184,7 @@
   gap: 7px;
   margin-top: 11px;
   color: var(--faint);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .hero-starters button {
@@ -193,7 +193,7 @@
   border-radius: 99px;
   color: var(--muted);
   background: rgba(255, 255, 255, 0.02);
-  font-size: 8px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -239,7 +239,7 @@
   padding: 0 14px;
   border-bottom: 1px solid #1f2934;
   color: #6f7e8e;
-  font-size: 7px;
+  font-size: 13px;
   font-weight: 650;
   letter-spacing: 1px;
 }
@@ -459,14 +459,14 @@
 
 .hero-float-card small {
   color: var(--faint);
-  font-size: 6px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.9px;
 }
 
 .hero-float-card strong {
   color: var(--subtext);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 550;
 }
 
@@ -480,16 +480,16 @@
 .dashboard-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-top: 12px;
+  gap: 12px;
+  margin-top: 14px;
 }
 
 .stat-card {
   display: flex;
-  height: 78px;
+  min-height: 88px;
   align-items: center;
   gap: 12px;
-  padding: 0 15px;
+  padding: 12px 16px;
   border: 1px solid var(--border-soft);
   border-radius: 12px;
   color: inherit;
@@ -522,7 +522,7 @@
 
 .stat-card > div span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .stat-card > small {
@@ -531,7 +531,7 @@
   gap: 4px;
   margin-left: auto;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .stat-card--action {
@@ -550,9 +550,9 @@
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 286px;
-  gap: 18px;
-  margin-top: 28px;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px;
+  margin-top: 30px;
 }
 
 .section-heading {
@@ -572,7 +572,7 @@
 
 .section-heading > p {
   color: var(--faint);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .section-heading__tools {
@@ -599,7 +599,7 @@
   outline: 0;
   color: var(--text);
   background: transparent;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .project-grid {
@@ -677,7 +677,7 @@
   align-items: center;
   gap: 6px;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .project-card h3 {
@@ -718,7 +718,7 @@
   border-radius: 6px;
   color: var(--subtext);
   background: none;
-  font-size: 9px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -742,7 +742,7 @@
   border-top: 1px solid var(--border-soft);
   color: var(--faint);
   background: none;
-  font-size: 8px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -759,12 +759,12 @@
 .dashboard-side {
   display: flex;
   flex-direction: column;
-  gap: 11px;
+  gap: 13px;
 }
 
 .focus-card,
 .capability-card {
-  padding: 17px;
+  padding: 18px;
   border: 1px solid var(--border-soft);
   border-radius: 14px;
   background: var(--panel);
@@ -787,7 +787,7 @@
   margin-top: 5px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -798,7 +798,7 @@
   justify-content: space-between;
   margin: 18px 0 8px;
   color: var(--accent);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .focus-card__progress > span:first-child {
@@ -809,13 +809,13 @@
 
 .focus-card__progress strong {
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
 }
 
 .focus-card__progress small {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .focus-card__button {
@@ -853,12 +853,12 @@
 
 .capability-list span {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .capability-list strong {
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -871,7 +871,7 @@
   border: 0;
   color: var(--accent);
   background: none;
-  font-size: 8px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -907,12 +907,12 @@
 }
 
 .idea-card strong {
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 550;
 }
 
 .idea-card small {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 13px;
 }
 

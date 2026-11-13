@@ -2,13 +2,13 @@
 
 @media (max-width: 1180px) {
   .timeline-workspace {
-    grid-template-columns: minmax(0, 1fr) 240px;
+    grid-template-columns: minmax(0, 1fr) 270px;
   }
 }
 
 /* Timeline */
 .timeline-workspace {
-  @apply grid grid-cols-[minmax(0,1fr)_250px] items-start gap-3;
+  @apply grid grid-cols-[minmax(0,1fr)_280px] items-start gap-4;
 }
 
 .timeline-preview {
@@ -44,7 +44,7 @@
   max-width: 580px;
   margin-top: 9px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.7;
 }
 
@@ -54,7 +54,7 @@
   gap: 12px;
   margin: 16px 0;
   color: var(--faint);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .timeline-editor-panel {
@@ -85,7 +85,7 @@
   align-items: center;
   gap: 5px;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .timeline-zoom input {
@@ -116,7 +116,7 @@
   padding: 0 10px;
   border-right: 1px solid var(--border-soft);
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .ruler-line {
@@ -144,7 +144,7 @@
   top: 6px;
   left: 4px;
   color: var(--faint);
-  font-size: 6px;
+  font-size: 13px;
   font-style: normal;
 }
 
@@ -180,13 +180,13 @@
 
 .timeline-track .track-label strong {
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
 }
 
 .timeline-track .track-label small {
   color: var(--faint);
-  font-size: 6px;
+  font-size: 13px;
 }
 
 .timeline-track .track-label button {
@@ -243,7 +243,7 @@
   color: color-mix(in srgb, var(--clip-color) 85%, white);
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--clip-color) 22%, transparent), color-mix(in srgb, var(--clip-color) 8%, #0f161d));
-  font-size: 7px;
+  font-size: 13px;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -337,13 +337,13 @@
 
 .clip-summary span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .clip-summary strong {
   max-width: 130px;
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
   text-align: right;
 }
@@ -360,6 +360,6 @@
   gap: 6px;
   margin-top: 7px;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 

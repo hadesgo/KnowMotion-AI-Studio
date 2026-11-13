@@ -188,7 +188,7 @@
 }
 
 .scene-preview--empty {
-  @apply grid min-h-[120px] place-items-center text-[8px] tracking-[1px] text-[var(--faint)];
+  @apply grid min-h-[120px] place-items-center text-[11px] tracking-[.8px] text-[var(--faint)];
 }
 
 .project-missing {
@@ -219,6 +219,6 @@
 .project-missing p {
   margin: 7px 0 16px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 

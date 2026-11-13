@@ -589,7 +589,7 @@ export default function AgentWorkflow() {
               <button
                 key={suggestion}
                 type="button"
-                className="rounded-full border border-[var(--border-soft)] bg-white/[.018] px-2.5 py-1 text-[7px] text-[var(--muted)] transition-colors hover:border-[rgba(200,255,101,.24)] hover:text-[var(--accent)]"
+                className="rounded-full border border-[var(--border-soft)] bg-white/[.018] px-2.5 py-1 text-[11px] text-[var(--muted)] transition-colors hover:border-[rgba(200,255,101,.24)] hover:text-[var(--accent)]"
                 onClick={() => {
                   setTargetAgent("animation");
                   setInstruction(suggestion);

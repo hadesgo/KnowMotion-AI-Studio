@@ -2,7 +2,7 @@
 
 @media (max-width: 1180px) {
   .planning-layout {
-    grid-template-columns: minmax(0, 1fr) 275px;
+    grid-template-columns: minmax(0, 1fr) 280px;
   }
 }
 
@@ -24,7 +24,7 @@
 .planning-context p {
   margin-top: 4px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .planning-context__metrics {
@@ -35,7 +35,7 @@
   display: flex;
   flex-direction: column;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   text-align: right;
 }
 
@@ -47,7 +47,7 @@
 }
 
 .planning-layout {
-  @apply mt-3.5 grid grid-cols-[minmax(0,1fr)_310px] items-start gap-[15px];
+  @apply mt-4 grid grid-cols-[minmax(0,1fr)_320px] items-start gap-4;
 }
 
 .outline-editor {
@@ -62,7 +62,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 15px;
-  padding: 16px 18px;
+  padding: 17px 20px;
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -78,16 +78,16 @@
 }
 
 .toolbar-group .select-wrap {
-  width: 118px;
+  width: 132px;
 }
 
 .toolbar-group .select {
-  height: 31px;
-  font-size: 9px;
+  height: 40px;
+  font-size: 12px;
 }
 
 .outline-list {
-  padding: 0 18px;
+  padding: 0 20px;
 }
 
 .outline-item {
@@ -113,7 +113,7 @@
   border-radius: 50%;
   color: var(--accent);
   background: var(--accent-soft);
-  font-size: 7px;
+  font-size: 13px;
   font-weight: 650;
 }
 
@@ -141,7 +141,7 @@
   outline: 0;
   color: var(--muted);
   background: transparent;
-  font-size: 7px;
+  font-size: 13px;
   font-weight: 650;
   letter-spacing: 1px;
 }
@@ -151,7 +151,7 @@
   align-items: center;
   gap: 3px;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .outline-item__meta label input {
@@ -161,7 +161,7 @@
   outline: 0;
   color: var(--muted);
   background: transparent;
-  font-size: 8px;
+  font-size: 12px;
   text-align: right;
 }
 
@@ -192,7 +192,7 @@
   outline: 0;
   color: var(--muted);
   background: transparent;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.65;
   resize: none;
 }
@@ -219,7 +219,7 @@
 
 .outline-footer > div > span {
   color: var(--faint);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .outline-footer > div > span strong {
@@ -261,7 +261,7 @@
   max-width: 390px;
   margin: 7px 0 15px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.65;
 }
 
@@ -318,7 +318,7 @@
 
 .strategy-list > button > span:first-child {
   color: var(--faint);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .strategy-list > button > div {
@@ -329,13 +329,13 @@
 
 .strategy-list strong {
   color: var(--subtext);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 550;
 }
 
 .strategy-list small {
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
   line-height: 1.4;
 }
 
@@ -389,7 +389,7 @@
 
 .source-list strong {
   overflow: hidden;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -398,7 +398,7 @@
 .source-list small {
   overflow: hidden;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -428,7 +428,7 @@
 }
 
 .research-empty p {
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -442,12 +442,12 @@
 }
 
 .source-form .input {
-  height: 33px;
-  font-size: 8px;
+  height: 42px;
+  font-size: 13px;
 }
 
 .source-form .field__label {
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .source-form .button {
@@ -467,7 +467,7 @@
 
 .planning-note p {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.6;
 }
 
@@ -475,7 +475,7 @@
   display: block;
   margin-bottom: 3px;
   color: var(--subtext);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 550;
 }
 

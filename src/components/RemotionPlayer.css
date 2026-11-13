@@ -29,6 +29,6 @@
 .remotion-player__transport > div:first-child > span {
   margin-left: 6px;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }

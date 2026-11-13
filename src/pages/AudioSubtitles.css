@@ -2,7 +2,7 @@
 
 @media (max-width: 1400px) {
   .audio-layout {
-    grid-template-columns: 215px minmax(420px, 1fr) 235px;
+    grid-template-columns: 225px minmax(390px, 1fr) 245px;
   }
 }
 
@@ -18,7 +18,7 @@
 
 /* Audio & subtitles */
 .audio-layout {
-  @apply grid grid-cols-[235px_minmax(460px,1fr)_260px] items-start gap-3;
+  @apply grid grid-cols-[235px_minmax(460px,1fr)_270px] items-start gap-4;
 }
 
 .narration-list,
@@ -81,7 +81,7 @@
 
 .narration-list__items button > span {
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .narration-list__items button > div {
@@ -94,7 +94,7 @@
 .narration-list__items strong {
   overflow: hidden;
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -102,7 +102,7 @@
 
 .narration-list__items small {
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .voice-controls {
@@ -116,7 +116,7 @@
 
 .voice-controls .select {
   height: 34px;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .range-field {
@@ -131,12 +131,12 @@
   align-items: center;
   justify-content: space-between;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .range-field strong {
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -187,7 +187,7 @@
   display: flex;
   justify-content: space-between;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .waveform-panel__top span {
@@ -240,7 +240,7 @@
   display: flex;
   justify-content: space-between;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .narration-copy {
@@ -264,7 +264,7 @@
   outline: 0;
   color: var(--subtext);
   background: transparent;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.7;
   resize: vertical;
 }
@@ -310,13 +310,13 @@
 .subtitle-table__head {
   color: var(--faint);
   background: #0b1118;
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .subtitle-table__row {
   border-top: 1px solid var(--border-soft);
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
   cursor: pointer;
 }
 
@@ -333,7 +333,7 @@
   border-radius: 5px;
   color: var(--subtext);
   background: transparent;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .subtitle-table__row input:focus {
@@ -362,7 +362,7 @@
 
 .subtitle-empty p {
   max-width: 360px;
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -418,14 +418,14 @@
 .audio-upload strong {
   margin-top: 7px;
   color: var(--subtext);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 550;
 }
 
 .audio-upload p {
   margin-top: 4px;
   color: var(--muted);
-  font-size: 7px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -440,7 +440,7 @@
   border-radius: 7px;
   color: var(--subtext);
   background: var(--raised);
-  font-size: 8px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -463,6 +463,6 @@
 
 .audio-check p {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 

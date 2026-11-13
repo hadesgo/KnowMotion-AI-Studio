@@ -32,7 +32,7 @@
 .sidebar__label,
 .eyebrow {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 1.5px;
   text-transform: uppercase;
@@ -49,7 +49,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 38px;
+  min-height: 42px;
   padding: 0 10px;
   border: 1px solid transparent;
   border-radius: 9px;
@@ -116,7 +116,7 @@
   align-items: center;
   gap: 9px;
   margin-bottom: 8px;
-  padding: 9px;
+  padding: 10px;
   border: 1px solid var(--border-soft);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.018);
@@ -144,7 +144,7 @@
 .project-mini strong {
   overflow: hidden;
   color: var(--text);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -152,7 +152,7 @@
 
 .project-mini small {
   color: var(--faint);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .workflow-nav {
@@ -165,14 +165,14 @@
 
 .workflow-nav a {
   display: grid;
-  grid-template-columns: 22px 18px 1fr 14px;
+  grid-template-columns: 24px 18px minmax(0, 1fr) 14px;
   align-items: center;
-  gap: 7px;
-  min-height: 34px;
-  padding: 0 8px;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 9px;
   border-radius: 8px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
   transition: 140ms ease;
 }
 
@@ -192,13 +192,13 @@
 
 .workflow-nav__index {
   display: grid;
-  width: 19px;
-  height: 19px;
+  width: 22px;
+  height: 22px;
   place-items: center;
   border: 1px solid var(--border);
   border-radius: 50%;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .workflow-nav__index--done {
@@ -230,7 +230,7 @@
 .sidebar__aside p {
   margin-top: 8px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.65;
 }
 
@@ -243,14 +243,14 @@
 
 .sidebar__aside small {
   color: var(--faint);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .sidebar__footer {
   display: flex;
   flex-direction: column;
   margin-top: auto;
-  padding: 12px;
+  padding: 12px 12px 14px;
   border-top: 1px solid var(--border-soft);
 }
 
@@ -280,13 +280,13 @@
 }
 
 .local-status strong {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
 }
 
 .local-status small {
   color: var(--faint);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .app-main {
@@ -307,7 +307,7 @@
 }
 
 .page-shell::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
 }
 
 .page-shell::-webkit-scrollbar-track {
@@ -325,7 +325,7 @@
 
 .page-heading {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
   margin-bottom: 25px;
@@ -347,8 +347,8 @@
   max-width: 670px;
   margin-top: 9px;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.65;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
 .page-heading__actions {
@@ -356,5 +356,7 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 

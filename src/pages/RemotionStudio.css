@@ -32,13 +32,13 @@
   padding-bottom: 2px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 7px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .remotion-layout {
-  @apply grid grid-cols-[218px_minmax(470px,1fr)_270px] items-start gap-[11px];
+  @apply grid grid-cols-[220px_minmax(470px,1fr)_280px] items-start gap-3;
 }
 
 .remotion-scene-list,
@@ -103,7 +103,7 @@
 
 .remotion-scene-list__index {
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .remotion-scene-list > button > div {
@@ -115,7 +115,7 @@
 
 .remotion-scene-style {
   color: var(--accent);
-  font-size: 6px;
+  font-size: 13px;
   font-weight: 650;
   letter-spacing: 0.9px;
   text-transform: uppercase;
@@ -124,7 +124,7 @@
 .remotion-scene-list strong {
   overflow: hidden;
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -132,7 +132,7 @@
 
 .remotion-scene-list small {
   color: var(--faint);
-  font-size: 6px;
+  font-size: 13px;
 }
 
 .remotion-stage-panel {
@@ -154,7 +154,7 @@
   align-items: center;
   gap: 10px;
   color: var(--muted);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .live-indicator {
@@ -162,7 +162,7 @@
   align-items: center;
   gap: 4px;
   color: var(--accent);
-  font-size: 6px;
+  font-size: 13px;
   font-weight: 650;
   letter-spacing: 0.8px;
 }
@@ -198,7 +198,7 @@
   padding: 0 12px;
   border-top: 1px solid var(--border-soft);
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .remotion-stage-footer span {
@@ -240,13 +240,13 @@
 
 .remotion-inspector__meta span {
   color: var(--faint);
-  font-size: 6px;
+  font-size: 13px;
 }
 
 .remotion-inspector__meta strong {
   margin-top: 3px;
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -298,7 +298,7 @@
 .remotion-layer-stack strong {
   overflow: hidden;
   color: var(--subtext);
-  font-size: 7px;
+  font-size: 13px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -306,7 +306,7 @@
 
 .remotion-layer-stack small {
   color: var(--faint);
-  font-size: 6px;
+  font-size: 13px;
 }
 
 .schema-result {
@@ -327,20 +327,20 @@
 .schema-result strong {
   flex: 1;
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 550;
 }
 
 .schema-result span {
   color: var(--success);
-  font-size: 6px;
+  font-size: 13px;
   font-weight: 650;
 }
 
 .schema-result p {
   margin-top: 6px;
   color: var(--danger);
-  font-size: 7px;
+  font-size: 13px;
   line-height: 1.45;
 }
 
@@ -352,7 +352,7 @@
   display: block;
   margin-top: 7px;
   color: var(--faint);
-  font-size: 6px;
+  font-size: 13px;
 }
 
 .remotion-lower-grid {
@@ -390,7 +390,7 @@
 .render-handoff p {
   margin-top: 5px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -410,7 +410,7 @@
   color: var(--accent);
   background: #080e13;
   font-family: Consolas, monospace;
-  font-size: 7px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -436,14 +436,14 @@
 
 .render-handoff__result strong {
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 550;
 }
 
 .render-handoff__result small {
   overflow: hidden;
   color: var(--muted);
-  font-size: 6px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -472,13 +472,13 @@
 
 .remotion-feature-list strong {
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
 }
 
 .remotion-feature-list small {
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
 }
 
 .remotion-example-card h2 {
@@ -490,7 +490,7 @@
 .remotion-example-card > p {
   margin-top: 6px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -509,7 +509,7 @@
   border: 1px solid var(--border-soft);
   border-radius: 5px;
   color: var(--muted);
-  font-size: 6px;
+  font-size: 13px;
 }
 
 .remotion-example-card > div i {
@@ -524,7 +524,7 @@
   gap: 5px;
   margin-top: 11px;
   color: var(--accent);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 @media (max-width: 1300px) {
@@ -533,7 +533,7 @@
   }
 
   .remotion-layout {
-    grid-template-columns: 200px minmax(440px, 1fr) 250px;
+    grid-template-columns: 200px minmax(425px, 1fr) 250px;
   }
 
   .remotion-lower-grid {
@@ -542,5 +542,15 @@
 
   .remotion-example-card {
     grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1180px) {
+  .remotion-layout {
+    grid-template-columns: minmax(0, 1fr) 240px;
+  }
+
+  .remotion-scene-list {
+    display: none;
   }
 }

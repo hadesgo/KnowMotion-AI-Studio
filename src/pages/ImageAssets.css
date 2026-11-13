@@ -2,13 +2,13 @@
 
 @media (max-width: 1400px) {
   .assets-layout {
-    grid-template-columns: 280px minmax(400px, 1fr) 225px;
+    grid-template-columns: 280px minmax(390px, 1fr) 250px;
   }
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1220px) {
   .assets-layout {
-    grid-template-columns: 265px minmax(360px, 1fr);
+    grid-template-columns: 260px minmax(350px, 1fr);
   }
 
   .asset-inspector {
@@ -18,7 +18,7 @@
 
 /* Assets */
 .assets-layout {
-  @apply grid grid-cols-[310px_minmax(430px,1fr)_245px] items-start gap-[13px];
+  @apply grid grid-cols-[310px_minmax(430px,1fr)_260px] items-start gap-[14px];
 }
 
 .asset-controls,
@@ -46,7 +46,7 @@
 .asset-scene-summary p {
   margin-top: 7px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -56,7 +56,7 @@
 
 .asset-controls .textarea {
   min-height: 110px;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .style-token-grid {
@@ -75,7 +75,7 @@
   border-radius: 7px;
   color: var(--muted);
   background: #0d131b;
-  font-size: 8px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -95,7 +95,7 @@
 
 .asset-setting-row > span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .generate-button {
@@ -113,7 +113,7 @@
   gap: 5px;
   margin-top: 10px;
   color: var(--faint);
-  font-size: 7px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -194,7 +194,7 @@
   border-radius: 99px;
   color: #09110a;
   background: var(--accent);
-  font-size: 7px;
+  font-size: 13px;
   font-weight: 650;
 }
 
@@ -214,7 +214,7 @@
   display: block;
   overflow: hidden;
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 520;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -225,7 +225,7 @@
   margin-top: 3px;
   overflow: hidden;
   color: var(--faint);
-  font-size: 6px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -275,7 +275,7 @@
   margin-top: 6px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.55;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
@@ -297,14 +297,14 @@
 
 .asset-meta-list span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .asset-meta-list strong {
   max-width: 130px;
   overflow: hidden;
   color: var(--subtext);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -328,7 +328,7 @@
 
 .asset-inspector__empty p {
   max-width: 150px;
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -346,7 +346,7 @@
 
 .asset-consistency p {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
