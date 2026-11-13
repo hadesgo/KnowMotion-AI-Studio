@@ -14,6 +14,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { CanvasLayer } from "../canvas/CanvasLayer";
+import { evaluateGsapMotion } from "../gsap/gsapMotion";
 import type {
   CanvasLayerDsl,
   ChartLayerDsl,
@@ -107,6 +108,15 @@ function AnimationShell({
   const translateX = layer.animation.type === "slideIn" ? (1 - progress) * -5 : 0;
   const translateY = layer.animation.type === "fadeUp" ? (1 - progress) * 5 : 0;
   const scale = layer.animation.type === "scaleIn" ? 0.9 + progress * 0.1 : 1;
+  const gsapTimeMs = (localFrame / fps) * 1000;
+  const sceneGsap = evaluateGsapMotion(scene.gsap, gsapTimeMs);
+  const layerGsap = evaluateGsapMotion(layer.gsap, gsapTimeMs);
+  const gsapMotion = {
+    x: sceneGsap.x + layerGsap.x,
+    y: sceneGsap.y + layerGsap.y,
+    scale: sceneGsap.scale * layerGsap.scale,
+    rotation: sceneGsap.rotation + layerGsap.rotation,
+  };
   const style: CSSProperties = {
     position: "absolute",
     left: `${layer.x}%`,
@@ -114,8 +124,9 @@ function AnimationShell({
     width: `${layer.width}%`,
     height: `${layer.height}%`,
     opacity,
-    transform: `translate(${translateX}%, ${translateY}%) rotate(${layer.rotation}deg) scale(${scale})`,
+    transform: `translate(${translateX}%, ${translateY}%) translate(${gsapMotion.x}px, ${gsapMotion.y}px) rotate(${layer.rotation + gsapMotion.rotation}deg) scale(${scale * gsapMotion.scale})`,
     transformOrigin: "left top",
+    willChange: layer.gsap || scene.gsap ? "transform" : undefined,
   };
   return <div style={style}>{children}</div>;
 }

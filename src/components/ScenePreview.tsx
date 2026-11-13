@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { CanvasLayer } from "../canvas/CanvasLayer";
+import { evaluateGsapMotion } from "../gsap/gsapMotion";
 import type { Asset, AspectRatio, Scene } from "../types";
 import "./ScenePreview.css";
 
@@ -62,6 +63,15 @@ export function ScenePreview({
         const visible = localTime >= layer.start && localTime <= layer.end;
         const entrance = Math.min(1, Math.max(0, (localTime - layer.start) / 0.7));
         if (!visible) return null;
+        const sceneMotion = evaluateGsapMotion(
+          scene.gsapMotion,
+          localTime * 1000,
+        );
+        const layerMotion = evaluateGsapMotion(
+          layer.gsapMotion,
+          localTime * 1000,
+        );
+        const transform = `translate(${sceneMotion.x + layerMotion.x}px, ${sceneMotion.y + layerMotion.y}px) rotate(${sceneMotion.rotation + layerMotion.rotation}deg) scale(${sceneMotion.scale * layerMotion.scale})`;
         if (layer.type === "canvas") {
           return (
             <div
@@ -73,6 +83,8 @@ export function ScenePreview({
                 width: `${layer.width}%`,
                 height: `${layer.height}%`,
                 opacity: layer.opacity * entrance,
+                transform,
+                transformOrigin: "center center",
               }}
             >
               <CanvasLayer
@@ -101,6 +113,8 @@ export function ScenePreview({
                 height: `${layer.height}%`,
                 opacity: layer.opacity * entrance * 0.55,
                 background: layer.color,
+                transform,
+                transformOrigin: "center center",
               }}
             />
           );
@@ -117,7 +131,8 @@ export function ScenePreview({
               opacity: layer.opacity * entrance,
               color: layer.color,
               fontSize: `clamp(14px, ${layer.fontSize / 16}vw, ${layer.fontSize}px)`,
-              transform: `translateY(${(1 - entrance) * 14}px)`,
+              transform: `${transform} translateY(${(1 - entrance) * 14}px)`,
+              transformOrigin: "center center",
             }}
           >
             {layer.content}

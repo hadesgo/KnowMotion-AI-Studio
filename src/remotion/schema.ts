@@ -34,6 +34,20 @@ const animationSchema = z
   })
   .strict();
 
+const gsapMotionSchema = z
+  .object({
+    preset: z.enum([
+      "float",
+      "breathe",
+      "sway",
+      "orbit",
+      "elasticReveal",
+    ]),
+    intensity: z.number().finite().min(0).max(1).default(0.65),
+    speed: z.number().finite().min(0.05).max(3).default(0.8),
+  })
+  .strict();
+
 const baseLayerShape = {
   id: z.string().min(1).max(120),
   timing: timingSchema,
@@ -44,6 +58,7 @@ const baseLayerShape = {
   width: z.number().finite().min(0.1).max(300),
   height: z.number().finite().min(0.1).max(300),
   rotation: z.number().finite().min(-3600).max(3600).default(0),
+  gsap: gsapMotionSchema.optional(),
 };
 
 const textLayerSchema = z
@@ -179,6 +194,7 @@ export const sceneDslSchema = z
       })
       .strict(),
     transition: transitionSchema,
+    gsap: gsapMotionSchema.optional(),
     layers: z.array(sceneLayerSchema).max(60),
   })
   .strict()
@@ -310,6 +326,7 @@ export type SvgLayerDsl = z.infer<typeof svgLayerSchema>;
 export type ImageLayerDsl = z.infer<typeof imageLayerSchema>;
 export type ChartLayerDsl = z.infer<typeof chartLayerSchema>;
 export type CanvasLayerDsl = z.infer<typeof canvasLayerSchema>;
+export type GsapMotionDsl = z.infer<typeof gsapMotionSchema>;
 export type SceneDsl = z.infer<typeof sceneDslSchema>;
 export type CompositionDsl = z.infer<typeof compositionSchema>;
 
@@ -346,7 +363,10 @@ export function sceneToRemotionDsl(
     const parsed = sceneDslSchema.safeParse(scene.remotion);
     if (parsed.success) {
       return sceneDslSchema.parse(
-        overlayEditorCanvasLayers(parsed.data, scene),
+        applySceneGsap(
+          overlayEditorCanvasLayers(parsed.data, scene),
+          scene,
+        ),
       );
     }
   }
@@ -672,8 +692,16 @@ export function sceneToRemotionDsl(
       durationMs: Math.min(700, Math.round(durationMs * 0.1)),
       direction: index % 2 === 0 ? "left" : "right",
     },
+    gsap: scene.gsapMotion,
     layers,
   });
+}
+
+function applySceneGsap(sceneDsl: SceneDsl, scene: Scene): SceneDsl {
+  return {
+    ...sceneDsl,
+    gsap: scene.gsapMotion ?? sceneDsl.gsap,
+  };
 }
 
 function overlayEditorCanvasLayers(sceneDsl: SceneDsl, scene: Scene): SceneDsl {
@@ -728,6 +756,7 @@ function editorCanvasLayers(scene: Scene, durationMs: number): CanvasLayerDsl[] 
         intensity: layer.intensity ?? 0.85,
         seed: layer.seed ?? 41,
         borderRadius: 0,
+        gsap: layer.gsapMotion,
       };
     });
 }

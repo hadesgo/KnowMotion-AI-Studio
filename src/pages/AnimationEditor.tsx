@@ -27,6 +27,7 @@ import { Button, IconButton, Pill } from "../components/ui";
 import { createLayer } from "../data/demo";
 import { useStudioStore } from "../store/studio";
 import type { SceneLayer } from "../types";
+import type { GsapMotionPreset } from "../gsap/gsapMotion";
 import {
   downloadText,
   formatTime,
@@ -484,6 +485,77 @@ export default function AnimationEditor() {
                 <option value="image">图片素材</option>
               </select>
             </label>
+            <label className="inspector-field">
+              <span>GSAP 场景运动</span>
+              <select
+                value={scene.gsapMotion?.preset ?? "none"}
+                onChange={(event) =>
+                  updateScene({
+                    gsapMotion:
+                      event.target.value === "none"
+                        ? undefined
+                        : {
+                            preset: event.target.value as GsapMotionPreset,
+                            intensity: scene.gsapMotion?.intensity ?? 0.65,
+                            speed: scene.gsapMotion?.speed ?? 0.8,
+                          },
+                  })
+                }
+              >
+                <option value="none">关闭</option>
+                <option value="float">漂浮</option>
+                <option value="breathe">呼吸缩放</option>
+                <option value="sway">左右摆动</option>
+                <option value="orbit">椭圆环绕</option>
+                <option value="elasticReveal">弹性入场</option>
+              </select>
+            </label>
+            {scene.gsapMotion && (
+              <>
+                <label className="inspector-field">
+                  <span>GSAP 强度</span>
+                  <div className="property-range">
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={scene.gsapMotion.intensity}
+                      onChange={(event) =>
+                        updateScene({
+                          gsapMotion: {
+                            ...scene.gsapMotion!,
+                            intensity: Number(event.target.value),
+                          },
+                        })
+                      }
+                    />
+                    <em>{Math.round(scene.gsapMotion.intensity * 100)}%</em>
+                  </div>
+                </label>
+                <label className="inspector-field">
+                  <span>GSAP 速度</span>
+                  <div className="property-range">
+                    <input
+                      type="range"
+                      min={0.05}
+                      max={3}
+                      step={0.05}
+                      value={scene.gsapMotion.speed}
+                      onChange={(event) =>
+                        updateScene({
+                          gsapMotion: {
+                            ...scene.gsapMotion!,
+                            speed: Number(event.target.value),
+                          },
+                        })
+                      }
+                    />
+                    <em>{scene.gsapMotion.speed.toFixed(2)}×</em>
+                  </div>
+                </label>
+              </>
+            )}
           </div>
 
           {layer ? (
@@ -693,6 +765,81 @@ export default function AnimationEditor() {
                   <label><span>宽度</span><input type="number" value={layer.width} onChange={(event) => updateLayer({ width: Number(event.target.value) })} /></label>
                   <label><span>高度</span><input type="number" value={layer.height} onChange={(event) => updateLayer({ height: Number(event.target.value) })} /></label>
                 </div>
+                <label className="inspector-field">
+                  <span>图层 GSAP 运动</span>
+                  <select
+                    value={layer.gsapMotion?.preset ?? "none"}
+                    onChange={(event) =>
+                      updateLayer({
+                        gsapMotion:
+                          event.target.value === "none"
+                            ? undefined
+                            : {
+                                preset: event.target
+                                  .value as GsapMotionPreset,
+                                intensity:
+                                  layer.gsapMotion?.intensity ?? 0.65,
+                                speed: layer.gsapMotion?.speed ?? 0.8,
+                              },
+                      })
+                    }
+                  >
+                    <option value="none">不叠加</option>
+                    <option value="float">漂浮</option>
+                    <option value="breathe">呼吸缩放</option>
+                    <option value="sway">左右摆动</option>
+                    <option value="orbit">椭圆环绕</option>
+                    <option value="elasticReveal">弹性入场</option>
+                  </select>
+                </label>
+                {layer.gsapMotion && (
+                  <>
+                    <label className="inspector-field">
+                      <span>图层 GSAP 强度</span>
+                      <div className="property-range">
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={layer.gsapMotion.intensity}
+                          onChange={(event) =>
+                            updateLayer({
+                              gsapMotion: {
+                                ...layer.gsapMotion!,
+                                intensity: Number(event.target.value),
+                              },
+                            })
+                          }
+                        />
+                        <em>
+                          {Math.round(layer.gsapMotion.intensity * 100)}%
+                        </em>
+                      </div>
+                    </label>
+                    <label className="inspector-field">
+                      <span>图层 GSAP 速度</span>
+                      <div className="property-range">
+                        <input
+                          type="range"
+                          min={0.05}
+                          max={3}
+                          step={0.05}
+                          value={layer.gsapMotion.speed}
+                          onChange={(event) =>
+                            updateLayer({
+                              gsapMotion: {
+                                ...layer.gsapMotion!,
+                                speed: Number(event.target.value),
+                              },
+                            })
+                          }
+                        />
+                        <em>{layer.gsapMotion.speed.toFixed(2)}×</em>
+                      </div>
+                    </label>
+                  </>
+                )}
                 <label className="inspector-field">
                   <span>透明度</span>
                   <div className="property-range">

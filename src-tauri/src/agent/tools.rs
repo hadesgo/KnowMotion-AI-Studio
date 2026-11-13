@@ -346,6 +346,7 @@ fn normalize_scene(scene: &Value, index: usize) -> Result<Value, String> {
         } else {
             "programmatic"
         },
+        "gsapMotion": normalize_gsap_motion(scene.get("gsapMotion")),
         "remotion": scene
             .get("remotion")
             .filter(|value| value.is_object())
@@ -437,7 +438,8 @@ fn normalize_layer(
             Value::String(text(layer, "shape", "circle"))
         } else {
             Value::Null
-        }
+        },
+        "gsapMotion": normalize_gsap_motion(layer.get("gsapMotion"))
     });
     if layer_type == "canvas" {
         let variant = text(layer, "canvasVariant", "particleFlow");
@@ -459,6 +461,24 @@ fn normalize_layer(
         normalized["content"] = Value::String(String::new());
     }
     Ok(normalized)
+}
+
+fn normalize_gsap_motion(value: Option<&Value>) -> Value {
+    let Some(value) = value.filter(|value| value.is_object()) else {
+        return Value::Null;
+    };
+    let preset = value
+        .get("preset")
+        .and_then(Value::as_str)
+        .filter(|preset| {
+            ["float", "breathe", "sway", "orbit", "elasticReveal"].contains(preset)
+        })
+        .unwrap_or("float");
+    json!({
+        "preset": preset,
+        "intensity": number(value, "intensity", 0.65).clamp(0.0, 1.0),
+        "speed": number(value, "speed", 0.8).clamp(0.05, 3.0)
+    })
 }
 
 fn normalize_timeline_clip(clip: &Value, index: usize) -> Result<Value, String> {
@@ -832,6 +852,34 @@ mod tests {
         assert_eq!(layer["speed"], 3.0);
         assert_eq!(layer["lineWidth"], 0.2);
         assert_eq!(layer["intensity"], 1.0);
+        assert_eq!(layer["gsapMotion"], Value::Null);
+    }
+
+    #[test]
+    fn gsap_motion_is_allowlisted_and_bounded() {
+        let layer = normalize_layer(
+            &json!({
+                "id": "gsap-layer",
+                "type": "text",
+                "gsapMotion": {
+                    "preset": "orbit",
+                    "intensity": 8,
+                    "speed": 0.01
+                }
+            }),
+            "Scene",
+            6.0,
+            0,
+        )
+        .expect("gsap layer");
+        assert_eq!(layer["gsapMotion"]["preset"], "orbit");
+        assert_eq!(layer["gsapMotion"]["intensity"], 1.0);
+        assert_eq!(layer["gsapMotion"]["speed"], 0.05);
+
+        let bounded = normalize_gsap_motion(Some(&json!({
+            "preset": "arbitrary-code"
+        })));
+        assert_eq!(bounded["preset"], "float");
     }
 
     #[test]

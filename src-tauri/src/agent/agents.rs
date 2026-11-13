@@ -306,6 +306,7 @@ impl Agent for AnimationAgent {
 绝对不要改写 id、title、narration、description、visualPrompt、duration 或 assetId。
 你可以设置 layers、accent、transition、motionPreset。motionPreset 只能是 pushIn、pullOut、panLeft、panRight、none。
 可使用 text、shape 和 canvas 图层。canvas 只允许 particleFlow、waveform、network、orbitTrails 四种内置动画，不得生成 JavaScript、Canvas 绘图代码、CSS 或任意 Remotion 组件。
+场景或图层可附加 gsapMotion，preset 只能是 float、breathe、sway、orbit、elasticReveal；intensity 为 0 到 1，speed 为 0.05 到 3。GSAP 由运行时以 Remotion 当前帧确定性求值，不得生成 GSAP 代码或实时播放时间线。
 {}
 
 工具输入格式：

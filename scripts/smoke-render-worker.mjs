@@ -45,6 +45,11 @@ try {
         intensity: 0.9,
         seed: 41,
         borderRadius: 0,
+        gsap: {
+          preset: "orbit",
+          intensity: 0.65,
+          speed: 0.8,
+        },
       },
     ],
   };

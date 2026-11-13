@@ -80,9 +80,22 @@ interface CompositionDsl {
 - `ChartRenderer`：数据可视化。
 - `CanvasRenderer`：Canvas 2D 专用动画，绘制完成后通过 `delayRender`/`continueRender` 保证 Renderer 不在空白帧截取。
 - `CanvasLayer`：浏览器场景预览与 Remotion 共用的 Canvas 绘制表面。
+- `evaluateGsapMotion`：用当前帧时间驱动暂停的 GSAP Timeline，输出确定性位移、缩放和旋转。
 - `AnimationShell`：统一图层入场和透明度。
 
 同一组组件同时服务 Player 和 Renderer，避免预览与成片使用两套实现。
+
+### GSAP 确定性运动
+
+场景和任意图层都可附加 `gsapMotion`。首批预设为：
+
+- `float`：漂浮
+- `breathe`：呼吸缩放
+- `sway`：左右摆动
+- `orbit`：椭圆环绕
+- `elasticReveal`：弹性入场
+
+参数只有 `preset`、`intensity`（0–1）和 `speed`（0.05–3）。运行时创建一个 `paused` GSAP Timeline，用 Remotion 当前帧换算的时间设置 `timeline.progress()`，再读取纯数值变换。GSAP 的实时 Ticker、DOM 查询和任意 JavaScript 均不进入渲染流程，因此同一帧在 Player、Canvas 预览和 Renderer 中结果一致。
 
 ## 6. Player
 

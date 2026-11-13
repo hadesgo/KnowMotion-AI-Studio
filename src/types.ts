@@ -1,3 +1,5 @@
+import type { GsapMotionConfig } from "./gsap/gsapMotion";
+
 export type AspectRatio = "16:9" | "9:16" | "1:1";
 export type ProjectStage =
   | "planning"
@@ -63,6 +65,7 @@ export interface SceneLayer {
   lineWidth?: number;
   intensity?: number;
   seed?: number;
+  gsapMotion?: GsapMotionConfig;
 }
 
 export interface Scene {
@@ -80,6 +83,7 @@ export interface Scene {
   remotion?: Record<string, unknown>;
   motionPreset?: "pushIn" | "pullOut" | "panLeft" | "panRight" | "none";
   visualMode?: "programmatic" | "image";
+  gsapMotion?: GsapMotionConfig;
 }
 
 export interface Asset {
