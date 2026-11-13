@@ -153,6 +153,7 @@ export interface VideoProject {
 }
 
 export type ProviderCapability = "LLM" | "Image" | "TTS" | "ASR" | "Embedding";
+export type GgufInferenceBackend = "auto" | "gpu" | "cpu";
 
 export interface ProviderProfile {
   id: string;
@@ -162,9 +163,12 @@ export interface ProviderProfile {
     | "Anthropic"
     | "Gemini"
     | "Ollama"
+    | "GGUF"
     | "ComfyUI";
   baseUrl: string;
   model: string;
+  contextSize?: number;
+  inferenceBackend?: GgufInferenceBackend;
   capabilities: ProviderCapability[];
   enabled: boolean;
   health: "healthy" | "unchecked" | "error";

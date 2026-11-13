@@ -644,7 +644,7 @@ impl AgentRuntime {
             .and_then(|route| route.model.clone())
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| provider_config.model.clone());
-        let provider = resolve_provider(&provider_config, Some(model.clone()))?;
+        let provider = resolve_provider(&provider_config, Some(model.clone())).await?;
 
         let dependency_outputs = self.dependency_outputs(run_id, &step.dependencies)?;
         let instruction = {
@@ -691,7 +691,7 @@ impl AgentRuntime {
         let call_started = std::time::Instant::now();
         let output = self
             .registry
-            .execute(&step.agent_key, agent_input, &provider, &model)
+            .execute(&step.agent_key, agent_input, provider.as_ref(), &model)
             .await;
         let latency_ms = call_started.elapsed().as_millis() as i64;
         match &output {

@@ -16,6 +16,7 @@ flowchart LR
     Revision --> FS[Project JSON / Controlled Files]
     Runtime -->|"event"| UI
     Provider -->|"HTTPS / localhost"| LLM[OpenAI / Anthropic / Gemini / Ollama]
+    Provider -->|"in-process"| GGUF[GGUF / llama-rs CPU + DX12 GPU]
 ```
 
 模型只能输出工具请求。运行时检查 Agent 是否被允许调用该工具，再将输入规范化为项目数据。Agent 永远不能提交文件路径或执行任意代码。
@@ -104,10 +105,13 @@ Provider 协议支持：
 - Anthropic
 - Gemini
 - Ollama
+- GGUF（本地 `.gguf` 文件，内置 CPU 与 DirectX 12 GPU 推理）
 
 每个 Agent 可以独立指定 `providerId` 和 `model`。运行开始时模型路由会写入 `workflow_runs.agent_routes_json`，恢复运行时使用同一配置。
 
-API Key 通过 keyring 4.x 写入系统凭据库。SQLite 和项目文件只保存 Provider 元数据。Provider 连接测试和 Agent 模型调用都在 Rust 中完成。
+GGUF Provider 的 `baseUrl` 保存本地模型文件路径，`contextSize` 控制推理上下文长度，`inferenceBackend` 可取 `auto`、`gpu`、`cpu`。自动模式优先 DirectX 12 GPU，并在检测不到 GPU 时回退 CPU。模型首次使用时加载并缓存，连接检测会执行一次真实短生成并返回实际推理设备。GGUF 支持 LLaMA、Mistral、Qwen2/Qwen3、Mixtral、TinyLlama、DeepSeek-Coder 等 llama.cpp 风格架构；具体兼容性取决于模型量化与架构。
+
+API Key 通过 keyring 4.x 写入系统凭据库。SQLite 和项目文件只保存 Provider 元数据。Provider 连接测试和 Agent 模型调用都在 Rust 中完成；GGUF 推理不会把模型或提示词发送到外部服务。
 
 ## 5. 受控项目工具
 

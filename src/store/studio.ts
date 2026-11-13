@@ -63,6 +63,8 @@ const defaultProviders: ProviderProfile[] = [
     protocol: "Ollama",
     baseUrl: "http://127.0.0.1:11434",
     model: "qwen3:8b",
+    contextSize: 8192,
+    inferenceBackend: "auto",
     capabilities: ["LLM"],
     enabled: true,
     health: "unchecked",

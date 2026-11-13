@@ -1,4 +1,5 @@
 mod agents;
+mod gguf;
 mod model;
 mod provider;
 pub(crate) mod runtime;

@@ -52,6 +52,10 @@ pub struct ProviderConfig {
     pub base_url: String,
     pub model: String,
     #[serde(default)]
+    pub context_size: Option<u32>,
+    #[serde(default)]
+    pub inference_backend: Option<String>,
+    #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
     pub capabilities: Vec<String>,
@@ -296,6 +300,7 @@ pub struct ProviderTestResult {
     pub message: String,
     pub latency_ms: u128,
     pub model: String,
+    pub backend: String,
 }
 
 pub fn workflow_definition() -> WorkflowDefinition {

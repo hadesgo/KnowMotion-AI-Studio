@@ -92,6 +92,7 @@ export interface ProviderTestResult {
   message: string;
   latencyMs: number;
   model: string;
+  backend: string;
 }
 
 export const fallbackWorkflowDefinition: WorkflowDefinition = {
@@ -167,6 +168,8 @@ export async function startWorkflow(
         protocol: provider.protocol,
         baseUrl: provider.baseUrl,
         model: provider.model,
+        contextSize: provider.contextSize ?? null,
+        inferenceBackend: provider.inferenceBackend ?? "auto",
         enabled: provider.enabled,
         capabilities: provider.capabilities,
       })),
@@ -274,6 +277,8 @@ export async function testProviderConnection(
         protocol: provider.protocol,
         baseUrl: provider.baseUrl,
         model: provider.model,
+        contextSize: provider.contextSize ?? null,
+        inferenceBackend: provider.inferenceBackend ?? "auto",
         enabled: provider.enabled,
         capabilities: provider.capabilities,
       },

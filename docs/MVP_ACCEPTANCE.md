@@ -55,13 +55,13 @@
 
 1. 运行 `npm run desktop:dev`。
 2. 打开“AI 模型”。
-3. 添加 OpenAI Compatible、Anthropic、Gemini 或 Ollama Provider。
-4. 输入 API 地址、模型和 Key。
+3. 添加 OpenAI Compatible、Anthropic、Gemini、Ollama 或 GGUF Provider。
+4. 云端或 Ollama 输入 API 地址、模型和 Key；GGUF 选择本地 `.gguf` 文件、上下文长度与推理设备。
 5. 点击“检测”；成功表示后端已实际请求 Provider 并解析响应。
 6. 在 Agent Workflow 为每个 Agent 指定 Provider 与模型。
 7. 启动工作流并完成审批。
 
-当前机器未配置外部模型凭据，且 Ollama 未监听 `127.0.0.1:11434`，因此没有在验收中发起外部真实 LLM 请求。Provider 协议解析、密钥边界、工具白名单和结构化 Agent 输出已有自动化测试。
+GGUF 已使用真实小型量化模型完成 CPU 与 DirectX 12 GPU 生成测试。外部云端 Provider 仍需要用户自己的 API Key；Ollama 需要本地服务运行。Provider 协议解析、GGUF 文件校验、GPU/CPU 路由、密钥边界、工具白名单和结构化 Agent 输出已有自动化测试。
 
 ## 渲染运行时边界
 

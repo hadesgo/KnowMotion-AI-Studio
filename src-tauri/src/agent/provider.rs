@@ -1,3 +1,4 @@
+use super::gguf::GgufLlmProvider;
 use super::model::{ProviderConfig, ProviderTestResult};
 use async_trait::async_trait;
 use keyring::Entry;
@@ -31,6 +32,10 @@ pub struct LlmResponse {
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, String>;
+
+    fn backend_label(&self) -> Option<&str> {
+        None
+    }
 }
 
 pub struct HttpLlmProvider {
@@ -377,15 +382,11 @@ pub async fn test_provider(config: ProviderConfig) -> Result<ProviderTestResult,
     if !config.enabled {
         return Err("Provider is disabled".to_string());
     }
-    let secret = if config.protocol == "Ollama" {
-        None
-    } else {
-        Some(get_provider_secret(&config.id).ok_or_else(|| {
-            "No API key is stored for this provider. Save the key in the desktop app first."
-                .to_string()
-        })?)
-    };
-    let provider = HttpLlmProvider::new(config.clone(), secret)?;
+    let provider = resolve_provider(&config, None).await?;
+    let backend = provider
+        .backend_label()
+        .unwrap_or(&config.protocol)
+        .to_string();
     let started = Instant::now();
     let response = provider
         .complete(LlmRequest {
@@ -405,17 +406,30 @@ pub async fn test_provider(config: ProviderConfig) -> Result<ProviderTestResult,
         ),
         latency_ms: started.elapsed().as_millis(),
         model: response.model,
+        backend,
     })
 }
 
-pub fn resolve_provider(
+pub async fn resolve_provider(
     provider: &ProviderConfig,
     model: Option<String>,
-) -> Result<HttpLlmProvider, String> {
+) -> Result<Box<dyn LlmProvider>, String> {
     if !provider.enabled {
         return Err(format!("Provider {} is disabled", provider.name));
     }
-    let secret = if provider.protocol == "Ollama" {
+    let mut provider = provider.clone();
+    if let Some(model) = model {
+        if !model.trim().is_empty() {
+            provider.model = model;
+        }
+    }
+    if provider.protocol == "GGUF" {
+        let local = tokio::task::spawn_blocking(move || GgufLlmProvider::load(&provider))
+            .await
+            .map_err(|error| format!("GGUF model loading task failed: {error}"))??;
+        return Ok(Box::new(local));
+    }
+    let secret = if provider.protocol == "Ollama" || provider.protocol == "ComfyUI" {
         None
     } else {
         Some(
@@ -423,13 +437,7 @@ pub fn resolve_provider(
                 .ok_or_else(|| format!("No API key is stored for provider {}", provider.name))?,
         )
     };
-    let mut provider = provider.clone();
-    if let Some(model) = model {
-        if !model.trim().is_empty() {
-            provider.model = model;
-        }
-    }
-    HttpLlmProvider::new(provider, secret)
+    Ok(Box::new(HttpLlmProvider::new(provider, secret)?))
 }
 
 #[cfg(test)]
@@ -477,5 +485,21 @@ mod tests {
         assert!(value.contains("invalid key"));
         assert!(!value.contains("sk-secret-value"));
         assert!(!value.contains("{\"error\""));
+    }
+
+    #[test]
+    fn provider_config_accepts_missing_context_size() {
+        let config: ProviderConfig = serde_json::from_value(json!({
+            "id": "local",
+            "name": "Local GGUF",
+            "protocol": "GGUF",
+            "baseUrl": "C:\\models\\model.gguf",
+            "model": "model.gguf",
+            "enabled": true,
+            "capabilities": ["LLM"]
+        }))
+        .expect("legacy provider config should deserialize");
+        assert_eq!(config.context_size, None);
+        assert_eq!(config.inference_backend, None);
     }
 }

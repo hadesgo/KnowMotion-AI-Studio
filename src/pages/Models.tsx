@@ -3,6 +3,8 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleAlert,
+  FolderOpen,
+  HardDrive,
   KeyRound,
   Plus,
   RefreshCw,
@@ -13,6 +15,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { PageHeading } from "../components/AppShell";
 import {
   Button,
@@ -25,6 +28,7 @@ import {
 } from "../components/ui";
 import { useStudioStore } from "../store/studio";
 import type {
+  GgufInferenceBackend,
   ProviderCapability,
   ProviderProfile,
 } from "../types";
@@ -49,6 +53,7 @@ const protocols: ProviderProfile["protocol"][] = [
   "OpenAI Compatible",
   "Anthropic",
   "Gemini",
+  "GGUF",
   "Ollama",
   "ComfyUI",
 ];
@@ -59,6 +64,8 @@ interface ProviderDraft {
   protocol: ProviderProfile["protocol"];
   baseUrl: string;
   model: string;
+  contextSize: number;
+  inferenceBackend: GgufInferenceBackend;
   capabilities: ProviderCapability[];
   apiKey: string;
   enabled: boolean;
@@ -70,6 +77,8 @@ const emptyDraft: ProviderDraft = {
   protocol: "OpenAI Compatible",
   baseUrl: "https://api.openai.com/v1",
   model: "gpt-5.1",
+  contextSize: 8192,
+  inferenceBackend: "auto",
   capabilities: ["LLM"],
   apiKey: "",
   enabled: true,
@@ -99,6 +108,8 @@ export default function Models() {
   const openEdit = (provider: ProviderProfile) => {
     setDraft({
       ...provider,
+      contextSize: provider.contextSize ?? 8192,
+      inferenceBackend: provider.inferenceBackend ?? "auto",
       apiKey: "",
     });
     setFormError("");
@@ -110,11 +121,19 @@ export default function Models() {
       setFormError("给这个 Provider 一个可识别的名称。");
       return;
     }
-    try {
-      new URL(draft.baseUrl);
-    } catch {
-      setFormError("API 地址必须是完整的 http(s) URL。");
-      return;
+    const isGguf = draft.protocol === "GGUF";
+    if (isGguf) {
+      if (!draft.baseUrl.trim().toLowerCase().endsWith(".gguf")) {
+        setFormError("请选择或填写完整的 .gguf 模型文件路径。");
+        return;
+      }
+    } else {
+      try {
+        new URL(draft.baseUrl);
+      } catch {
+        setFormError("API 地址必须是完整的 http(s) URL。");
+        return;
+      }
     }
     if (!draft.model.trim()) {
       setFormError("请填写默认模型名称。");
@@ -125,7 +144,10 @@ export default function Models() {
       return;
     }
     const providerId = draft.id ?? makeId("provider");
-    if (isTauriDesktop && draft.apiKey.trim()) {
+    const usesApiKey = ["OpenAI Compatible", "Anthropic", "Gemini"].includes(
+      draft.protocol,
+    );
+    if (isTauriDesktop && usesApiKey && draft.apiKey.trim()) {
       try {
         setSaving(true);
         await saveProviderSecret(providerId, draft.apiKey.trim());
@@ -143,12 +165,15 @@ export default function Models() {
       protocol: draft.protocol,
       baseUrl: draft.baseUrl.trim(),
       model: draft.model.trim(),
+      contextSize: Math.max(512, Math.min(1_048_576, draft.contextSize || 8192)),
+      inferenceBackend: draft.inferenceBackend,
       capabilities: draft.capabilities,
       enabled: draft.enabled,
       health: draft.id
         ? providers.find((item) => item.id === draft.id)?.health ?? "unchecked"
         : "unchecked",
-      hasSecret: draft.hasSecret || Boolean(draft.apiKey.trim()),
+      hasSecret:
+        usesApiKey && (draft.hasSecret || Boolean(draft.apiKey.trim())),
       isDefault:
         providers.find((item) => item.id === draft.id)?.isDefault ?? false,
     };
@@ -178,7 +203,7 @@ export default function Models() {
         pushToast({
           type: "success",
           title: "模型连接成功",
-          message: `${result.model} · ${result.latencyMs} ms · ${result.message}`,
+          message: `${result.model} · ${result.backend} · ${result.latencyMs} ms · ${result.message}`,
         });
       } catch (error) {
         updateProvider(provider.id, { health: "error" });
@@ -192,11 +217,16 @@ export default function Models() {
       }
       return;
     }
+    const validEndpoint =
+      provider.protocol === "GGUF"
+        ? provider.baseUrl.trim().toLowerCase().endsWith(".gguf")
+        : provider.baseUrl.startsWith("http");
     const checks = [
-      Boolean(provider.baseUrl.startsWith("http")),
+      validEndpoint,
       Boolean(provider.model.trim()),
       provider.capabilities.length > 0,
       provider.protocol === "Ollama" ||
+        provider.protocol === "GGUF" ||
         provider.protocol === "ComfyUI" ||
         provider.hasSecret ||
         provider.baseUrl,
@@ -210,6 +240,34 @@ export default function Models() {
         ? "浏览器原型未发起模型网络请求；桌面版会执行真实连接检测。"
         : "检查 API 地址、模型名称和凭据状态。",
     });
+  };
+
+  const pickGgufModel = async () => {
+    if (!isTauriDesktop) {
+      setFormError("浏览器预览无法读取本地路径，请运行桌面版选择模型文件。");
+      return;
+    }
+    try {
+      const selected = await open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "GGUF 模型", extensions: ["gguf"] }],
+      });
+      if (typeof selected !== "string") return;
+      const filename = selected.split(/[\\/]/).pop() ?? selected;
+      const modelName = filename.replace(/\.gguf$/i, "");
+      setDraft((current) => ({
+        ...current,
+        baseUrl: selected,
+        model: filename,
+        name: current.name.trim() || modelName,
+      }));
+      setFormError("");
+    } catch (error) {
+      setFormError(
+        error instanceof Error ? error.message : `模型文件选择失败：${String(error)}`,
+      );
+    }
   };
 
   const removeProvider = async (provider: ProviderProfile) => {
@@ -289,7 +347,13 @@ export default function Models() {
             <article className="provider-card" key={provider.id}>
               <header>
                 <span className="provider-card__logo">
-                  {provider.protocol === "Ollama" ? <Server size={20} /> : <Sparkles size={20} />}
+                  {provider.protocol === "GGUF" ? (
+                    <HardDrive size={20} />
+                  ) : provider.protocol === "Ollama" ? (
+                    <Server size={20} />
+                  ) : (
+                    <Sparkles size={20} />
+                  )}
                 </span>
                 <div>
                   <div className="provider-card__title">
@@ -312,7 +376,9 @@ export default function Models() {
                 </label>
               </header>
               <div className="provider-card__endpoint">
-                <span>ENDPOINT</span>
+                <span>
+                  {provider.protocol === "GGUF" ? "MODEL FILE" : "ENDPOINT"}
+                </span>
                 <code>{provider.baseUrl}</code>
               </div>
               <div className="provider-card__model">
@@ -323,6 +389,15 @@ export default function Models() {
                 {provider.capabilities.map((capability) => (
                   <Pill key={capability} tone="neutral">{capability}</Pill>
                 ))}
+                {provider.protocol === "GGUF" && (
+                  <Pill tone="accent">
+                    {provider.inferenceBackend === "cpu"
+                      ? "CPU"
+                      : provider.inferenceBackend === "gpu"
+                        ? "DX12 GPU"
+                        : "AUTO GPU"}
+                  </Pill>
+                )}
               </div>
               <footer>
                 <div
@@ -372,7 +447,7 @@ export default function Models() {
           <button type="button" className="provider-add-card" onClick={openCreate}>
             <span><Plus size={22} /></span>
             <strong>接入另一个模型服务</strong>
-            <small>OpenAI 兼容、Anthropic、Gemini、Ollama、ComfyUI</small>
+            <small>OpenAI 兼容、Anthropic、Gemini、GGUF、Ollama、ComfyUI</small>
           </button>
         </div>
       </section>
@@ -463,9 +538,18 @@ export default function Models() {
               <Select
                 value={draft.protocol}
                 onChange={(event) =>
-                  setDraft({
-                    ...draft,
-                    protocol: event.target.value as ProviderDraft["protocol"],
+                  setDraft((current) => {
+                    const protocol = event.target
+                      .value as ProviderDraft["protocol"];
+                    return {
+                      ...current,
+                      protocol,
+                      baseUrl:
+                        protocol === "GGUF" &&
+                        !current.baseUrl.toLowerCase().endsWith(".gguf")
+                          ? ""
+                          : current.baseUrl,
+                    };
                   })
                 }
               >
@@ -475,14 +559,37 @@ export default function Models() {
               </Select>
             </Field>
           </div>
-          <Field label="API Base URL">
+          <div className="field flex flex-col gap-[7px]">
+            <span className="text-[12px] font-medium text-[var(--subtext)]">
+              {draft.protocol === "GGUF" ? "GGUF 模型文件" : "API Base URL"}
+            </span>
             <TextInput
               value={draft.baseUrl}
               onChange={(event) =>
                 setDraft({ ...draft, baseUrl: event.target.value })
               }
+              placeholder={
+                draft.protocol === "GGUF"
+                  ? "D:\\models\\qwen2.5-0.5b-instruct-q4_k_m.gguf"
+                  : undefined
+              }
             />
-          </Field>
+            {draft.protocol === "GGUF" && (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<FolderOpen size={14} />}
+                onClick={() => void pickGgufModel()}
+              >
+                选择 .gguf 文件
+              </Button>
+            )}
+            {draft.protocol === "GGUF" && (
+              <span className="flex items-center gap-1 text-[11px] leading-[1.5] text-[var(--faint)]">
+                模型只在当前电脑本地加载和推理，不上传到外部服务。
+              </span>
+            )}
+          </div>
           <Field label="默认模型">
             <TextInput
               value={draft.model}
@@ -492,20 +599,65 @@ export default function Models() {
               placeholder="模型名称或本地模型标签"
             />
           </Field>
-          <Field
-            label="API Key"
-            hint="仅用于本次页面会话；关闭页面后不会保留。"
-          >
-            <TextInput
-              type="password"
-              value={draft.apiKey}
-              onChange={(event) =>
-                setDraft({ ...draft, apiKey: event.target.value })
-              }
-              placeholder={draft.hasSecret ? "已绑定密钥，输入可替换" : "本地服务可留空"}
-              autoComplete="off"
-            />
-          </Field>
+          {draft.protocol === "GGUF" && (
+            <Field
+              label="上下文长度"
+              hint="Token 数。更高的上下文占用更多内存；默认 8192。"
+            >
+              <TextInput
+                type="number"
+                min={512}
+                max={1_048_576}
+                step={512}
+                value={draft.contextSize}
+                onChange={(event) =>
+                  setDraft({
+                    ...draft,
+                    contextSize: Number(event.target.value),
+                  })
+                }
+              />
+            </Field>
+          )}
+          {draft.protocol === "GGUF" && (
+            <Field
+              label="推理设备"
+              hint="自动模式优先使用 DirectX 12 GPU；未检测到 GPU 时回退 CPU。"
+            >
+              <Select
+                value={draft.inferenceBackend}
+                onChange={(event) =>
+                  setDraft({
+                    ...draft,
+                    inferenceBackend: event.target
+                      .value as GgufInferenceBackend,
+                  })
+                }
+              >
+                <option value="auto">自动（GPU 优先）</option>
+                <option value="gpu">GPU（DirectX 12）</option>
+                <option value="cpu">CPU</option>
+              </Select>
+            </Field>
+          )}
+          {draft.protocol !== "GGUF" && (
+            <Field
+              label="API Key"
+              hint="仅用于本次页面会话；关闭页面后不会保留。"
+            >
+              <TextInput
+                type="password"
+                value={draft.apiKey}
+                onChange={(event) =>
+                  setDraft({ ...draft, apiKey: event.target.value })
+                }
+                placeholder={
+                  draft.hasSecret ? "已绑定密钥，输入可替换" : "本地服务可留空"
+                }
+                autoComplete="off"
+              />
+            </Field>
+          )}
           <Field label="支持能力">
             <div className="capability-picker">
               {capabilities.map((capability) => {

@@ -10,9 +10,10 @@ AI-powered knowledge animation studio. 用户从一个知识主题开始，在�
 - 每个项目同步生成独立的 `project.json`、脚本、分镜、素材清单、动画时间轴和字幕目录。
 - 14 个工作区界面：Dashboard、新建项目、Agent 工作流、内容策划、脚本、分镜、图片素材、动画、Remotion Studio、时间轴、AI 助手、音频字幕、渲染、模型配置。
 - 九个持久化 AI Agent 与 DAG Workflow：模型路由、审批、暂停恢复、局部重跑、受控项目工具、修订和撤销。
+- 原生 GGUF 本地推理：可直接选择 `.gguf` 模型文件，支持 CPU 与 DirectX 12 GPU 加速。
 - Remotion Scene/Composition DSL、可复用动画组件、实时 Player 和完整 H.264 渲染。
 - 浏览器预览支持完整项目持久化、SVG 视觉草案、系统语音试听、字幕导出和真实 WebM 视频录制。
-- 桌面版 API Key 不会持久化到 WebView；后续由系统凭据库接入。
+- 桌面版 API Key 不写入 WebView、项目文件或 SQLite，而是保存在系统凭据库。
 
 ## 开发
 
@@ -29,7 +30,9 @@ npm run dev
 npm run desktop:dev
 ```
 
-要求 Windows 已安装 Rust、MSVC Build Tools 和 WebView2。桌面数据写入 Tauri 应用数据目录：
+要求 Windows 已安装 Rust、MSVC Build Tools、Windows 10 SDK（包含 `dxc.exe`）和 WebView2。GPU 推理使用 DirectX 12，最终用户无需安装 CUDA 或 Vulkan SDK。桌面数据写入 Tauri 应用数据目录：
+
+GGUF 使用内置的 llama-rs 推理引擎，不需要额外安装 Ollama 或 llama.cpp。推理设备可选“自动、GPU、CPU”；自动模式会优先使用 DirectX 12 GPU，检测不到兼容 GPU 时回退 CPU。模型文件本身不复制到应用数据目录；Provider 只保存本地文件路径、上下文长度和推理设备偏好。
 
 ```text
 %APPDATA%/com.knowmotion.studio/
