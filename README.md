@@ -16,6 +16,7 @@ AI-powered knowledge animation studio. 用户从一个知识主题开始，在�
 - 帧驱动 GSAP 运动：漂浮、呼吸、摆动、环绕和弹性入场，Player 与 Renderer 结果一致。
 - 持久渲染 Job、真实 `render.progress`、取消、恢复、FFprobe、SHA-256 与原子提交。
 - Windows Job Object 监管 Node/Chrome/FFmpeg 进程树，取消、崩溃或应用退出时不残留渲染子进程。
+- 结构化 JSONL 日志、5 MiB 轮转、7 份历史、30 天保留和统一 API Key/Authorization 脱敏。
 - 构建时打包固定 Node sidecar、Chrome Headless Shell、FFmpeg/FFprobe，并校验 runtime manifest。
 - OpenAI Compatible / ComfyUI 图片、云端与本地 TTS、ASR、Embedding/RAG 和网页来源正文抓取。
 - 项目文件锁、素材落盘、缺失扫描、可恢复归档删除及含素材的 ZIP 项目包导入导出。
@@ -54,6 +55,9 @@ GGUF 使用内置的 llama-rs 推理引擎，不需要额外安装 Ollama 或 ll
 ```text
 %APPDATA%/com.knowmotion.studio/
 ├─ studio.sqlite3
+├─ logs/
+│  ├─ knowmotion.log
+│  └─ knowmotion.{1..7}.log
 └─ projects/
    └─ {projectId}/
       ├─ project.json

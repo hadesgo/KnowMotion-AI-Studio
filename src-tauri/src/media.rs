@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use crate::{logging, logging::LogLevel};
 use chrono::Utc;
 use hound::{SampleFormat, WavSpec, WavWriter};
 use serde::{Deserialize, Serialize};
@@ -242,6 +243,16 @@ pub async fn generate_project_narration(
                 duration_ms,
             });
         }
+        logging::log_event(
+            LogLevel::Info,
+            "media",
+            "Local narration completed",
+            Some(serde_json::json!({
+                "projectId": request.project_id,
+                "scenes": assets.len(),
+                "voice": request.voice
+            })),
+        );
         Ok(assets)
     })
     .await
@@ -258,7 +269,7 @@ pub async fn generate_background_music(
         let (path, duration_ms) =
             service.generate_music(&request.project_id, request.duration_seconds.unwrap_or(15))?;
         let bytes = fs::read(path).map_err(|error| error.to_string())?;
-        Ok(GeneratedMediaAsset {
+        let asset = GeneratedMediaAsset {
             id: "music-ambient-knowledge-bed".to_string(),
             scene_id: "project".to_string(),
             name: "Ambient Knowledge Bed".to_string(),
@@ -268,7 +279,17 @@ pub async fn generate_background_music(
             created_at: Utc::now().to_rfc3339(),
             local: true,
             duration_ms,
-        })
+        };
+        logging::log_event(
+            LogLevel::Info,
+            "media",
+            "Background music completed",
+            Some(serde_json::json!({
+                "projectId": request.project_id,
+                "durationMs": duration_ms
+            })),
+        );
+        Ok(asset)
     })
     .await
     .map_err(|error| error.to_string())?

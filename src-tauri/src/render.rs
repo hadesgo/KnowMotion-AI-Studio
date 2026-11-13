@@ -1,4 +1,6 @@
-use crate::{job_object::RenderJobObject, safe_identifier, write_atomic};
+use crate::{
+    job_object::RenderJobObject, logging, logging::LogLevel, safe_identifier, write_atomic,
+};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -288,6 +290,12 @@ impl RenderManager {
         let job_object = match RenderJobObject::attach(&child) {
             Ok(job_object) => job_object,
             Err(error) => {
+                logging::log_event(
+                    LogLevel::Error,
+                    "render",
+                    "Unable to initialize render process tree",
+                    Some(json!({ "jobId": job_id, "error": error })),
+                );
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = fs::remove_file(&manifest_path);
@@ -336,6 +344,19 @@ impl RenderManager {
             );
         }
         self.update_job_started(&job_id, pid)?;
+        logging::log_event(
+            LogLevel::Info,
+            "render",
+            "Render job started",
+            Some(json!({
+                "jobId": job_id,
+                "taskId": task_id,
+                "projectId": project_id,
+                "pid": pid,
+                "rendererVersion": self.environment.version,
+                "expectedDurationMs": expected_duration_ms
+            })),
+        );
         self.emit_progress(&app, &job_id, 0.0, 0, 0, "starting");
         self.emit_changed(&app, &job_id, "updated", "running");
 
@@ -404,6 +425,12 @@ impl RenderManager {
             return Ok(job);
         }
         self.update_job_status(job_id, "canceling", None)?;
+        logging::log_event(
+            LogLevel::Info,
+            "render",
+            "Render cancellation requested",
+            Some(json!({ "jobId": job_id, "projectId": project_id })),
+        );
         let (stdin, child, canceled, job_object) = {
             let active = self
                 .active
@@ -463,11 +490,7 @@ impl RenderManager {
         stdout: impl Read + Send + 'static,
         stderr: impl Read + Send + 'static,
     ) {
-        let stderr_thread = thread::spawn(move || {
-            let mut buffer = String::new();
-            let _ = BufReader::new(stderr).read_to_string(&mut buffer);
-            buffer
-        });
+        let stderr_thread = thread::spawn(move || drain_stderr(stderr, 256 * 1024));
         let mut last_error = String::new();
         let mut completed_message = false;
         let mut last_db_update = Instant::now() - Duration::from_secs(1);
@@ -543,6 +566,17 @@ impl RenderManager {
             .map(|status| status.success())
             .unwrap_or(false);
         let stderr_text = stderr_thread.join().unwrap_or_default();
+        if !stderr_text.trim().is_empty() {
+            logging::log_event(
+                LogLevel::Warn,
+                "render",
+                "Renderer stderr",
+                Some(json!({
+                    "jobId": job_id,
+                    "stderr": stderr_text
+                })),
+            );
+        }
 
         if canceled.load(Ordering::SeqCst) {
             let _ = fs::remove_file(&partial_path);
@@ -560,6 +594,12 @@ impl RenderManager {
             );
             self.emit_progress(&app, &job_id, 0.0, 0, 0, "canceled");
             self.emit_changed(&app, &job_id, "updated", "canceled");
+            logging::log_event(
+                LogLevel::Info,
+                "render",
+                "Render job canceled",
+                Some(json!({ "jobId": job_id })),
+            );
             self.remove_active(&job_id);
             return;
         }
@@ -577,6 +617,18 @@ impl RenderManager {
             } else {
                 last_error
             };
+            let safe_detail = limited_error(&detail);
+            logging::log_event(
+                LogLevel::Error,
+                "render",
+                "Render job failed",
+                Some(json!({
+                    "jobId": job_id,
+                    "exitSuccessful": status,
+                    "completedProtocol": completed_message,
+                    "error": safe_detail
+                })),
+            );
             let _ = fs::remove_file(&partial_path);
             let _ = self.finish_job(
                 &job_id,
@@ -587,7 +639,7 @@ impl RenderManager {
                 None,
                 None,
                 Some("RENDER_FAILED"),
-                Some(&limited_error(&detail)),
+                Some(&safe_detail),
             );
             self.emit_progress(&app, &job_id, 0.0, 0, 0, "failed");
             self.emit_changed(&app, &job_id, "updated", "failed");
@@ -622,6 +674,13 @@ impl RenderManager {
         let (bytes, sha256, duration_ms) = match verified {
             Ok(result) => result,
             Err(error) => {
+                let safe_error = logging::redact_text(&error);
+                logging::log_event(
+                    LogLevel::Error,
+                    "render",
+                    "Render artifact validation failed",
+                    Some(json!({ "jobId": job_id, "error": safe_error })),
+                );
                 let _ = fs::remove_file(&partial_path);
                 let _ = self.finish_job(
                     &job_id,
@@ -632,7 +691,7 @@ impl RenderManager {
                     None,
                     None,
                     Some("RENDER_VALIDATION_FAILED"),
-                    Some(&error),
+                    Some(&safe_error),
                 );
                 self.emit_progress(&app, &job_id, 0.0, 0, 0, "failed");
                 self.emit_changed(&app, &job_id, "updated", "failed");
@@ -676,6 +735,18 @@ impl RenderManager {
         let _ = self.record_artifact(&job_id, &relative_path, bytes, &sha256, duration_ms);
         self.emit_progress(&app, &job_id, 100.0, expected_duration_ms as u64, 0, "completed");
         self.emit_changed(&app, &job_id, "updated", "succeeded");
+        logging::log_event(
+            LogLevel::Info,
+            "render",
+            "Render job completed",
+            Some(json!({
+                "jobId": job_id,
+                "bytes": bytes,
+                "sha256": sha256,
+                "durationMs": duration_ms,
+                "output": relative_path
+            })),
+        );
         self.remove_active(&job_id);
     }
 
@@ -1227,7 +1298,27 @@ fn file_sha256(path: &Path) -> Result<String, String> {
 }
 
 fn limited_error(value: &str) -> String {
-    value.chars().take(4000).collect()
+    logging::redact_text(value).chars().take(4000).collect()
+}
+
+fn drain_stderr(mut reader: impl Read, max_bytes: usize) -> String {
+    let mut tail = Vec::with_capacity(max_bytes.min(64 * 1024));
+    let mut buffer = [0_u8; 8192];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                tail.extend_from_slice(&buffer[..read]);
+                if tail.len() > max_bytes {
+                    let drain = tail.len() - max_bytes;
+                    tail.drain(..drain);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
+    String::from_utf8_lossy(&tail).to_string()
 }
 
 fn hydrate_composition_assets(

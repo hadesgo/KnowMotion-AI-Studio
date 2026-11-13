@@ -1,4 +1,7 @@
-use crate::{agent::get_provider_secret, safe_identifier, storage::persist_generated_image, AppState};
+use crate::{
+    agent::get_provider_secret, logging, logging::LogLevel, safe_identifier,
+    storage::persist_generated_image, AppState,
+};
 use chrono::Utc;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use reqwest::Client;
@@ -262,6 +265,19 @@ pub async fn transcribe_project_audio(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    logging::log_event(
+        LogLevel::Info,
+        "provider.asr",
+        "Audio transcription completed",
+        Some(json!({
+            "projectId": request.project_id,
+            "assetId": request.asset_id,
+            "providerId": request.provider.id,
+            "model": request.provider.model,
+            "segments": cues.len(),
+            "elapsedMs": started.elapsed().as_millis()
+        })),
+    );
     Ok(AsrResult {
         text,
         cues,
@@ -331,6 +347,18 @@ pub async fn embed_project_knowledge(
             .map_err(|error| error.to_string())?;
     }
     transaction.commit().map_err(|error| error.to_string())?;
+    logging::log_event(
+        LogLevel::Info,
+        "knowledge",
+        "Knowledge source embedded",
+        Some(json!({
+            "projectId": request.project_id,
+            "sourceId": request.source_id,
+            "providerId": request.provider.id,
+            "chunks": chunks.len(),
+            "dimensions": dimensions
+        })),
+    );
     Ok(EmbeddingResult {
         chunks: chunks.len(),
         dimensions,
@@ -399,6 +427,15 @@ pub async fn search_project_knowledge(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     results.truncate(request.limit.unwrap_or(8).clamp(1, 30));
+    logging::log_event(
+        LogLevel::Debug,
+        "knowledge",
+        "Knowledge search completed",
+        Some(json!({
+            "projectId": request.project_id,
+            "results": results.len()
+        })),
+    );
     Ok(results)
 }
 
@@ -448,6 +485,16 @@ pub async fn fetch_research_source(
     if text.trim().len() < 80 {
         return Err("Research source did not contain enough extractable text".to_string());
     }
+    logging::log_event(
+        LogLevel::Info,
+        "research",
+        "Research source fetched",
+        Some(json!({
+            "host": url.host_str(),
+            "bytes": bytes.len(),
+            "extractedCharacters": text.chars().count()
+        })),
+    );
     Ok(ResearchFetchResult {
         title,
         text: text.chars().take(120_000).collect(),
@@ -560,6 +607,19 @@ pub async fn generate_project_cloud_narration(
             ],
         );
     }
+    logging::log_event(
+        LogLevel::Info,
+        "provider.tts",
+        "Cloud narration completed",
+        Some(json!({
+            "projectId": request.project_id,
+            "providerId": request.provider.id,
+            "model": request.provider.model,
+            "scenes": assets.len(),
+            "audioMs": total_audio_ms,
+            "elapsedMs": started.elapsed().as_millis()
+        })),
+    );
     Ok(TtsGenerationResult {
         assets,
         provider_id: request.provider.id,
@@ -666,6 +726,19 @@ pub async fn generate_project_images(
         );
     }
 
+    logging::log_event(
+        LogLevel::Info,
+        "provider.image",
+        "Image generation completed",
+        Some(json!({
+            "projectId": request.project_id,
+            "sceneId": request.scene_id,
+            "providerId": request.provider.id,
+            "model": request.provider.model,
+            "images": assets.len(),
+            "elapsedMs": started.elapsed().as_millis()
+        })),
+    );
     Ok(ImageGenerationResult {
         assets,
         provider_id: request.provider.id,

@@ -6,6 +6,7 @@ use super::model::{
 };
 use super::provider::resolve_provider;
 use super::tools::{apply_agent_changes, list_revisions, undo_revision};
+use crate::logging::{self, LogLevel};
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -1025,6 +1026,25 @@ impl AgentRuntime {
             ],
         )
         .map_err(|error| error.to_string())?;
+        logging::log_event(
+            if call.status == "succeeded" {
+                LogLevel::Info
+            } else {
+                LogLevel::Warn
+            },
+            "provider",
+            "Provider call finished",
+            Some(serde_json::json!({
+                "callId": call_id,
+                "runId": call.run_id,
+                "stepKey": call.step_key,
+                "providerId": call.provider_id,
+                "model": call.model,
+                "status": call.status,
+                "latencyMs": call.latency_ms,
+                "error": call.error
+            })),
+        );
         Ok(call_id)
     }
 
@@ -1075,6 +1095,26 @@ impl AgentRuntime {
             run_status: run_status.to_string(),
             at: Utc::now().to_rfc3339(),
         };
+        let level = if payload.kind.contains("failed") {
+            LogLevel::Error
+        } else if payload.kind.contains("retry") || payload.kind.contains("interrupted") {
+            LogLevel::Warn
+        } else {
+            LogLevel::Info
+        };
+        logging::log_event(
+            level,
+            "workflow",
+            &payload.message,
+            Some(serde_json::json!({
+                "eventId": payload.event_id,
+                "runId": payload.run_id,
+                "stepKey": payload.step_key,
+                "kind": payload.kind,
+                "runStatus": payload.run_status,
+                "at": payload.at
+            })),
+        );
         if let Ok(db) = self.lock_db() {
             let _ = db.execute(
                 r#"

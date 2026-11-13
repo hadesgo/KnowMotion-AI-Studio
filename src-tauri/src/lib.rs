@@ -2,6 +2,7 @@ mod agent;
 mod capabilities;
 mod database;
 mod job_object;
+mod logging;
 mod media;
 mod render;
 mod storage;
@@ -31,6 +32,8 @@ struct AppState {
 struct DesktopStatus {
     storage_path: String,
     database_path: String,
+    log_directory: String,
+    logging_ready: bool,
     sqlite_ready: bool,
     project_count: i64,
 }
@@ -643,14 +646,41 @@ fn desktop_status(state: State<'_, AppState>) -> Result<DesktopStatus, String> {
     Ok(DesktopStatus {
         storage_path: state.projects_root.to_string_lossy().to_string(),
         database_path: state.database_path.to_string_lossy().to_string(),
+        log_directory: logging::directory()
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        logging_ready: logging::healthy(),
         sqlite_ready: true,
         project_count,
     })
 }
 
+#[tauri::command]
+fn write_webview_log(
+    level: String,
+    target: String,
+    message: String,
+    fields_json: Option<String>,
+) -> Result<(), String> {
+    if message.len() > 128 * 1024 || fields_json.as_ref().is_some_and(|value| value.len() > 128 * 1024)
+    {
+        return Err("WebView log payload exceeds the 128 KB limit".to_string());
+    }
+    let level =
+        logging::LogLevel::parse(&level).ok_or_else(|| "Unknown log level".to_string())?;
+    let fields = fields_json
+        .map(|value| {
+            serde_json::from_str::<Value>(&value)
+                .map_err(|error| format!("Invalid WebView log fields: {error}"))
+        })
+        .transpose()?;
+    logging::log_event(level, &target, &message, fields);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .register_uri_scheme_protocol("kmasset", |context, request| {
             serve_project_asset(context, request)
@@ -660,6 +690,17 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .map_err(|error| error.to_string())?;
+            logging::init(&app_data.join("logs")).map_err(|error| error.to_string())?;
+            logging::install_panic_hook();
+            logging::log_event(
+                logging::LogLevel::Info,
+                "app",
+                "Desktop application starting",
+                Some(serde_json::json!({
+                    "version": app.package_info().version.to_string(),
+                    "appData": app_data.to_string_lossy()
+                })),
+            );
             let projects_root = app_data.join("projects");
             fs::create_dir_all(&projects_root).map_err(|error| error.to_string())?;
             let database_path = app_data.join("studio.sqlite3");
@@ -683,6 +724,12 @@ pub fn run() {
             app.manage(agent_runtime);
             app.manage(media_service);
             app.manage(render_manager);
+            logging::log_event(
+                logging::LogLevel::Info,
+                "app",
+                "Desktop services initialized",
+                Some(serde_json::json!({ "databaseReady": true })),
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -694,6 +741,7 @@ pub fn run() {
             import_project_package,
             scan_project_missing_assets,
             desktop_status,
+            write_webview_log,
             capabilities::generate_project_images,
             capabilities::generate_project_cloud_narration,
             capabilities::transcribe_project_audio,
@@ -720,6 +768,15 @@ pub fn run() {
             render::render_list,
             render::render_cancel
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running KnowMotion AI Studio");
+        .build(tauri::generate_context!())
+        .expect("error while building KnowMotion AI Studio");
+    app.run(|_, event| {
+        if matches!(
+            event,
+            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+        ) {
+            logging::info("app", "Desktop application exiting");
+            logging::shutdown();
+        }
+    });
 }

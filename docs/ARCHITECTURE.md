@@ -151,7 +151,7 @@ flowchart BT
 | 浏览器 | 随应用打包的 Chrome Headless Shell | 不依赖系统 Chrome；生产导出离线可重复；不能依赖 WebView2 代替 |
 | 音视频 | Remotion 使用的 FFmpeg/FFprobe；后续可加独立后处理二进制 | 减少版本冲突；同时保留格式转换和音频探测能力 |
 | 进程通信 | Tauri command/events + sidecar stdout JSONL | 本地、无端口、无 CORS；易于 Rust 监管子进程生命周期 |
-| 日志 | `tracing` + 本地轮转文件 | 包含 jobId 和结构化字段；统一脱敏 API Key、Authorization 和提示词 |
+| 日志 | 有界队列 + 本地轮转 JSONL writer | 包含 jobId 和结构化字段；统一脱敏 API Key、Authorization、提示词与其他敏感值 |
 | 测试 | Rust unit/integration + Vitest + 干净 Windows VM smoke test | 覆盖状态机、存储、IPC、渲染和打包，不只测试 UI |
 
 ## 5. 推荐仓库结构
@@ -590,6 +590,8 @@ Provider 注册表按 `(capability, providerId, model)` 解析。业务任务可
 - 幂等键通常为 `runId/stepId/inputHash`；重试不重复计费或覆盖已完成产物。
 - 记录 token 数、图片张数、音频秒数、估算成本和请求耗时，不记录提示词正文。
 - 模型结构化输出先解析再 Schema 校验；失败可进行一次“格式修复”，仍失败则任务失败，不把脏数据写入项目。
+
+日志 writer 在独立线程消费 2048 条有界队列；`Warn/Error` 在队列满时可阻塞以保留关键诊断，普通记录采用非阻塞投递。活动文件达到 5 MiB 后轮转，最多保留 7 个历史文件，并清理 30 天以前日志。所有 message、target 和结构化字段都经过同一个递归脱敏器；WebView 错误通过专用 Rust command 进入同一入口。
 
 ## 9. Agent 与 Workflow 编排
 

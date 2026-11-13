@@ -182,6 +182,16 @@
 - 网页来源抓取包含 URL 协议/私网校验、重定向上限、5 MB 限制、正文提取和浏览器式脚本标签剔除。
 - 图片、TTS、ASR、Embedding 的密钥仍只从系统凭据库读取。
 
+### 3.10 生产日志与脱敏
+
+- Rust 后台线程通过有界队列写入结构化 JSONL，避免渲染和网络线程同步写盘。
+- `knowmotion.log` 达到 5 MiB 时轮转为 `knowmotion.{n}.log`，保留 7 份历史并删除 30 天以前文件。
+- 每条记录包含 UTC 毫秒时间、级别、target、message 和可选结构化字段；单条字段与消息有大小上限。
+- 统一脱敏器递归处理结构化字段，并覆盖 Authorization/Bearer、x-api-key、Cookie、API Key、密码、token、URL 用户信息/查询参数、私钥块和 Data URL。
+- WebView 的 `console.error`、`console.warn`、全局 error 与 unhandled rejection 通过 `write_webview_log` 进入同一后端脱敏器。
+- Rust panic hook、渲染生命周期、Provider 调用、Workflow 事件、媒体合成和知识检索均接入统一管线。
+- 渲染 stderr 采用 256 KiB 滚动尾部缓冲，既持续排空子进程管道，又避免无上限内存占用。
+
 ## 4. 部分实现
 
 | 功能 | 当前状态 | 缺口 |
@@ -213,7 +223,6 @@
 - Authenticode 签名、时间戳和 signed updater。
 - Windows 干净虚拟机 smoke test。
 - 组件测试和自动化桌面端 E2E。
-- 生产级日志轮转与统一脱敏日志管线。
 - 真实外部 LLM/Image/TTS/ASR/Embedding 服务端到端验收。
 
 ## 6. 与架构文档不一致的关键项
@@ -276,5 +285,5 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 
 1. 生成 IPC TypeScript 类型与 JSON Schema，消除手工重复模型。
 2. 增加组件测试和桌面端 E2E；当前已有前端 schema 单元测试与 Rust 单元测试。
-3. 增加 Windows Job Object、日志轮转和统一脱敏管线。
+3. 增加发布 CI 日志聚合与远程诊断导出。
 4. 增加发布签名、signed updater、SBOM 和 VM smoke test。
