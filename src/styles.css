@@ -29,8 +29,8 @@
   --border-soft: #1d2632;
   --text: #eef3f8;
   --subtext: #a7b3c2;
-  --muted: #778598;
-  --faint: #536071;
+  --muted: #8795a7;
+  --faint: #718095;
   --accent: #c8ff65;
   --accent-soft: rgba(200, 255, 101, 0.11);
   --accent-dark: #a7df42;
@@ -153,6 +153,26 @@ p {
 a {
   color: inherit;
   text-decoration: none;
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 200;
+  top: 10px;
+  left: 50%;
+  padding: 9px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 9px;
+  color: #08100b;
+  background: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  transform: translate(-50%, calc(-100% - 18px));
+  transition: transform 160ms ease-out;
+}
+
+.skip-link:focus {
+  transform: translate(-50%, 0);
 }
 
 @keyframes fade-in {

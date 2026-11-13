@@ -306,6 +306,10 @@
   scrollbar-gutter: stable;
 }
 
+.page-shell:focus {
+  outline: none;
+}
+
 .page-shell::-webkit-scrollbar {
   width: 8px;
 }
@@ -336,7 +340,7 @@
 }
 
 .page-heading h1 {
-  margin-top: 7px;
+  margin-top: 0;
   font-size: clamp(25px, 2.3vw, 36px);
   font-weight: 600;
   letter-spacing: -1.2px;

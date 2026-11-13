@@ -12,6 +12,7 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useStudioStore } from "../store/studio";
 import "./ui.css";
@@ -123,7 +124,7 @@ export function TextInput({
 }: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
-      className={`input h-11 w-full rounded-[9px] border border-[var(--border)] bg-[#0d131b] px-3 text-[13px] text-[var(--text)] transition-colors placeholder:text-[#4d5968] hover:border-[#344255] focus:border-[rgba(200,255,101,.45)] focus:bg-[#0f1720] focus:outline-none ${className}`}
+      className={`input h-11 w-full rounded-[9px] border border-[var(--border)] bg-[#0d131b] px-3 text-[13px] text-[var(--text)] transition-colors placeholder:text-[var(--faint)] hover:border-[#344255] focus:border-[rgba(200,255,101,.45)] focus:bg-[#0f1720] focus:outline-none ${className}`}
       {...props}
     />
   );
@@ -135,7 +136,7 @@ export function TextArea({
 }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea
-      className={`textarea min-h-[96px] w-full resize-y rounded-[9px] border border-[var(--border)] bg-[#0d131b] px-3 py-2.5 text-[13px] leading-[1.65] text-[var(--text)] transition-colors placeholder:text-[#4d5968] hover:border-[#344255] focus:border-[rgba(200,255,101,.45)] focus:bg-[#0f1720] focus:outline-none ${className}`}
+      className={`textarea min-h-[96px] w-full resize-y rounded-[9px] border border-[var(--border)] bg-[#0d131b] px-3 py-2.5 text-[13px] leading-[1.65] text-[var(--text)] transition-colors placeholder:text-[var(--faint)] hover:border-[#344255] focus:border-[rgba(200,255,101,.45)] focus:bg-[#0f1720] focus:outline-none ${className}`}
       {...props}
     />
   );
@@ -268,21 +269,67 @@ export function Modal({
   children: ReactNode;
   width?: number;
 }) {
+  const modalRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const focusableSelector =
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
+    const focusFirst = window.requestAnimationFrame(() => {
+      const focusable = modalRef.current?.querySelectorAll<HTMLElement>(focusableSelector);
+      focusable?.[0]?.focus();
+    });
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !modalRef.current) return;
+
+      const focusable = Array.from(
+        modalRef.current.querySelectorAll<HTMLElement>(focusableSelector),
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFirst);
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [onClose, open]);
+
   if (!open) return null;
   return createPortal(
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
+        ref={modalRef}
         className="modal"
         style={{ width }}
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
+        aria-describedby={description ? "modal-description" : undefined}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="modal__header">
           <div>
             <h2 id="modal-title">{title}</h2>
-            {description && <p>{description}</p>}
+            {description && <p id="modal-description">{description}</p>}
           </div>
           <IconButton label="关闭" onClick={onClose}>
             <X size={18} />

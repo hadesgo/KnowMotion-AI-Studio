@@ -11,7 +11,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { createTimeline, generateOutlineDraft } from "../data/demo";
 import { useStudioStore } from "../store/studio";
@@ -68,6 +68,47 @@ export function AssistantDrawer() {
         "我在当前项目上下文中工作。你可以让我调整节奏、补充分镜、生成字幕或切换画幅。每项操作都会直接写入项目。",
     },
   ]);
+  const drawerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const focusableSelector =
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+    const focusFrame = window.requestAnimationFrame(() => {
+      drawerRef.current
+        ?.querySelector<HTMLElement>("[data-autofocus]")
+        ?.focus();
+    });
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+      if (event.key !== "Tab" || !drawerRef.current) return;
+
+      const focusable = Array.from(
+        drawerRef.current.querySelectorAll<HTMLElement>(focusableSelector),
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [open, setOpen]);
 
   const contextLabel = useMemo(() => {
     if (!project) return "未打开项目";
@@ -224,7 +265,13 @@ export function AssistantDrawer() {
         aria-label="关闭助手"
         onClick={() => setOpen(false)}
       />
-      <aside className="assistant-drawer" aria-label="AI 工作区助手">
+      <aside
+        ref={drawerRef}
+        className="assistant-drawer"
+        aria-label="AI 工作区助手"
+        aria-modal="true"
+        role="dialog"
+      >
         <header className="assistant-drawer__header">
           <div className="assistant-title">
             <span className="assistant-orb">
@@ -235,7 +282,11 @@ export function AssistantDrawer() {
               <span>{contextLabel}</span>
             </div>
           </div>
-          <IconButton label="关闭助手" onClick={() => setOpen(false)}>
+          <IconButton
+            label="关闭助手"
+            onClick={() => setOpen(false)}
+            data-autofocus
+          >
             <X size={18} />
           </IconButton>
         </header>
@@ -268,7 +319,7 @@ export function AssistantDrawer() {
           ))}
         </div>
 
-        <div className="assistant-messages">
+        <div className="assistant-messages" aria-live="polite">
           {messages.map((message) => (
             <div
               key={message.id}
@@ -303,6 +354,7 @@ export function AssistantDrawer() {
               }}
               rows={2}
               placeholder="描述你想调整的内容…"
+              aria-label="描述你想调整的内容"
               disabled={!project}
             />
             <Button

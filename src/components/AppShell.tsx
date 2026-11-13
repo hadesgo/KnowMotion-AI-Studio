@@ -100,6 +100,9 @@ export function AppShell() {
 
   return (
     <div className="app-shell min-h-screen bg-studio-canvas text-studio-text antialiased">
+      <a className="skip-link" href="#studio-main">
+        跳到主要内容
+      </a>
       <TitleBar />
       <aside className="sidebar">
         <nav className="sidebar__main">
@@ -200,7 +203,7 @@ export function AppShell() {
       </aside>
 
       <div className="app-main">
-        <main className="page-shell">
+        <main id="studio-main" className="page-shell" tabIndex={-1}>
           <Outlet />
         </main>
       </div>
@@ -240,7 +243,6 @@ export function useCurrentProject() {
 }
 
 export function PageHeading({
-  eyebrow,
   title,
   description,
   actions,
@@ -253,7 +255,6 @@ export function PageHeading({
   return (
     <div className="page-heading">
       <div>
-        {eyebrow && <span className="eyebrow">{eyebrow}</span>}
         <h1>{title}</h1>
         {description && <p>{description}</p>}
       </div>

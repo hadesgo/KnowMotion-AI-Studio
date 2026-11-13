@@ -1,12 +1,9 @@
 import {
   ArrowRight,
   Bot,
-  CheckCircle2,
   Clapperboard,
   Clock3,
   Copy,
-  FileImage,
-  Film,
   FolderOpen,
   MoreHorizontal,
   Play,
@@ -16,12 +13,12 @@ import {
   Trash2,
   WandSparkles,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ScenePreview } from "../components/ScenePreview";
-import { Button, EmptyState, IconButton, Pill, Progress } from "../components/ui";
+import { Button, EmptyState, IconButton, Pill } from "../components/ui";
 import { useStudioStore } from "../store/studio";
-import type { VideoProject } from "../types";
+import type { ProjectStage, VideoProject } from "../types";
 import { projectDuration, truncate } from "../utils";
 import "./Dashboard.css";
 
@@ -31,6 +28,21 @@ const starters = [
   "大语言模型怎样理解上下文？",
   "没有钟表的文明如何计量时间？",
 ];
+
+const stageMeta: Record<ProjectStage, { label: string; path: string }> = {
+  planning: { label: "内容策划", path: "plan" },
+  script: { label: "脚本编辑", path: "script" },
+  storyboard: { label: "分镜", path: "storyboard" },
+  assets: { label: "图片素材", path: "assets" },
+  animation: { label: "动画", path: "animation" },
+  timeline: { label: "时间轴", path: "timeline" },
+  audio: { label: "音频与字幕", path: "audio" },
+  render: { label: "视频渲染", path: "render" },
+};
+
+function projectRoute(project: VideoProject) {
+  return `/projects/${project.id}/${stageMeta[project.stage].path}`;
+}
 
 function ProjectCard({
   project,
@@ -44,8 +56,26 @@ function ProjectCard({
   onDelete: () => void;
 }) {
   const [menu, setMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const scene = project.scenes[project.stage === "render" ? project.scenes.length - 1 : 0];
   const asset = project.assets.find((item) => item.id === scene?.assetId);
+
+  useEffect(() => {
+    if (!menu) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenu(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenu(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [menu]);
+
   return (
     <article className="project-card">
       <button type="button" className="project-card__preview" onClick={onOpen}>
@@ -62,12 +92,17 @@ function ProjectCard({
                 {project.isDemo ? "示例" : "草稿"}
               </Pill>
               <span>{project.settings.contentType}</span>
+              <span className="project-card__stage">
+                {stageMeta[project.stage].label}
+              </span>
             </div>
             <h3>{project.title}</h3>
           </div>
-          <div className="menu-wrap">
+          <div className="menu-wrap" ref={menuRef}>
             <IconButton
               label="项目菜单"
+              aria-haspopup="menu"
+              aria-expanded={menu}
               onClick={(event) => {
                 event.stopPropagation();
                 setMenu(!menu);
@@ -76,9 +111,10 @@ function ProjectCard({
               <MoreHorizontal size={17} />
             </IconButton>
             {menu && (
-              <div className="context-menu">
+              <div className="context-menu" role="menu" aria-label={`${project.title} 项目操作`}>
                 <button
                   type="button"
+                  role="menuitem"
                   onClick={() => {
                     setMenu(false);
                     onOpen();
@@ -88,6 +124,7 @@ function ProjectCard({
                 </button>
                 <button
                   type="button"
+                  role="menuitem"
                   onClick={() => {
                     setMenu(false);
                     onDuplicate();
@@ -97,6 +134,7 @@ function ProjectCard({
                 </button>
                 <button
                   type="button"
+                  role="menuitem"
                   className="danger"
                   onClick={() => {
                     setMenu(false);
@@ -109,7 +147,12 @@ function ProjectCard({
             )}
           </div>
         </div>
-        <button type="button" className="project-card__open" onClick={onOpen}>
+        <button
+          type="button"
+          className="project-card__open"
+          onClick={onOpen}
+          aria-label={`继续编辑 ${project.title}`}
+        >
           <span>
             <Clock3 size={14} />
             {Math.round(projectDuration(project))}s
@@ -138,6 +181,7 @@ export default function Dashboard() {
   const setAssistantOpen = useStudioStore((state) => state.setAssistantOpen);
   const [topic, setTopic] = useState("");
   const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const visibleProjects = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -147,8 +191,43 @@ export default function Dashboard() {
     );
   }, [projects, search]);
 
-  const activeProject = projects[0];
+  const activeProject = useMemo(
+    () =>
+      [...projects].sort(
+        (left, right) =>
+          Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+      )[0],
+    [projects],
+  );
   const totalScenes = projects.reduce((sum, project) => sum + project.scenes.length, 0);
+  const heroScene =
+    activeProject?.scenes[
+      activeProject.stage === "render"
+        ? Math.max(0, activeProject.scenes.length - 1)
+        : 0
+    ];
+  const heroAsset = activeProject?.assets.find(
+    (asset) => asset.id === heroScene?.assetId,
+  );
+  const heroPreviewTime =
+    (heroScene?.layers.find((layer) => layer.type === "text")?.start ?? 0) + 0.8;
+
+  const focusSearch = useCallback(() => {
+    searchRef.current?.focus();
+    searchRef.current?.select();
+  }, []);
+
+  useEffect(() => {
+    const focusSearchFromKeyboard = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        focusSearch();
+      }
+    };
+    document.addEventListener("keydown", focusSearchFromKeyboard);
+    return () =>
+      document.removeEventListener("keydown", focusSearchFromKeyboard);
+  }, [focusSearch]);
 
   const startProject = () => {
     const clean = topic.trim();
@@ -159,18 +238,20 @@ export default function Dashboard() {
     <div className="dashboard-page mx-auto w-full max-w-[1530px] px-4 pb-10 pt-7 xl:px-8">
       <div className="dashboard-topline">
         <div>
-          <span className="eyebrow">WEDNESDAY · CREATIVE DESK</span>
-          <h1>把知识，变成会呼吸的画面。</h1>
+          <h1>今天想把什么讲清楚？</h1>
+          <p>
+            {projects.length
+              ? `${projects.length} 个项目，${totalScenes} 个场景。继续手上的作品，或从一个新问题开始。`
+              : "从一个具体的问题开始，让研究、脚本和画面在同一个项目里生长。"}
+          </p>
         </div>
         <div className="dashboard-topline__actions">
           <Button
             variant="ghost"
             size="sm"
             icon={<Search size={15} />}
-            onClick={() => {
-              const input = document.getElementById("project-search");
-              input?.focus();
-            }}
+            onClick={focusSearch}
+            aria-keyshortcuts="Control+K"
           >
             查找项目
           </Button>
@@ -187,18 +268,13 @@ export default function Dashboard() {
 
       <section className="dashboard-hero">
         <div className="dashboard-hero__copy">
-          <span className="hero-kicker">
-            <Sparkles size={14} />
-            THE AI KNOWLEDGE ANIMATION WORKSTATION
-          </span>
           <h2>
-            从一个主题开始，
+            从一个好问题开始。
             <br />
-            <span>让 AI 帮你完成整支片子。</span>
+            <span>先讲清楚，再做漂亮。</span>
           </h2>
           <p>
-            研究、结构、脚本、分镜和动画共用同一个项目上下文。你负责判断，
-            AI 负责把想法变成可以预览的画面。
+            写下观众真正想弄懂的问题。你会先得到可编辑的内容结构，再进入脚本、分镜和动画。
           </p>
           <div className="hero-composer">
             <span className="hero-composer__icon">
@@ -222,7 +298,7 @@ export default function Dashboard() {
             </Button>
           </div>
           <div className="hero-starters">
-            <span>试试：</span>
+            <span>从这些问题开始</span>
             {starters.slice(0, 3).map((starter) => (
               <button
                 type="button"
@@ -234,112 +310,79 @@ export default function Dashboard() {
             ))}
           </div>
         </div>
-        <div className="dashboard-hero__visual" aria-hidden="true">
-          <div className="hero-visual__frame">
-            <div className="hero-visual__top">
-              <span>SCENE 03 / 05</span>
-              <span className="hero-visual__live">
-                <i />
-                LIVE PREVIEW
+        <div className="dashboard-hero__visual">
+          {activeProject ? (
+            <button
+              type="button"
+              className="hero-project-preview"
+              onClick={() => navigate(projectRoute(activeProject))}
+              aria-label={`继续 ${activeProject.title}`}
+            >
+              <div className="hero-project-preview__head">
+                <div>
+                  <small>继续上次</small>
+                  <strong>{stageMeta[activeProject.stage].label}</strong>
+                </div>
+                <Pill tone="accent" dot>
+                  {activeProject.isDemo ? "示例项目" : "草稿"}
+                </Pill>
+              </div>
+              <div className="hero-project-preview__frame">
+                <ScenePreview
+                  scene={heroScene}
+                  asset={heroAsset}
+                  ratio={activeProject.settings.aspectRatio}
+                  time={heroPreviewTime}
+                />
+              </div>
+              <div className="hero-project-preview__foot">
+                <div>
+                  <strong>{truncate(activeProject.title, 34)}</strong>
+                  <small>
+                    {Math.round(projectDuration(activeProject))}s ·{" "}
+                    {activeProject.scenes.length} 个场景
+                  </small>
+                </div>
+                <ArrowRight size={17} />
+              </div>
+            </button>
+          ) : (
+            <div className="hero-project-empty">
+              <span>
+                <Sparkles size={19} />
               </span>
+              <h3>你的第一支知识动画</h3>
+              <p>主题确定后，项目会把每一步产物留在同一个上下文里。</p>
             </div>
-            <div className="hero-visual__scene">
-              <span className="hero-visual__index">03</span>
-              <div className="hero-visual__orb">
-                <i />
-                <i />
-                <i />
-              </div>
-              <div className="hero-visual__title">信息，比光走得更远</div>
-              <div className="hero-visual__lines">
-                <span />
-                <span />
-                <span />
-              </div>
-            </div>
-            <div className="hero-visual__timeline">
-              <span />
-              <span />
-              <span />
-              <i />
-            </div>
-          </div>
-          <span className="hero-orbit hero-orbit--one" />
-          <span className="hero-orbit hero-orbit--two" />
-          <div className="hero-float-card hero-float-card--top">
-            <span>
-              <FileImage size={15} />
-            </span>
-            <div>
-              <small>VISUAL DIRECTION</small>
-              <strong>Editorial science</strong>
-            </div>
-          </div>
-          <div className="hero-float-card hero-float-card--bottom">
-            <span className="hero-float-card__number">42</span>
-            <div>
-              <small>PROJECT SECONDS</small>
-              <strong>节奏已平衡</strong>
-            </div>
-          </div>
+          )}
         </div>
       </section>
-
-      <div className="dashboard-stats">
-        <div className="stat-card">
-          <span className="stat-card__icon"><Film size={17} /></span>
-          <div>
-            <strong>{String(projects.length).padStart(2, "0")}</strong>
-            <span>知识项目</span>
-          </div>
-          <small>Local workspace</small>
-        </div>
-        <div className="stat-card">
-          <span className="stat-card__icon"><Clapperboard size={17} /></span>
-          <div>
-            <strong>{String(totalScenes).padStart(2, "0")}</strong>
-            <span>场景草稿</span>
-          </div>
-          <small>Across projects</small>
-        </div>
-        <div className="stat-card">
-          <span className="stat-card__icon"><CheckCircle2 size={17} /></span>
-          <div>
-            <strong>{projects.filter((project) => project.outlineApproved).length}</strong>
-            <span>策划已审批</span>
-          </div>
-          <small>Ready to produce</small>
-        </div>
-        <button
-          type="button"
-          className="stat-card stat-card--action"
-          onClick={() => navigate("/settings/models")}
-        >
-          <span className="stat-card__icon"><Sparkles size={17} /></span>
-          <div>
-            <strong>2</strong>
-            <span>创作能力入口</span>
-          </div>
-          <small>配置 AI 模型 <ArrowRight size={13} /></small>
-        </button>
-      </div>
 
       <div className="dashboard-grid">
         <section className="recent-section">
           <header className="section-heading">
             <div>
-              <span className="eyebrow">YOUR PROJECTS</span>
-              <h2>继续创作</h2>
+              <h2>最近项目</h2>
+              <p>
+                {visibleProjects.length} 个项目
+                {search.trim() ? "符合搜索" : "可按最近更新时间继续"}
+              </p>
             </div>
             <div className="section-heading__tools">
-              <label className="search-field">
+              <label className="search-field" htmlFor="project-search">
                 <Search size={15} />
                 <input
+                  ref={searchRef}
                   id="project-search"
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="搜索项目"
+                  aria-label="搜索项目"
+                  aria-keyshortcuts="Control+K"
                 />
+                <span className="search-field__shortcut" aria-hidden="true">
+                  Ctrl K
+                </span>
               </label>
               <Button
                 variant="secondary"
@@ -357,12 +400,19 @@ export default function Dashboard() {
                 <ProjectCard
                   key={project.id}
                   project={project}
-                  onOpen={() => navigate(`/projects/${project.id}/plan`)}
+                  onOpen={() => navigate(projectRoute(project))}
                   onDuplicate={() => {
                     const id = duplicateProject(project.id);
                     if (id) {
                       pushToast({ type: "success", title: "项目已复制" });
-                      navigate(`/projects/${id}/plan`);
+                      const duplicated = useStudioStore
+                        .getState()
+                        .projects.find((item) => item.id === id);
+                      navigate(
+                        duplicated
+                          ? projectRoute(duplicated)
+                          : `/projects/${id}/plan`,
+                      );
                     }
                   }}
                   onDelete={() => {
@@ -393,49 +443,14 @@ export default function Dashboard() {
         </section>
 
         <aside className="dashboard-side">
-          <section className="focus-card">
-            <header>
-              <span className="eyebrow">PRODUCTION FOCUS</span>
-              <Pill tone="accent" dot>进行中</Pill>
-            </header>
-            {activeProject ? (
-              <>
-                <h3>{truncate(activeProject.title, 32)}</h3>
-                <p>{activeProject.settings.topic}</p>
-                <div className="focus-card__progress">
-                  <span>
-                    <strong>当前阶段</strong>
-                    <small>
-                      {["策划", "脚本", "分镜", "动画", "渲染"][
-                        Math.min(4, Math.floor(activeProject.scenes.length / 2))
-                      ]}
-                    </small>
-                  </span>
-                  <span>{Math.min(92, Math.max(24, activeProject.scenes.length * 12))}%</span>
-                </div>
-                <Progress
-                  value={Math.min(92, Math.max(24, activeProject.scenes.length * 12))}
-                />
-                <Button
-                  variant="soft"
-                  className="focus-card__button"
-                  icon={<ArrowRight size={15} />}
-                  onClick={() => navigate(`/projects/${activeProject.id}/storyboard`)}
-                >
-                  继续编辑分镜
-                </Button>
-              </>
-            ) : (
-              <p>还没有正在进行的项目。</p>
-            )}
-          </section>
-
           <section className="capability-card">
             <header>
-              <span className="eyebrow">CAPABILITY</span>
+              <div>
+                <span className="capability-card__kicker">工作区状态</span>
+                <h3>创作管线</h3>
+              </div>
               <span className="capability-dot" />
             </header>
-            <h3>创作管线</h3>
             <div className="capability-list">
               {[
                 ["内容结构", activeProject?.outline.length ? "已生成" : "待生成"],
@@ -458,21 +473,36 @@ export default function Dashboard() {
             </button>
           </section>
 
-          <button
-            type="button"
-            className="idea-card"
-            onClick={() => {
-              updateProject(activeProject.id, { stage: "planning" });
-              navigate(`/projects/${activeProject.id}/plan`);
-            }}
-          >
-            <span><WandSparkles size={18} /></span>
-            <div>
-              <strong>继续完善内容策略</strong>
-              <small>从当前项目上下文继续</small>
-            </div>
-            <ArrowRight size={15} />
-          </button>
+          {activeProject ? (
+            <button
+              type="button"
+              className="idea-card"
+              onClick={() => {
+                updateProject(activeProject.id, { stage: "planning" });
+                navigate(`/projects/${activeProject.id}/plan`);
+              }}
+            >
+              <span><WandSparkles size={18} /></span>
+              <div>
+                <strong>回到内容策略</strong>
+                <small>重新检查主题、结构与叙事方式</small>
+              </div>
+              <ArrowRight size={15} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="idea-card"
+              onClick={() => navigate("/projects/new")}
+            >
+              <span><Plus size={18} /></span>
+              <div>
+                <strong>创建第一个项目</strong>
+                <small>从一个待解释的问题开始</small>
+              </div>
+              <ArrowRight size={15} />
+            </button>
+          )}
         </aside>
       </div>
     </div>
