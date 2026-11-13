@@ -8194,6 +8194,39 @@ kbd {
   white-space: nowrap;
 }
 
+.render-handoff__result {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 9px;
+  border: 1px solid rgba(131, 231, 176, 0.16);
+  border-radius: 7px;
+  color: var(--success);
+  background: rgba(131, 231, 176, 0.06);
+}
+
+.render-handoff__result > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.render-handoff__result strong {
+  color: var(--subtext);
+  font-size: 8px;
+  font-weight: 550;
+}
+
+.render-handoff__result small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .remotion-feature-list,
 .remotion-example-card {
   padding: 15px;

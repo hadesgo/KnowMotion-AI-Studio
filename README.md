@@ -54,3 +54,21 @@ npm run desktop:build
 ```
 
 架构设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，UI 规范见 [docs/UI_DESIGN.md](docs/UI_DESIGN.md)，Agent 系统见 [docs/AGENT_WORKFLOW.md](docs/AGENT_WORKFLOW.md)，动画引擎见 [docs/REMOTION_ENGINE.md](docs/REMOTION_ENGINE.md)。
+
+## 第一条端到端示例
+
+项目模板：**天空为什么是蓝色的？**
+
+- 约 60 秒、16:9、1080P。
+- 六场景、五种视觉风格。
+- 真实 Windows 中文旁白 WAV、字幕和程序化背景音乐。
+- Remotion Player 预览。
+- Remotion Renderer 导出 H.264/AAC MP4。
+
+```bash
+npm run mvp:render
+```
+
+输出：[renders/sky-blue-mvp.mp4](renders/sky-blue-mvp.mp4)
+
+MVP 验收明细见 [docs/MVP_ACCEPTANCE.md](docs/MVP_ACCEPTANCE.md)。

@@ -14,6 +14,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { PageHeading, useCurrentProject } from "../components/AppShell";
 import { ScenePreview } from "../components/ScenePreview";
 import {
@@ -220,6 +221,7 @@ function wrapCanvasText(
 
 export default function RenderPage() {
   const project = useCurrentProject();
+  const navigate = useNavigate();
   const updateProject = useStudioStore((state) => state.updateProject);
   const pushToast = useStudioStore((state) => state.pushToast);
   const [resolution, setResolution] = useState<Resolution>("720p");
@@ -420,9 +422,16 @@ export default function RenderPage() {
       <PageHeading
         eyebrow="RENDER & EXPORT"
         title="把项目变成一段可以分享的视频"
-        description="浏览器原型可以生成真实 WebM 预览；H.264 MP4 与 4K 输出需要接入桌面 Remotion 渲染服务。"
+        description="这里生成轻量 WebM 预览；完整 1080P H.264 MP4 由 Remotion Studio 的真实 Renderer 输出。"
         actions={
           <>
+            <Button
+              variant="primary"
+              icon={<MonitorPlay size={15} />}
+              onClick={() => navigate(`/projects/${project.id}/remotion`)}
+            >
+              打开完整 MP4 渲染
+            </Button>
             <Button
               variant="secondary"
               icon={<ImageIcon size={15} />}
@@ -490,9 +499,9 @@ export default function RenderPage() {
             <span><MonitorPlay size={19} /></span>
             <div>
               <strong>H.264 MP4 · 4K</strong>
-              <p>需要 Tauri Node + Remotion + FFmpeg 渲染运行时。</p>
+              <p>Remotion Studio 已接入桌面 Node + Renderer 导出链路。</p>
             </div>
-            <Pill tone="warning">未连接</Pill>
+            <Pill tone="success">已接入</Pill>
           </div>
           <div className="render-estimate">
             <div><span>输出时长</span><strong>{formatTime(previewDuration)}</strong></div>
@@ -662,7 +671,7 @@ export default function RenderPage() {
             <div><span>WebView</span><strong>READY</strong></div>
             <div><span>Canvas</span><strong>READY</strong></div>
             <div><span>MediaRecorder</span><strong>{("MediaRecorder" in window) ? "READY" : "N/A"}</strong></div>
-            <div><span>Node Renderer</span><strong className="is-offline">OFFLINE</strong></div>
+            <div><span>Node Renderer</span><strong>REMOTION STUDIO</strong></div>
           </div>
           <section className="render-history">
             <span className="eyebrow">HISTORY</span>

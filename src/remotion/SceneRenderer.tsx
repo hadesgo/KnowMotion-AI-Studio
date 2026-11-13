@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import {
   AbsoluteFill,
+  Audio,
   Easing,
   Img,
   Sequence,
@@ -595,6 +596,33 @@ export function KnowledgeComposition({
   let cursor = 0;
   return (
     <AbsoluteFill style={{ background: "#06090c" }}>
+      {composition.audioTracks.map((track) => {
+        const asset = composition.assets.find(
+          (item) => item.id === track.assetId,
+        );
+        if (!asset) return null;
+        const from = Math.max(
+          0,
+          Math.round((track.fromMs / 1000) * fps),
+        );
+        const durationInFrames = Math.max(
+          1,
+          Math.round(((track.toMs - track.fromMs) / 1000) * fps),
+        );
+        return (
+          <Sequence
+            key={track.id}
+            from={from}
+            durationInFrames={durationInFrames}
+          >
+            <Audio
+              src={asset.src}
+              volume={track.volume}
+              loop={track.loop}
+            />
+          </Sequence>
+        );
+      })}
       {composition.scenes.map((scene, index) => {
         const durationInFrames = Math.max(
           1,

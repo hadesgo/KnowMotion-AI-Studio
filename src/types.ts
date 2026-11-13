@@ -76,6 +76,7 @@ export interface Asset {
   prompt: string;
   createdAt: string;
   local: boolean;
+  durationMs?: number;
 }
 
 export interface SubtitleCue {
@@ -92,6 +93,7 @@ export interface TimelineClip {
   id: string;
   track: TrackKind;
   sceneId?: string;
+  assetId?: string;
   label: string;
   start: number;
   duration: number;
@@ -114,6 +116,7 @@ export interface RenderRecord {
   duration: number;
   size: string;
   status: "ready" | "failed";
+  outputPath?: string;
 }
 
 export interface VideoProject {

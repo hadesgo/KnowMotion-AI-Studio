@@ -23,13 +23,12 @@ export function RemotionPlayer({
   className?: string;
 }) {
   const playerRef = useRef<PlayerRef>(null);
-  const [muted, setMuted] = useState(true);
+  const [muted, setMuted] = useState(false);
   const [playing, setPlaying] = useState(false);
 
   useEffect(() => {
     const player = playerRef.current;
     if (!player) return;
-    player.mute();
     const handlePlay = () => setPlaying(true);
     const handlePause = () => setPlaying(false);
     player.addEventListener("play", handlePlay);

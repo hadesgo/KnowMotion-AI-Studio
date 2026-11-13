@@ -14,6 +14,7 @@ import {
   createProject,
   createScene,
   createTimeline,
+  makeSkyBlueProject,
   makeSampleProject,
 } from "../data/demo";
 import { makeId, nowIso } from "../utils";
@@ -53,6 +54,7 @@ interface StudioState {
 }
 
 const sample = makeSampleProject();
+const skyMvp = makeSkyBlueProject();
 
 const defaultProviders: ProviderProfile[] = [
   {
@@ -72,7 +74,7 @@ const defaultProviders: ProviderProfile[] = [
 export const useStudioStore = create<StudioState>()(
   persist(
     (set, get) => ({
-      projects: [sample],
+      projects: [skyMvp, sample],
       providers: defaultProviders,
       taskRoutes: {
         LLM: defaultProviders[0].id,
@@ -282,7 +284,21 @@ export const useStudioStore = create<StudioState>()(
     }),
     {
       name: "knowmotion-studio-v1",
+      version: 2,
       storage: createJSONStorage(() => studioStorage),
+      migrate: (persistedState, version) => {
+        const state = persistedState as Partial<StudioState>;
+        if (
+          version < 2 &&
+          !state.projects?.some((project) => project.id === skyMvp.id)
+        ) {
+          return {
+            ...state,
+            projects: [skyMvp, ...(state.projects ?? [])],
+          };
+        }
+        return state;
+      },
       partialize: (state) => ({
         projects: state.projects,
         providers: state.providers,

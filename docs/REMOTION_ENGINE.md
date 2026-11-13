@@ -53,6 +53,7 @@ interface CompositionDsl {
   fps: 24 | 25 | 30 | 50 | 60;
   durationInFrames: number;
   assets: CompositionAsset[];
+  audioTracks: AudioTrack[];
   scenes: SceneDsl[];
 }
 ```
@@ -62,6 +63,7 @@ interface CompositionDsl {
 - Composition 帧数与场景时长一致。
 - 场景 ID 不重复。
 - 图片图层引用的 `assetId` 存在。
+- 音轨引用的音频素材存在，且不超出 Composition 时长。
 - 图层时间不超过场景时长。
 - 场景和图层数量受限。
 
@@ -124,3 +126,14 @@ npm run remotion:render -- --composition composition.json --out renders/video.mp
 ## 9. 发布注意
 
 Remotion 的公司与团队使用许可需在商业发布前单独确认。产品代码不代替最终许可证审阅；随应用发布的 Chrome Headless Shell 和 FFmpeg 也需要保留对应许可证与版本清单。
+
+## 10. 第一条端到端视频
+
+“为什么天空是蓝色的？”项目规格：
+
+- 16:9，1920×1080，30 FPS，约 60 秒。
+- 六场景、五种视觉策略。
+- Windows Huihui 中文语音生成逐场景 WAV 旁白。
+- 本地程序化氛围音乐，可在完整时间轴循环。
+- Player 内置字幕、旁白与背景音乐。
+- H.264/AAC MP4 真实渲染。

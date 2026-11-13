@@ -7,6 +7,7 @@ import {
   Download,
   Film,
   Layers3,
+  LoaderCircle,
   Play,
   ScanLine,
   TerminalSquare,
@@ -23,18 +24,32 @@ import {
   validateComposition,
 } from "../remotion/schema";
 import { useStudioStore } from "../store/studio";
-import { downloadText } from "../utils";
+import { isTauriDesktop } from "../services/desktop";
+import { renderRemotionComposition } from "../services/remotion";
+import {
+  downloadText,
+  formatBytes,
+  makeId,
+  nowIso,
+} from "../utils";
 
 type PreviewMode = "composition" | "scene";
 
 export default function RemotionStudio() {
   const project = useCurrentProject();
   const pushToast = useStudioStore((state) => state.pushToast);
+  const updateProject = useStudioStore((state) => state.updateProject);
   const [mode, setMode] = useState<PreviewMode>("composition");
   const [selectedSceneId, setSelectedSceneId] = useState(
     project?.scenes[0]?.id ?? "",
   );
   const [validatedAt, setValidatedAt] = useState("");
+  const [rendering, setRendering] = useState(false);
+  const [renderResult, setRenderResult] = useState<{
+    outputPath: string;
+    bytes: number;
+    elapsedMs: number;
+  } | null>(null);
 
   const composition = useMemo(
     () => (project ? buildProjectComposition(project) : null),
@@ -106,6 +121,53 @@ export default function RemotionStudio() {
     }
   };
 
+  const renderMp4 = async () => {
+    const result = validateComposition(composition);
+    if (!result.valid) {
+      pushToast({
+        type: "error",
+        title: "Composition 无法渲染",
+        message: result.errors[0],
+      });
+      return;
+    }
+    setRendering(true);
+    try {
+      const output = await renderRemotionComposition(project.id, composition);
+      setRenderResult(output);
+      updateProject(project.id, (current) => ({
+        ...current,
+        stage: "render",
+        renders: [
+          {
+            id: makeId("render"),
+            createdAt: nowIso(),
+            resolution: `${composition.width}×${composition.height}`,
+            format: "MP4 · H.264",
+            duration: composition.durationInFrames / composition.fps,
+            size: formatBytes(output.bytes),
+            status: "ready",
+            outputPath: output.outputPath,
+          },
+          ...current.renders,
+        ],
+      }));
+      pushToast({
+        type: "success",
+        title: "MP4 渲染完成",
+        message: `真实 Rendermedia 输出 · ${formatBytes(output.bytes)} · ${Math.round(output.elapsedMs / 1000)} 秒`,
+      });
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: "MP4 渲染失败",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setRendering(false);
+    }
+  };
+
   return (
     <div className="remotion-studio-page">
       <PageHeading
@@ -130,6 +192,20 @@ export default function RemotionStudio() {
               onClick={downloadJson}
             >
               导出 DSL
+            </Button>
+            <Button
+              variant="primary"
+              icon={
+                rendering ? (
+                  <LoaderCircle size={15} className="spin" />
+                ) : (
+                  <Film size={15} />
+                )
+              }
+              onClick={() => void renderMp4()}
+              disabled={!isTauriDesktop || rendering || !validation?.valid}
+            >
+              {rendering ? "Renderer 正在逐帧渲染…" : "渲染完整 MP4"}
             </Button>
           </>
         }
@@ -303,6 +379,20 @@ export default function RemotionStudio() {
           </div>
           <div className="render-handoff__actions">
             <Button
+              variant="primary"
+              icon={
+                rendering ? (
+                  <LoaderCircle size={14} className="spin" />
+                ) : (
+                  <Film size={14} />
+                )
+              }
+              onClick={() => void renderMp4()}
+              disabled={!isTauriDesktop || rendering || !validation?.valid}
+            >
+              {rendering ? "真实渲染中…" : "渲染 MP4"}
+            </Button>
+            <Button
               variant="secondary"
               icon={<Clipboard size={14} />}
               onClick={() => void copyRenderCommand()}
@@ -318,6 +408,15 @@ export default function RemotionStudio() {
             </Button>
           </div>
           <code>npm run remotion:render -- --composition composition.json</code>
+          {renderResult && (
+            <div className="render-handoff__result">
+              <CheckCircle2 size={15} />
+              <span>
+                <strong>{formatBytes(renderResult.bytes)}</strong>
+                <small>{renderResult.outputPath}</small>
+              </span>
+            </div>
+          )}
         </section>
 
         <section className="remotion-feature-list">
@@ -340,10 +439,10 @@ export default function RemotionStudio() {
 
         <section className="remotion-example-card">
           <span className="eyebrow">INCLUDED EXAMPLE</span>
-          <h2>为什么夜空是黑色的？</h2>
+          <h2>{project.title}</h2>
           <p>
-            示例项目包含电影感开场、信息图解释、数据揭示、编辑部图片和极简收束
-            五种不同风格场景。
+            当前 Composition 由 {new Set(composition.scenes.map((scene) => scene.styleVariant)).size}
+            种视觉风格组成，可在完整视频与单场景预览之间切换。
           </p>
           <div>
             {composition.scenes.slice(0, 5).map((scene, index) => (

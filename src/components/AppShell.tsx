@@ -61,6 +61,22 @@ export function AppShell() {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [location.pathname]);
 
+  useEffect(() => {
+    const persistApi = useStudioStore.persist;
+    const flushHydratedState = () => {
+      const state = useStudioStore.getState();
+      useStudioStore.setState({
+        projects: [...state.projects],
+        providers: [...state.providers],
+      });
+    };
+    if (persistApi.hasHydrated()) {
+      flushHydratedState();
+      return;
+    }
+    return persistApi.onFinishHydration(flushHydratedState);
+  }, []);
+
   const stepState = useMemo(() => {
     if (!project) return new Map<string, "done" | "active" | "todo">();
     return new Map<string, "done" | "active" | "todo">([

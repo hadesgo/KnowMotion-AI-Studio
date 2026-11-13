@@ -1,4 +1,5 @@
 mod agent;
+mod media;
 
 use chrono::Utc;
 use rusqlite::{params, Connection};
@@ -8,7 +9,9 @@ use std::{
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
+    process::Command,
     sync::Mutex,
+    time::Instant,
 };
 use tauri::{Manager, State};
 
@@ -25,6 +28,14 @@ struct DesktopStatus {
     database_path: String,
     sqlite_ready: bool,
     project_count: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemotionRenderResult {
+    output_path: String,
+    bytes: u64,
+    elapsed_ms: u128,
 }
 
 fn open_database(path: &Path) -> Result<Connection, String> {
@@ -364,6 +375,157 @@ fn desktop_status(state: State<'_, AppState>) -> Result<DesktopStatus, String> {
     })
 }
 
+fn renderer_root() -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+    if let Ok(path) = std::env::var("KNOWMOTION_RENDERER_ROOT") {
+        candidates.push(PathBuf::from(path));
+    }
+    if let Ok(current) = std::env::current_dir() {
+        candidates.extend(current.ancestors().map(Path::to_path_buf));
+    }
+    if let Ok(executable) = std::env::current_exe() {
+        candidates.extend(
+            executable
+                .parent()
+                .into_iter()
+                .flat_map(Path::ancestors)
+                .map(Path::to_path_buf),
+        );
+    }
+    candidates
+        .into_iter()
+        .find(|candidate| {
+            candidate.join("package.json").is_file()
+                && candidate.join("scripts/render-remotion.ts").is_file()
+                && candidate.join("src/remotion/index.ts").is_file()
+        })
+        .ok_or_else(|| {
+            "Remotion renderer source is unavailable in this build. Set KNOWMOTION_RENDERER_ROOT to the project root."
+                .to_string()
+        })
+}
+
+fn resolve_node_executable() -> Result<PathBuf, String> {
+    if let Ok(path) = std::env::var("KNOWMOTION_NODE") {
+        let candidate = PathBuf::from(path);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+    let direct = PathBuf::from("node.exe");
+    if Command::new(&direct).arg("--version").output().is_ok() {
+        return Ok(direct);
+    }
+    let mut candidates = Vec::new();
+    candidates.push(PathBuf::from(r"C:\Program Files\nodejs\node.exe"));
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let installs = PathBuf::from(local_app_data).join("Author Software/nvm/installs");
+        if let Ok(entries) = fs::read_dir(installs) {
+            let mut versions = entries
+                .filter_map(Result::ok)
+                .filter_map(|entry| {
+                    let candidate = entry.path().join("node.exe");
+                    candidate.is_file().then_some(candidate)
+                })
+                .collect::<Vec<_>>();
+            versions.sort();
+            versions.reverse();
+            candidates.extend(versions);
+        }
+    }
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| {
+            "Node.js executable is unavailable. Set KNOWMOTION_NODE to a bundled Node runtime."
+                .to_string()
+        })
+}
+
+#[tauri::command]
+async fn render_remotion_composition(
+    app: tauri::AppHandle,
+    project_id: String,
+    composition_json: String,
+) -> Result<RemotionRenderResult, String> {
+    if !safe_identifier(&project_id) {
+        return Err("Invalid project id".to_string());
+    }
+    if composition_json.len() > 20 * 1024 * 1024 {
+        return Err("Composition exceeds the 20 MB render limit".to_string());
+    }
+    let project_root = renderer_root()?;
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    let job_id = Utc::now().format("%Y%m%d-%H%M%S").to_string();
+    let job_directory = app_data
+        .join("projects")
+        .join(&project_id)
+        .join("cache/render-jobs");
+    let output_directory = app_data.join("projects").join(&project_id).join("renders");
+    fs::create_dir_all(&job_directory).map_err(|error| error.to_string())?;
+    fs::create_dir_all(&output_directory).map_err(|error| error.to_string())?;
+    let composition_path = job_directory.join(format!("{job_id}.json"));
+    let output_path = output_directory.join(format!("{job_id}.mp4"));
+    write_atomic(&composition_path, composition_json.as_bytes())?;
+
+    let renderer_script = project_root.join("node_modules/tsx/dist/cli.mjs");
+    if !renderer_script.is_file() {
+        return Err("tsx renderer dependency is missing".to_string());
+    }
+    let node_executable = resolve_node_executable()?;
+    let project_root_for_command = project_root.clone();
+    let composition_for_command = composition_path.clone();
+    let output_for_command = output_path.clone();
+    let started = Instant::now();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let mut command = Command::new(node_executable);
+        command
+            .current_dir(&project_root_for_command)
+            .arg(renderer_script)
+            .arg("scripts/render-remotion.ts")
+            .arg("--composition")
+            .arg(composition_for_command)
+            .arg("--out")
+            .arg(output_for_command);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
+        command.output().map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+
+    if !result.status.success() {
+        return Err(format!(
+            "Remotion renderer failed: {}",
+            String::from_utf8_lossy(&result.stderr)
+                .chars()
+                .rev()
+                .take(2000)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect::<String>()
+        ));
+    }
+    let bytes = fs::metadata(&output_path)
+        .map_err(|error| error.to_string())?
+        .len();
+    if bytes == 0 {
+        return Err("Remotion renderer produced an empty file".to_string());
+    }
+    Ok(RemotionRenderResult {
+        output_path: output_path.to_string_lossy().to_string(),
+        bytes,
+        elapsed_ms: started.elapsed().as_millis(),
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -378,12 +540,15 @@ pub fn run() {
             let database = open_database(&database_path).map_err(|error| error.to_string())?;
             let agent_runtime =
                 agent::runtime::AgentRuntime::new(&database_path, projects_root.clone())?;
+            let media_service =
+                media::MediaService::new(projects_root.clone(), app_data.join("cache/media"))?;
             app.manage(AppState {
                 database: Mutex::new(database),
                 projects_root,
                 database_path,
             });
             app.manage(agent_runtime);
+            app.manage(media_service);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -404,7 +569,10 @@ pub fn run() {
             agent::workflow_undo_revision,
             agent::provider_save_secret,
             agent::provider_clear_secret,
-            agent::provider_test
+            agent::provider_test,
+            media::generate_project_narration,
+            media::generate_background_music,
+            render_remotion_composition
         ])
         .run(tauri::generate_context!())
         .expect("error while running KnowMotion AI Studio");

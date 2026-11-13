@@ -3,6 +3,7 @@ import {
   AudioLines,
   Captions,
   Download,
+  LoaderCircle,
   Mic2,
   Play,
   Plus,
@@ -29,6 +30,11 @@ import {
 } from "../components/ui";
 import { useStudioStore } from "../store/studio";
 import type { Asset, SubtitleCue } from "../types";
+import { isTauriDesktop } from "../services/desktop";
+import {
+  generateBackgroundMusic,
+  generateNarrationAudio,
+} from "../services/media";
 import {
   downloadText,
   formatBytes,
@@ -49,6 +55,8 @@ export default function AudioSubtitles() {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedCueId, setSelectedCueId] = useState(project?.subtitles[0]?.id ?? "");
   const [audioUrl, setAudioUrl] = useState("");
+  const [generatingAudio, setGeneratingAudio] = useState(false);
+  const [generatingMusic, setGeneratingMusic] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const scene = project?.scenes.find((item) => item.id === activeSceneId);
@@ -143,6 +151,186 @@ export default function AudioSubtitles() {
     });
   };
 
+  const generateAllNarration = async () => {
+    if (!isTauriDesktop) {
+      pushToast({
+        type: "error",
+        title: "需要桌面版",
+        message: "真实 WAV 旁白由 Windows 本地语音引擎生成。",
+      });
+      return;
+    }
+    setGeneratingAudio(true);
+    try {
+      const generated = await generateNarrationAudio(
+        project.id,
+        project.scenes,
+        project.audio.voice,
+        project.audio.rate,
+      );
+      const generatedByScene = new Map(
+        generated.map((item) => [item.sceneId, item]),
+      );
+      let cursor = 0;
+      const cues: SubtitleCue[] = [];
+      const narrationClips = generated.map((item) => {
+        const scene = project.scenes.find((entry) => entry.id === item.sceneId);
+        const start = cursor;
+        const duration = Math.max(1, (item.durationMs ?? 0) / 1000 + 0.35);
+        const source = (scene?.narration ?? item.name)
+          .split(/(?<=[。！？])/)
+          .map((part) => part.trim())
+          .filter(Boolean);
+        const segments = source.length ? source : [scene?.narration ?? item.name];
+        const spokenDuration = Math.max(1, (item.durationMs ?? 0) / 1000);
+        const step = spokenDuration / segments.length;
+        segments.forEach((text, index) => {
+          cues.push({
+            id: makeId("sub"),
+            sceneId: item.sceneId,
+            start: Number((start + 0.15 + index * step).toFixed(2)),
+            end: Number((start + 0.15 + (index + 1) * step).toFixed(2)),
+            text,
+          });
+        });
+        cursor += duration;
+        return {
+          id: makeId("clip"),
+          track: "narration" as const,
+          sceneId: item.sceneId,
+          assetId: item.id,
+          label: item.name,
+          start: start + 0.15,
+          duration: spokenDuration,
+          color: "#a78bfa",
+        };
+      });
+      const scenes = project.scenes.map((scene) => {
+        const audio = generatedByScene.get(scene.id);
+        return audio
+          ? {
+              ...scene,
+              duration: Math.max(
+                scene.duration,
+                (audio.durationMs ?? 0) / 1000 + 0.35,
+              ),
+            }
+          : scene;
+      });
+      let videoCursor = 0;
+      const videoClips = scenes.map((scene, index) => {
+        const clip = {
+          id: makeId("clip"),
+          track: "video" as const,
+          sceneId: scene.id,
+          label: `${String(index + 1).padStart(2, "0")} ${scene.title}`,
+          start: videoCursor,
+          duration: scene.duration,
+          color: scene.accent,
+        };
+        videoCursor += scene.duration;
+        return clip;
+      });
+      const subtitleClips = cues.map((item) => ({
+        id: makeId("clip"),
+        track: "subtitle" as const,
+        sceneId: item.sceneId,
+        label: item.text,
+        start: item.start,
+        duration: Math.max(0.8, item.end - item.start),
+        color: "#c8ff65",
+      }));
+      updateProject(project.id, (current) => ({
+        ...current,
+        assets: [
+          ...current.assets.filter(
+            (item) => !item.id.startsWith("narration-"),
+          ),
+          ...generated,
+        ],
+        scenes,
+        subtitles: cues,
+        timeline: [
+          ...current.timeline.filter(
+            (item) => item.track === "music" || item.track === "sfx",
+          ),
+          ...videoClips,
+          ...narrationClips,
+          ...subtitleClips,
+        ],
+        stage: "audio",
+      }));
+      setSelectedCueId(cues[0]?.id ?? "");
+      pushToast({
+        type: "success",
+        title: "真实旁白 WAV 已生成",
+        message: `${generated.length} 段旁白已写入项目，并同步字幕与时间轴。`,
+      });
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: "旁白生成失败",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setGeneratingAudio(false);
+    }
+  };
+
+  const generateMusic = async () => {
+    if (!isTauriDesktop) {
+      pushToast({
+        type: "error",
+        title: "需要桌面版",
+        message: "背景音乐由本地 WAV 合成器生成。",
+      });
+      return;
+    }
+    setGeneratingMusic(true);
+    try {
+      const music = await generateBackgroundMusic(project.id, 15);
+      const totalDuration = project.scenes.reduce(
+        (sum, scene) => sum + scene.duration,
+        0,
+      );
+      updateProject(project.id, (current) => ({
+        ...current,
+        assets: [
+          ...current.assets.filter(
+            (item) => item.id !== "music-ambient-knowledge-bed",
+          ),
+          music,
+        ],
+        timeline: [
+          ...current.timeline.filter((clip) => clip.track !== "music"),
+          {
+            id: makeId("clip"),
+            track: "music",
+            sceneId: "project",
+            assetId: music.id,
+            label: music.name,
+            start: 0,
+            duration: totalDuration,
+            color: "#f0a760",
+          },
+        ],
+      }));
+      pushToast({
+        type: "success",
+        title: "背景音乐已生成",
+        message: "15 秒 WAV 氛围音乐会在完整视频时间轴中循环。",
+      });
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: "背景音乐生成失败",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setGeneratingMusic(false);
+    }
+  };
+
   const uploadMusic = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -177,6 +365,7 @@ export default function AudioSubtitles() {
         id: makeId("clip"),
         track: "music",
         sceneId: activeSceneId,
+        assetId: asset.id,
         label: file.name,
         start: 0,
         duration: Math.min(project.settings.duration, 12),
@@ -216,6 +405,20 @@ export default function AudioSubtitles() {
         description="浏览器试听使用系统语音；字幕时间与导出完全基于项目数据生成。"
         actions={
           <>
+            <Button
+              variant="soft"
+              icon={
+                generatingAudio ? (
+                  <LoaderCircle size={15} className="spin" />
+                ) : (
+                  <Mic2 size={15} />
+                )
+              }
+              disabled={generatingAudio || !isTauriDesktop}
+              onClick={() => void generateAllNarration()}
+            >
+              {generatingAudio ? "正在合成旁白…" : "生成全部旁白"}
+            </Button>
             <Button
               variant="secondary"
               icon={<Download size={15} />}
@@ -324,6 +527,21 @@ export default function AudioSubtitles() {
                 }
               />
             </label>
+            <Button
+              variant="secondary"
+              className="full-button"
+              icon={
+                generatingMusic ? (
+                  <LoaderCircle size={14} className="spin" />
+                ) : (
+                  <AudioLines size={14} />
+                )
+              }
+              disabled={generatingMusic || !isTauriDesktop}
+              onClick={() => void generateMusic()}
+            >
+              {generatingMusic ? "正在生成音乐…" : "生成背景音乐"}
+            </Button>
           </section>
         </aside>
 

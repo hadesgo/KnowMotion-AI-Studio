@@ -13,7 +13,8 @@
     "remotion:studio": "remotion studio src/remotion/index.ts",
     "remotion:render": "tsx scripts/render-remotion.ts",
     "remotion:validate": "tsx scripts/validate-remotion.ts",
-    "remotion:example": "tsx scripts/export-remotion-example.ts"
+    "remotion:example": "tsx scripts/export-remotion-example.ts",
+    "mvp:render": "tsx scripts/render-sky-blue-mvp.ts"
   },
   "dependencies": {
     "@remotion/bundler": "^4.0.543",

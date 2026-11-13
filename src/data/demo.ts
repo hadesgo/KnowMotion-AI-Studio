@@ -237,6 +237,151 @@ export function makeSampleProject(): VideoProject {
   return project;
 }
 
+export function makeSkyBlueProject(): VideoProject {
+  const sceneSpecs = [
+    {
+      title: "天空为什么是蓝色的？",
+      narration:
+        "抬头看晴天，天空几乎总是蓝色。可太阳光明明是白色的，蓝色究竟从哪里来？",
+      description:
+        "从明亮的蓝天和白色太阳形成反直觉对照，抛出为什么天空是蓝色的问题。",
+      prompt:
+        "Modern playful science animation, bright blue sky, sun rays entering atmosphere, bold editorial typography",
+      accent: "#8ef2ff",
+    },
+    {
+      title: "白光是颜色的合集",
+      narration:
+        "太阳光看起来是白色，其实混合了红、橙、黄、绿、蓝、靛、紫等许多颜色。",
+      description:
+        "一束白光通过棱镜分解成连续色谱，颜色依次展开。",
+      prompt:
+        "White sunlight passing through a glass prism, vivid rainbow spectrum, clean vector infographic",
+      accent: "#ffd166",
+    },
+    {
+      title: "空气分子挡住光",
+      narration:
+        "光进入大气后，会不断撞上氮气、氧气等分子。这些分子比可见光的波长小得多。",
+      description:
+        "蓝色小分子网络与不同波长的光波相遇，显示尺度差异。",
+      prompt:
+        "Atmospheric gas molecules and light waves, tiny molecular clusters, educational diagram",
+      accent: "#79a9ff",
+    },
+    {
+      title: "蓝光更容易散射",
+      narration:
+        "红光波长较长，更容易从分子旁穿过；蓝光波长较短，更容易被分子向四面八方散射。",
+      description:
+        "红波长直线穿过，蓝波长在空气分子间向多个方向散射。",
+      prompt:
+        "Rayleigh scattering comparison, red path passing through, blue light scattering in all directions",
+      accent: "#58c7ff",
+    },
+    {
+      title: "整片天空都在发光",
+      narration:
+        "你抬头看到的蓝光，来自整片天空向你的眼睛散射；太阳本身仍然包含全部颜色。",
+      description:
+        "无数散射方向汇聚到观察者眼睛，整片天空成为蓝色光源。",
+      prompt:
+        "Observer looking at scattered blue sky, rays converging into an eye, modern science illustration",
+      accent: "#9fe0ff",
+    },
+    {
+      title: "眼睛偏爱的蓝色",
+      narration:
+        "紫光虽然也会散射，人眼对蓝光更敏感，天空便呈现明亮而熟悉的蓝色。",
+      description:
+        "蓝紫色波谱进入人眼响应曲线，蓝色区域被高亮，完成知识结论。",
+      prompt:
+        "Playful eye sensitivity chart, blue and violet spectrum, warm friendly science animation",
+      accent: "#c8ff65",
+    },
+  ];
+  const scenes = sceneSpecs.map((spec, index) => {
+    const scene = createScene(spec.title, spec.narration, 10, index);
+    scene.description = spec.description;
+    scene.visualPrompt = spec.prompt;
+    scene.accent = spec.accent;
+    scene.shotType = ["Hook", "Explainer", "Diagram", "Evidence", "Reveal", "Takeaway"][
+      index
+    ];
+    scene.transition = ["淡入", "横向推移", "遮罩展开", "擦除", "柔光淡入", "直接切换"][
+      index
+    ];
+    scene.layers = [
+      {
+        ...createLayer("text", 0),
+        name: "主标题",
+        content: scene.title,
+        x: 8,
+        y: 68,
+        width: 72,
+        height: 18,
+        fontSize: index === 0 ? 52 : 45,
+      },
+    ];
+    return scene;
+  });
+  const outline = sceneSpecs.map((spec, index) => ({
+    id: makeId("outline"),
+    eyebrow: `${String(index + 1).padStart(2, "0")} · ${
+      ["HOOK", "SPECTRUM", "MOLECULES", "SCATTER", "EXPLAIN", "TAKEAWAY"][index]
+    }`,
+    title: spec.title,
+    body: spec.description,
+    seconds: 10,
+  }));
+  const subtitles = scenes.flatMap((scene, sceneIndex) => {
+    const parts = scene.narration
+      .split(/(?<=[。！？])/)
+      .map((text) => text.trim())
+      .filter(Boolean);
+    const step = scene.duration / Math.max(1, parts.length);
+    return parts.map((text, index) => ({
+      id: makeId("sub"),
+      sceneId: scene.id,
+      start: Number((sceneIndex * 10 + index * step).toFixed(2)),
+      end: Number((sceneIndex * 10 + (index + 1) * step).toFixed(2)),
+      text,
+    }));
+  });
+  return {
+    id: "project-mvp-sky-blue",
+    title: "天空为什么是蓝色的？",
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    stage: "script",
+    isDemo: true,
+    settings: {
+      topic: "为什么天空是蓝色的？",
+      contentType: "科学原理",
+      audience: "对日常科学好奇的年轻观众",
+      duration: 60,
+      aspectRatio: "16:9",
+      style: "现代趣味科普动画",
+      language: "简体中文",
+    },
+    outline,
+    outlineApproved: true,
+    researchSources: [],
+    scenes,
+    assets: [],
+    subtitles,
+    timeline: createTimeline(scenes),
+    audio: {
+      voice: "Microsoft Huihui Desktop",
+      rate: 1.12,
+      volume: 0.84,
+      subtitleSize: 32,
+      subtitlePosition: "bottom",
+    },
+    renders: [],
+  };
+}
+
 export function createProject(input: CreateProjectInput): VideoProject {
   const scenes = buildScenesFromOutline(
     [

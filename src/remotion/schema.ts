@@ -190,6 +190,21 @@ export const compositionAssetSchema = z
   })
   .strict();
 
+export const audioTrackSchema = z
+  .object({
+    id: z.string().min(1).max(120),
+    assetId: z.string().min(1).max(120),
+    fromMs: z.number().finite().min(0),
+    toMs: z.number().finite().positive(),
+    volume: z.number().finite().min(0).max(1).default(1),
+    loop: z.boolean().default(false),
+  })
+  .strict()
+  .refine((track) => track.toMs > track.fromMs, {
+    message: "音轨结束时间必须晚于开始时间",
+    path: ["toMs"],
+  });
+
 export const compositionSchema = z
   .object({
     schemaVersion: z.literal("1.0"),
@@ -206,6 +221,7 @@ export const compositionSchema = z
     ]),
     durationInFrames: z.number().int().positive(),
     assets: z.array(compositionAssetSchema).max(500),
+    audioTracks: z.array(audioTrackSchema).max(200),
     scenes: z.array(sceneDslSchema).min(1).max(100),
   })
   .strict()
@@ -241,6 +257,27 @@ export const compositionSchema = z
             path: ["scenes"],
           });
         }
+      }
+    }
+    for (const track of composition.audioTracks) {
+      if (!assetIds.has(track.assetId)) {
+        context.addIssue({
+          code: "custom",
+          message: `音轨 ${track.id} 引用了不存在的素材 ${track.assetId}`,
+          path: ["audioTracks"],
+        });
+      }
+      const frameToleranceMs = (1000 / composition.fps) * 1.1;
+      if (
+        track.toMs >
+        (composition.durationInFrames / composition.fps) * 1000 +
+          frameToleranceMs
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: `音轨 ${track.id} 超出 Composition 时长`,
+          path: ["audioTracks"],
+        });
       }
     }
   });
@@ -291,8 +328,16 @@ export function sceneToRemotionDsl(
   )[index % 5];
   const durationMs = Math.max(500, scene.duration * 1000);
   const accent = scene.accent || "#c8ff65";
+  const isSkyTopic = /天空|蓝天|blue sky/i.test(project.settings.topic);
   const titleEnd = durationMs;
   const bodyStart = Math.min(durationMs - 250, 850);
+  const sceneStartMs =
+    project.scenes
+      .slice(0, Math.max(0, project.scenes.findIndex((item) => item.id === scene.id)))
+      .reduce((sum, item) => sum + item.duration * 1000, 0);
+  const hasSubtitles = project.subtitles.some(
+    (cue) => cue.sceneId === scene.id,
+  );
   const layers: SceneLayerDsl[] = [
     {
       type: "text",
@@ -317,7 +362,10 @@ export function sceneToRemotionDsl(
       align: "left",
       letterSpacing: -1,
     },
-    {
+  ];
+
+  if (!hasSubtitles) {
+    layers.push({
       type: "text",
       id: `${scene.id}-narration`,
       timing: { fromMs: bodyStart, toMs: durationMs },
@@ -329,7 +377,7 @@ export function sceneToRemotionDsl(
       },
       opacity: 0.78,
       x: style === "minimal" ? 16 : 8,
-      y: style === "cinematic" ? 76 : 81,
+      y: style === "cinematic" ? 74 : 79,
       width: style === "diagram" ? 70 : 62,
       height: 14,
       rotation: 0,
@@ -339,11 +387,40 @@ export function sceneToRemotionDsl(
       fontWeight: 400,
       align: "left",
       letterSpacing: 0,
-    },
-  ];
+    });
+  }
+
+  for (const cue of project.subtitles.filter((item) => item.sceneId === scene.id)) {
+    const fromMs = Math.max(0, (cue.start * 1000) - sceneStartMs);
+    const toMs = Math.min(durationMs, (cue.end * 1000) - sceneStartMs);
+    if (toMs <= fromMs) continue;
+    layers.push({
+      type: "text",
+      id: `${scene.id}-subtitle-${cue.id}`,
+      timing: { fromMs, toMs },
+      animation: {
+        type: "fade",
+        delayMs: 0,
+        durationMs: 220,
+        easing: "easeOut",
+      },
+      opacity: 0.96,
+      x: 8,
+      y: 89,
+      width: 84,
+      height: 7,
+      rotation: 0,
+      content: cue.text,
+      color: "#ffffff",
+      fontSize: project.audio.subtitleSize,
+      fontWeight: 500,
+      align: "center",
+      letterSpacing: 0,
+    });
+  }
 
   if (style === "cinematic" || style === "editorial") {
-    const fallbackAsset = ensureFallbackAsset(project, scene, index, assets);
+    const fallbackAsset = ensureFallbackAsset(project, scene, assets);
     if (fallbackAsset) {
       layers.unshift({
         type: "image",
@@ -480,7 +557,7 @@ export function sceneToRemotionDsl(
     });
   }
 
-  const backgrounds: Record<
+  const defaultBackgrounds: Record<
     SceneDsl["styleVariant"],
     SceneDsl["background"]["colors"]
   > = {
@@ -490,6 +567,17 @@ export function sceneToRemotionDsl(
     editorial: ["#2b2a24", "#141713", "#080b0a"],
     minimal: ["#1a2423", "#0d1214", "#070a0b"],
   };
+  const skyBackgrounds: Record<
+    SceneDsl["styleVariant"],
+    SceneDsl["background"]["colors"]
+  > = {
+    cinematic: ["#1767bd", "#0d3b7d", "#061b3c"],
+    diagram: ["#0b5f9c", "#0a2e56", "#061522"],
+    data: ["#123c70", "#0a213c", "#06101e"],
+    editorial: ["#447caf", "#183f66", "#07131f"],
+    minimal: ["#2d79a9", "#123952", "#07141e"],
+  };
+  const backgrounds = isSkyTopic ? skyBackgrounds : defaultBackgrounds;
 
   return sceneDslSchema.parse({
     schemaVersion: "1.0",
@@ -533,7 +621,6 @@ export function sceneToRemotionDsl(
 function ensureFallbackAsset(
   project: VideoProject,
   scene: Scene,
-  index: number,
   assets: CompositionDsl["assets"],
 ): string | null {
   const existing = project.assets.find(
@@ -550,12 +637,17 @@ function ensureFallbackAsset(
     }
     return existing.id;
   }
-  if (index % 2 !== 0) return null;
   const assetId = `${scene.id}-generated-visual`;
   if (!assets.some((asset) => asset.id === assetId)) {
     const accent = escapeXml(scene.accent);
+    const midColor = /天空|蓝天|blue sky/i.test(project.settings.topic)
+      ? "#0c4f8c"
+      : "#153e45";
+    const deepColor = /天空|蓝天|blue sky/i.test(project.settings.topic)
+      ? "#061b35"
+      : "#071015";
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="720" viewBox="0 0 960 720">
-      <defs><radialGradient id="g" cx="72%" cy="28%" r="80%"><stop offset="0" stop-color="${accent}" stop-opacity=".82"/><stop offset=".48" stop-color="#153e45"/><stop offset="1" stop-color="#071015"/></radialGradient></defs>
+      <defs><radialGradient id="g" cx="72%" cy="28%" r="80%"><stop offset="0" stop-color="${accent}" stop-opacity=".82"/><stop offset=".48" stop-color="${midColor}"/><stop offset="1" stop-color="${deepColor}"/></radialGradient></defs>
       <rect width="960" height="720" fill="url(#g)"/>
       <circle cx="700" cy="230" r="135" fill="none" stroke="${accent}" stroke-width="2" opacity=".7"/>
       <circle cx="700" cy="230" r="75" fill="none" stroke="${accent}" opacity=".45"/>
@@ -605,6 +697,22 @@ export function buildProjectComposition(project: VideoProject): CompositionDsl {
         ? "image/svg+xml"
         : undefined,
     }));
+  const audioTracks: CompositionDsl["audioTracks"] = project.timeline
+    .filter(
+      (clip) =>
+        (clip.track === "narration" || clip.track === "music") && clip.assetId,
+    )
+    .map((clip) => ({
+      id: `audio-${clip.id}`,
+      assetId: clip.assetId!,
+      fromMs: clip.start * 1000,
+      toMs: Math.min(
+        project.scenes.reduce((sum, scene) => sum + scene.duration, 0) * 1000,
+        (clip.start + clip.duration) * 1000,
+      ),
+      volume: clip.track === "music" ? 0.18 : project.audio.volume,
+      loop: clip.track === "music",
+    }));
   const scenes = project.scenes.map((scene, index) =>
     sceneToRemotionDsl(scene, index, project, assets),
   );
@@ -622,6 +730,7 @@ export function buildProjectComposition(project: VideoProject): CompositionDsl {
     fps,
     durationInFrames,
     assets,
+    audioTracks,
     scenes,
   });
 }
@@ -645,6 +754,7 @@ export function buildSceneComposition(
       Math.round((scene.durationMs / 1000) * fps),
     ),
     assets,
+    audioTracks: [],
     scenes: [scene],
   });
 }
