@@ -34,6 +34,7 @@ import {
   makeId,
   nowIso,
 } from "../utils";
+import "./RenderPage.css";
 
 type Resolution = "720p" | "1080p";
 type PreviewLength = "6s" | "full";
@@ -418,7 +419,7 @@ export default function RenderPage() {
   };
 
   return (
-    <div className="render-page">
+    <div className="render-page mx-auto w-full max-w-[1580px] px-4 pb-10 pt-6 xl:px-[30px]">
       <PageHeading
         eyebrow="RENDER & EXPORT"
         title="把项目变成一段可以分享的视频"

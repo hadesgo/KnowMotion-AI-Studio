@@ -32,6 +32,7 @@ import {
   makeId,
   nowIso,
 } from "../utils";
+import "./RemotionStudio.css";
 
 type PreviewMode = "composition" | "scene";
 
@@ -169,7 +170,7 @@ export default function RemotionStudio() {
   };
 
   return (
-    <div className="remotion-studio-page">
+    <div className="remotion-studio-page mx-auto w-full max-w-[1580px] px-4 pb-10 pt-6 xl:px-[30px]">
       <PageHeading
         eyebrow="REMOTION ENGINE"
         title="结构化场景，进入真实视频时间轴"

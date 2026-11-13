@@ -12,6 +12,7 @@ import { KnowledgeComposition } from "../remotion/SceneRenderer";
 import type { CompositionDsl } from "../remotion/schema";
 import { formatTime } from "../utils";
 import { Button, IconButton } from "./ui";
+import "./RemotionPlayer.css";
 
 export function RemotionPlayer({
   composition,

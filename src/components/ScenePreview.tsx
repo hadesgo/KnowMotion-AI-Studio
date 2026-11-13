@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import type { Asset, AspectRatio, Scene } from "../types";
+import "./ScenePreview.css";
 
 export function ScenePreview({
   scene,

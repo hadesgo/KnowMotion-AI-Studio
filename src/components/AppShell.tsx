@@ -35,6 +35,7 @@ import {
 } from "../services/desktop";
 import { AssistantDrawer } from "./AssistantDrawer";
 import { Button, IconButton, Pill, Toasts } from "./ui";
+import "./AppShell.css";
 
 const projectSteps = [
   { path: "workflow", label: "Agent 工作流", icon: Network },

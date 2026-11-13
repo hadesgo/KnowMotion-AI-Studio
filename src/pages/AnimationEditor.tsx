@@ -32,6 +32,7 @@ import {
   makeId,
   sceneSvg,
 } from "../utils";
+import "./AnimationEditor.css";
 
 export default function AnimationEditor() {
   const project = useCurrentProject();
@@ -172,7 +173,7 @@ export default function AnimationEditor() {
   };
 
   return (
-    <div className="animation-page">
+    <div className="animation-page mx-auto w-full max-w-[1580px] px-4 pb-10 pt-6 xl:px-[30px]">
       <PageHeading
         eyebrow="ANIMATION WORKBENCH"
         title="让每个信息在正确的时刻出现"

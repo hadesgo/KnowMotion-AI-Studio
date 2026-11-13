@@ -35,6 +35,7 @@ import {
   saveProviderSecret,
   testProviderConnection,
 } from "../services/agentWorkflow";
+import "./Models.css";
 
 const capabilities: ProviderCapability[] = [
   "LLM",
@@ -226,7 +227,7 @@ export default function Models() {
   };
 
   return (
-    <div className="models-page">
+    <div className="models-page mx-auto w-full max-w-[1580px] px-4 pb-10 pt-6 xl:px-[30px]">
       <PageHeading
         eyebrow="AI INFRASTRUCTURE"
         title="模型与能力配置"

@@ -14,6 +14,7 @@ import type {
 } from "react";
 import { createPortal } from "react-dom";
 import { useStudioStore } from "../store/studio";
+import "./ui.css";
 
 export function Button({
   variant = "secondary",
@@ -27,9 +28,28 @@ export function Button({
   size?: "sm" | "md" | "lg";
   icon?: ReactNode;
 }) {
+  const base =
+    "inline-flex shrink-0 cursor-pointer items-center justify-center gap-[7px] whitespace-nowrap rounded-[9px] border border-transparent font-medium transition-colors duration-150 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45";
+  const sizeClass = {
+    sm: "h-[31px] px-2.5 text-[10px]",
+    md: "h-[37px] px-[13px] text-[11px]",
+    lg: "h-11 px-[18px] text-xs",
+  }[size];
+  const variantClass = {
+    primary:
+      "bg-[var(--accent)] text-[#0a100b] shadow-[0_6px_24px_rgba(200,255,101,.1)] hover:bg-[#d6ff86]",
+    secondary:
+      "border-[var(--border)] bg-[var(--raised)] text-[var(--subtext)] hover:border-[#344255] hover:bg-[var(--raised-2)] hover:text-[var(--text)]",
+    soft:
+      "border-[rgba(200,255,101,.17)] bg-[var(--accent-soft)] text-[var(--accent)] hover:bg-[rgba(200,255,101,.16)]",
+    ghost:
+      "bg-transparent text-[var(--muted)] hover:bg-white/[.045] hover:text-[var(--text)]",
+    danger:
+      "border-[rgba(255,107,125,.16)] bg-[var(--danger-soft)] text-[var(--danger)] hover:bg-[rgba(255,107,125,.18)]",
+  }[variant];
   return (
     <button
-      className={`button button--${variant} button--${size} ${className}`}
+      className={`button ${base} ${sizeClass} ${variantClass} ${className}`}
       {...props}
     >
       {icon}
@@ -47,9 +67,14 @@ export function IconButton({
   label: string;
   children: ReactNode;
 }) {
+  const active = className.includes("is-active");
   return (
     <button
-      className={`icon-button ${className}`}
+      className={`icon-button inline-grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg border p-0 text-[var(--muted)] transition-colors duration-150 ${
+        active
+          ? "border-[var(--border)] bg-[var(--raised)] text-[var(--text)]"
+          : "border-transparent bg-transparent hover:border-[var(--border)] hover:bg-[var(--raised)] hover:text-[var(--text)]"
+      } ${className}`}
       aria-label={label}
       title={label}
       {...props}
@@ -73,16 +98,20 @@ export function Field({
   className?: string;
 }) {
   return (
-    <label className={`field ${className}`}>
-      <span className="field__label">{label}</span>
+    <label className={`field flex flex-col gap-[7px] ${className}`}>
+      <span className="text-[10px] font-medium text-[var(--subtext)]">
+        {label}
+      </span>
       {children}
       {error ? (
-        <span className="field__error">
+        <span className="flex items-center gap-1 text-[9px] leading-[1.45] text-[var(--danger)]">
           <AlertCircle size={13} />
           {error}
         </span>
       ) : hint ? (
-        <span className="field__hint">{hint}</span>
+        <span className="flex items-center gap-1 text-[9px] leading-[1.45] text-[var(--faint)]">
+          {hint}
+        </span>
       ) : null}
     </label>
   );
@@ -92,14 +121,24 @@ export function TextInput({
   className = "",
   ...props
 }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={`input ${className}`} {...props} />;
+  return (
+    <input
+      className={`input h-10 w-full rounded-lg border border-[var(--border)] bg-[#0d131b] px-3 text-[11px] text-[var(--text)] transition-colors placeholder:text-[#4d5968] hover:border-[#344255] focus:border-[rgba(200,255,101,.45)] focus:bg-[#0f1720] focus:outline-none ${className}`}
+      {...props}
+    />
+  );
 }
 
 export function TextArea({
   className = "",
   ...props
 }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea className={`textarea ${className}`} {...props} />;
+  return (
+    <textarea
+      className={`textarea min-h-[84px] w-full resize-y rounded-lg border border-[var(--border)] bg-[#0d131b] px-3 py-2.5 text-[11px] leading-[1.6] text-[var(--text)] transition-colors placeholder:text-[#4d5968] hover:border-[#344255] focus:border-[rgba(200,255,101,.45)] focus:bg-[#0f1720] focus:outline-none ${className}`}
+      {...props}
+    />
+  );
 }
 
 export function Select({
@@ -108,11 +147,17 @@ export function Select({
   ...props
 }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
-    <span className="select-wrap">
-      <select className={`select ${className}`} {...props}>
+    <span className="select-wrap relative block">
+      <select
+        className={`select h-10 w-full appearance-none rounded-lg border border-[var(--border)] bg-[#0d131b] py-0 pl-[11px] pr-[34px] text-[11px] text-[var(--text)] transition-colors hover:border-[#344255] focus:border-[rgba(200,255,101,.45)] focus:bg-[#0f1720] focus:outline-none ${className}`}
+        {...props}
+      >
         {children}
       </select>
-      <ChevronDown size={15} />
+      <ChevronDown
+        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--muted)]"
+        size={15}
+      />
     </span>
   );
 }
@@ -129,12 +174,20 @@ export function Segmented<T extends string>({
   label: string;
 }) {
   return (
-    <div className="segmented" role="group" aria-label={label}>
+    <div
+      className="segmented inline-flex gap-0.5 rounded-[9px] border border-[var(--border)] bg-[#0b1118] p-[3px]"
+      role="group"
+      aria-label={label}
+    >
       {options.map((option) => (
         <button
           key={option.value}
           type="button"
-          className={value === option.value ? "is-active" : ""}
+          className={`inline-flex h-7 cursor-pointer items-center justify-center gap-[5px] rounded-md border-0 px-2.5 text-[9px] ${
+            value === option.value
+              ? "bg-[var(--raised-2)] text-[var(--text)] shadow-[0_2px_8px_rgba(0,0,0,.22)]"
+              : "bg-transparent text-[var(--muted)] hover:text-[var(--subtext)]"
+          }`}
           onClick={() => onChange(option.value)}
         >
           {option.label}
@@ -153,9 +206,25 @@ export function Pill({
   tone?: "neutral" | "success" | "warning" | "info" | "danger" | "accent";
   dot?: boolean;
 }) {
+  const tones = {
+    neutral:
+      "border-[var(--border)] bg-white/[.025] text-[var(--muted)]",
+    success:
+      "border-[rgba(131,231,176,.2)] bg-[rgba(131,231,176,.08)] text-[var(--success)]",
+    warning:
+      "border-[rgba(255,188,102,.2)] bg-[var(--amber-soft)] text-[var(--amber)]",
+    info:
+      "border-[rgba(121,169,255,.2)] bg-[var(--blue-soft)] text-[var(--blue)]",
+    danger:
+      "border-[rgba(255,107,125,.2)] bg-[var(--danger-soft)] text-[var(--danger)]",
+    accent:
+      "border-[rgba(200,255,101,.22)] bg-[var(--accent-soft)] text-[var(--accent)]",
+  };
   return (
-    <span className={`pill pill--${tone}`}>
-      {dot && <span className="pill__dot" />}
+    <span
+      className={`pill inline-flex min-h-[21px] items-center gap-[5px] whitespace-nowrap rounded-full border px-2 text-[8px] font-semibold tracking-[.4px] ${tones[tone]}`}
+    >
+      {dot && <span className="h-[5px] w-[5px] rounded-full bg-current" />}
       {children}
     </span>
   );

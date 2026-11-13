@@ -16,6 +16,7 @@ import { Button, Field, Pill, Select, TextInput } from "../components/ui";
 import { contentTypes, visualStyles } from "../data/demo";
 import { useStudioStore } from "../store/studio";
 import type { AspectRatio } from "../types";
+import "./NewProject.css";
 
 const typeCopy: Record<string, string> = {
   知识科普: "清晰、有节奏的通用知识解释",
@@ -100,7 +101,7 @@ export default function NewProject() {
   };
 
   return (
-    <div className="new-project-page">
+    <div className="new-project-page mx-auto w-full max-w-[1580px] px-4 pb-10 pt-6 xl:px-[30px]">
       <PageHeading
         eyebrow="NEW KNOWLEDGE FILM"
         title="开始一支新的知识动画"

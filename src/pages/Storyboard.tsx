@@ -29,6 +29,7 @@ import { buildScenesFromOutline, createTimeline, generateOutlineDraft } from "..
 import { useStudioStore } from "../store/studio";
 import type { Scene } from "../types";
 import { truncate } from "../utils";
+import "./Storyboard.css";
 
 type ViewMode = "grid" | "list" | "filmstrip";
 
@@ -120,7 +121,7 @@ export default function Storyboard() {
   };
 
   return (
-    <div className="storyboard-page">
+    <div className="storyboard-page mx-auto w-full max-w-[1580px] px-4 pb-10 pt-6 xl:px-[30px]">
       <PageHeading
         eyebrow="VISUAL STORYBOARD"
         title="先让每一镜只讲清一件事"

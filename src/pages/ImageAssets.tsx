@@ -31,6 +31,7 @@ import {
 import { useStudioStore } from "../store/studio";
 import type { Asset } from "../types";
 import { createVisualDraftSvg, formatBytes, makeId, nowIso } from "../utils";
+import "./ImageAssets.css";
 
 const styles = ["编辑部极简", "电影感纪录片", "复古科学杂志", "未来主义数据"];
 
@@ -162,7 +163,7 @@ export default function ImageAssets() {
   };
 
   return (
-    <div className="assets-page">
+    <div className="assets-page mx-auto w-full max-w-[1580px] px-4 pb-10 pt-6 xl:px-[30px]">
       <PageHeading
         eyebrow="VISUAL ASSETS"
         title="为抽象知识找到可见的形状"

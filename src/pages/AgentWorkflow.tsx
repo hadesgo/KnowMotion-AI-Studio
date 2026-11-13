@@ -52,6 +52,7 @@ import {
 } from "../services/agentWorkflow";
 import { useStudioStore } from "../store/studio";
 import type { VideoProject } from "../types";
+import "./AgentWorkflow.css";
 
 const AUTO_ROUTE_KEY = "knowmotion-agent-routes-v1";
 
@@ -353,7 +354,7 @@ export default function AgentWorkflow() {
   };
 
   return (
-    <div className="agent-workflow-page">
+    <div className="agent-workflow-page mx-auto w-full max-w-[1580px] px-4 pb-10 pt-6 xl:px-[30px]">
       <PageHeading
         eyebrow="AGENT ORCHESTRATION"
         title="让 AI 接管创作流程，但把决定权留在你手里"

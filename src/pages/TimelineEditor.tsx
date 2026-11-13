@@ -31,6 +31,7 @@ import {
   makeId,
   toSrt,
 } from "../utils";
+import "./TimelineEditor.css";
 
 const tracks: { kind: TrackKind; label: string; icon: typeof Film }[] = [
   { kind: "video", label: "画面", icon: Film },
@@ -182,7 +183,7 @@ export default function TimelineEditor() {
   };
 
   return (
-    <div className="timeline-page">
+    <div className="timeline-page mx-auto w-full max-w-[1580px] px-4 pb-10 pt-6 xl:px-[30px]">
       <PageHeading
         eyebrow="TIMELINE"
         title="在一条时间线上对齐画面、声音和文字"

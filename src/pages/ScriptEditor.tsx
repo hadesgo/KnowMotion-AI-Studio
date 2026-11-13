@@ -26,6 +26,7 @@ import {
 } from "../data/demo";
 import { useStudioStore } from "../store/studio";
 import { estimateSpeechSeconds, truncate } from "../utils";
+import "./ScriptEditor.css";
 
 export default function ScriptEditor() {
   const project = useCurrentProject();
@@ -161,7 +162,7 @@ export default function ScriptEditor() {
   };
 
   return (
-    <div className="script-page">
+    <div className="script-page mx-auto w-full max-w-[1580px] px-4 pb-10 pt-6 xl:px-[30px]">
       <PageHeading
         eyebrow="SCRIPT ROOM"
         title="让旁白、画面与节奏一起成立"

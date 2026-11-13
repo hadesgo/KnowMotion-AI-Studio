@@ -18,6 +18,7 @@ import { useStudioStore } from "../store/studio";
 import type { SubtitleCue } from "../types";
 import { makeId } from "../utils";
 import { Button, IconButton } from "./ui";
+import "./AssistantDrawer.css";
 
 interface AssistantMessage {
   id: string;

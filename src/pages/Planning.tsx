@@ -28,6 +28,7 @@ import { generateOutlineDraft } from "../data/demo";
 import { useStudioStore } from "../store/studio";
 import type { OutlineSection, ResearchSource } from "../types";
 import { makeId } from "../utils";
+import "./Planning.css";
 
 const strategies = [
   {
@@ -156,7 +157,7 @@ export default function Planning() {
   };
 
   return (
-    <div className="planning-page">
+    <div className="planning-page mx-auto w-full max-w-[1580px] px-4 pb-10 pt-6 xl:px-[30px]">
       <PageHeading
         eyebrow="AI PLANNING"
         title="把主题变成一个值得看完的故事"

@@ -23,6 +23,7 @@ import { Button, EmptyState, IconButton, Pill, Progress } from "../components/ui
 import { useStudioStore } from "../store/studio";
 import type { VideoProject } from "../types";
 import { projectDuration, truncate } from "../utils";
+import "./Dashboard.css";
 
 const starters = [
   "为什么夜空是黑色的？",
@@ -155,7 +156,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="dashboard-page">
+    <div className="dashboard-page mx-auto w-full max-w-[1530px] px-4 pb-10 pt-7 xl:px-8">
       <div className="dashboard-topline">
         <div>
           <span className="eyebrow">WEDNESDAY · CREATIVE DESK</span>

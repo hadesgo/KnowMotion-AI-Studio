@@ -42,6 +42,7 @@ import {
   nowIso,
   toSrt,
 } from "../utils";
+import "./AudioSubtitles.css";
 
 export default function AudioSubtitles() {
   const project = useCurrentProject();
@@ -398,7 +399,7 @@ export default function AudioSubtitles() {
   };
 
   return (
-    <div className="audio-page">
+    <div className="audio-page mx-auto w-full max-w-[1580px] px-4 pb-10 pt-6 xl:px-[30px]">
       <PageHeading
         eyebrow="AUDIO & CAPTIONS"
         title="让声音和文字跟着画面呼吸"

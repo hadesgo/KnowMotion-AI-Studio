@@ -280,7 +280,7 @@ sequenceDiagram
 
 - Tauri 2 负责桌面窗口、SQLite 和项目目录写入；同一份前端在浏览器中回退到 `localStorage`。
 - 桌面模式下，项目状态写入 SQLite，并同步生成独立的 `project.json`、脚本、分镜、素材清单、动画时间轴和字幕文件。
-- Tailwind CSS v4 负责工具类和设计 Token，工作站专用控件使用同一构建管线中的组件样式层。
+- Tailwind CSS v4 负责工具类和设计 Token。全局 `styles.css` 只保留重置、Token、公共动画与可访问性规则；按钮、字段等基础控件以及每个页面/领域组件的专属样式分别位于同名 CSS 文件，并在组件入口中导入。
 - 图片生成是真实可执行的本地 SVG 视觉草案生成器，不伪装为在线 AI 图片。
 - 旁白试听使用系统 Web Speech API。
 - 视频预览使用 Canvas + MediaRecorder 生成 WebM。

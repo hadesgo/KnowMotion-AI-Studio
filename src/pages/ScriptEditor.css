@@ -1,0 +1,364 @@
+@reference "../styles.css";
+
+@media (max-width: 1400px) {
+  .script-layout {
+    grid-template-columns: 210px minmax(420px, 1fr) 220px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .script-layout {
+    grid-template-columns: 190px minmax(390px, 1fr);
+  }
+
+  .script-inspector {
+    display: none;
+  }
+}
+
+/* Script */
+.script-layout {
+  @apply grid min-h-[calc(100vh-180px)] grid-cols-[230px_minmax(440px,1fr)_240px] items-start gap-3;
+}
+
+.script-scenes,
+.script-inspector {
+  @apply overflow-hidden rounded-[13px] border border-[var(--border-soft)] bg-[var(--panel)];
+}
+
+.script-scenes {
+  position: sticky;
+  top: calc(var(--topbar-height) + 16px);
+}
+
+.script-scenes header {
+  @apply flex items-center justify-between border-b border-[var(--border-soft)] px-[13px] pb-[11px] pt-3.5;
+}
+
+.script-scenes h2 {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.script-scene-list {
+  max-height: calc(100vh - 330px);
+  padding: 5px;
+  overflow-y: auto;
+}
+
+.script-scene-list button {
+  display: grid;
+  grid-template-columns: 25px 1fr auto;
+  width: 100%;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.script-scene-list button:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.script-scene-list button.is-active {
+  border-color: rgba(200, 255, 101, 0.15);
+  background: var(--accent-soft);
+}
+
+.script-scene-list__index {
+  padding-top: 1px;
+  color: var(--faint);
+  font-size: 7px;
+}
+
+.script-scene-list button > span:nth-child(2) {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.script-scene-list strong {
+  overflow: hidden;
+  color: var(--subtext);
+  font-size: 9px;
+  font-weight: 520;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.script-scene-list small {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 7px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.script-scene-list em {
+  color: var(--faint);
+  font-size: 7px;
+  font-style: normal;
+}
+
+.script-scenes footer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 7px;
+  padding: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.script-scenes footer span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.script-scenes footer strong {
+  font-size: 9px;
+  font-weight: 520;
+}
+
+.script-scenes footer .progress {
+  grid-column: 1 / -1;
+}
+
+.script-editor {
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 13px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.script-editor__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 17px 19px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.script-editor__header > div:first-child {
+  flex: 1;
+}
+
+.script-editor__header input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: none;
+  font-size: 18px;
+  font-weight: 560;
+}
+
+.script-editor__header-actions {
+  display: flex;
+}
+
+.script-paper {
+  margin: 18px;
+  padding: 18px;
+  border: 1px solid #293544;
+  border-radius: 11px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent),
+    #0c1219;
+}
+
+.script-paper__label {
+  display: flex;
+  justify-content: space-between;
+  color: var(--faint);
+  font-size: 8px;
+  font-weight: 550;
+}
+
+.narration-editor {
+  width: 100%;
+  min-height: 235px;
+  margin-top: 13px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: #dce5ed;
+  background: transparent;
+  font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+  font-size: 16px;
+  letter-spacing: 0.1px;
+  line-height: 2;
+  resize: vertical;
+}
+
+.narration-editor::placeholder {
+  color: #45515f;
+}
+
+.script-meta-strip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-top: 11px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.script-meta-strip > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 7px;
+}
+
+.script-notes-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 0 18px 18px;
+}
+
+.script-note-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.012);
+}
+
+.script-note-field > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 550;
+}
+
+.script-note-field textarea {
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--subtext);
+  background: transparent;
+  font-size: 9px;
+  line-height: 1.65;
+  resize: vertical;
+}
+
+.script-inspector {
+  position: sticky;
+  top: calc(var(--topbar-height) + 16px);
+  padding: 15px;
+}
+
+.script-inspector h3 {
+  margin-top: 5px;
+  font-size: 14px;
+  font-weight: 550;
+}
+
+.scene-health {
+  display: flex;
+  flex-direction: column;
+  margin: 13px 0;
+}
+
+.scene-health div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.scene-health span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.scene-health strong {
+  font-size: 9px;
+  font-weight: 520;
+}
+
+.inspector-divider {
+  height: 1px;
+  margin: 15px 0;
+  background: var(--border-soft);
+}
+
+.compact-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.compact-field > span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.compact-field select {
+  height: 34px;
+  padding: 0 9px;
+}
+
+.number-field {
+  display: flex;
+  height: 34px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0d131b;
+}
+
+.number-field input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: 9px;
+}
+
+.number-field span {
+  color: var(--faint);
+  font-size: 8px;
+}
+
+.script-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 15px;
+  padding: 10px;
+  border-radius: 8px;
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.script-tip p {
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.55;
+}
+
