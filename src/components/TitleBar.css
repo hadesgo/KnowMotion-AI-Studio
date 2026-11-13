@@ -1,0 +1,148 @@
+@reference "../styles.css";
+
+.brand {
+  @apply flex cursor-pointer items-center gap-[11px] border-0 bg-transparent text-left;
+}
+
+.brand__mark {
+  @apply relative grid place-items-center overflow-hidden border border-[rgba(200,255,101,.35)] bg-[var(--accent-soft)];
+}
+
+.brand__mark::before,
+.brand__mark::after,
+.brand__mark span {
+  content: "";
+  @apply absolute rounded-full border border-[var(--accent)];
+}
+
+.brand__mark::before {
+  @apply h-[18px] w-[18px] opacity-[.38];
+}
+
+.brand__mark::after {
+  @apply h-2 w-2 bg-[var(--accent)] shadow-[0_0_16px_var(--accent)];
+}
+
+.brand__mark span:first-child {
+  @apply h-[26px] w-[26px] border-dashed opacity-35;
+}
+
+.brand__mark span:last-child {
+  @apply h-[23px] w-0.5 border-0 bg-[rgba(200,255,101,.5)];
+  transform: rotate(36deg);
+}
+
+.brand__type {
+  @apply flex flex-col leading-none;
+}
+
+.brand__type strong {
+  @apply text-sm font-semibold tracking-[-.2px];
+}
+
+.brand__type small {
+  @apply mt-[5px] font-bold text-[var(--accent)] tracking-[2.4px];
+}
+
+.window-titlebar {
+  @apply fixed inset-x-0 top-0 z-50 flex h-[44px] items-center border-b border-[var(--border-soft)] bg-[rgba(10,14,20,.97)] pl-3;
+  user-select: none;
+}
+
+.brand.titlebar-brand {
+  @apply h-9 shrink-0 px-1.5;
+}
+
+.brand.titlebar-brand .brand__mark {
+  @apply h-7 w-7 rounded-lg;
+}
+
+.brand.titlebar-brand .brand__type strong {
+  @apply text-[13px];
+}
+
+.brand.titlebar-brand .brand__type small {
+  @apply mt-1 text-[7px] tracking-[2px];
+}
+
+.titlebar-separator {
+  @apply mx-2 h-3.5 w-px shrink-0 bg-[var(--border)];
+}
+
+.titlebar-context {
+  @apply flex min-w-0 flex-1 items-center gap-2 text-[9px] font-semibold tracking-[.8px] text-[var(--faint)];
+}
+
+.titlebar-context i {
+  @apply not-italic text-[#3d4754];
+}
+
+.titlebar-context strong {
+  @apply max-w-[360px] overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-medium tracking-normal text-[var(--subtext)];
+}
+
+.titlebar-actions {
+  @apply flex h-full items-center gap-1 pr-0;
+}
+
+.window-controls {
+  @apply ml-1 flex h-full items-stretch border-l border-[var(--border-soft)];
+}
+
+.window-controls button {
+  @apply grid h-full w-11 place-items-center border-0 bg-transparent text-[var(--muted)] hover:bg-white/[.06] hover:text-[var(--text)];
+}
+
+.window-controls button.window-control--close:hover {
+  @apply bg-[#c42b1c] text-white;
+}
+
+.resize-handle {
+  @apply fixed z-[80];
+}
+
+.resize-handle--n {
+  @apply inset-x-2 top-0 h-1 cursor-ns-resize;
+}
+
+.resize-handle--s {
+  @apply inset-x-2 bottom-0 h-1 cursor-ns-resize;
+}
+
+.resize-handle--e {
+  @apply inset-y-2 right-0 w-1 cursor-ew-resize;
+}
+
+.resize-handle--w {
+  @apply inset-y-2 left-0 w-1 cursor-ew-resize;
+}
+
+.resize-handle--ne {
+  @apply right-0 top-0 h-2.5 w-2.5 cursor-nesw-resize;
+}
+
+.resize-handle--nw {
+  @apply left-0 top-0 h-2.5 w-2.5 cursor-nwse-resize;
+}
+
+.resize-handle--se {
+  @apply bottom-0 right-0 h-2.5 w-2.5 cursor-nwse-resize;
+}
+
+.resize-handle--sw {
+  @apply bottom-0 left-0 h-2.5 w-2.5 cursor-nesw-resize;
+}
+
+@media (max-width: 1180px) {
+  .brand.titlebar-brand {
+    @apply px-[15px];
+  }
+
+  .window-titlebar {
+    @apply pl-2;
+  }
+
+  .titlebar-context strong {
+    @apply max-w-[220px];
+  }
+}

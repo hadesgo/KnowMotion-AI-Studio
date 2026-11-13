@@ -44,7 +44,8 @@
   --danger-soft: rgba(255, 107, 125, 0.12);
   --success: #83e7b0;
   --sidebar-width: 236px;
-  --topbar-height: 58px;
+  --titlebar-height: 44px;
+  --topbar-height: var(--titlebar-height);
   --radius: 12px;
   --radius-lg: 18px;
   --shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
@@ -55,18 +56,23 @@
 }
 
 html {
+  height: 100%;
   background: var(--bg);
+}
+
+#root {
+  height: 100vh;
 }
 
 body {
   margin: 0;
   min-width: 1024px;
-  min-height: 100vh;
+  height: 100vh;
   background:
     radial-gradient(circle at 80% -20%, rgba(57, 112, 90, 0.13), transparent 30%),
     var(--bg);
   color: var(--text);
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 button,
@@ -76,7 +82,7 @@ select {
   font: inherit;
 }
 
-button {
+button:not(.button):not(.icon-button) {
   color: inherit;
 }
 
@@ -105,8 +111,8 @@ button:disabled {
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -114,9 +120,14 @@ button:disabled {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2a3542;
+  background: #283340;
   border-radius: 99px;
-  border: 2px solid transparent;
+  border: 1px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #344255;
   background-clip: content-box;
 }
 
@@ -163,5 +174,22 @@ a {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+html.tauri-window,
+html.tauri-window body,
+html.tauri-window #root {
+  background: transparent !important;
+}
+
+html.tauri-window .app-shell {
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 18px 60px rgb(0 0 0 / 42%);
+}
+
+html.tauri-window.window-maximized .app-shell {
+  border-radius: 0;
+  box-shadow: none;
 }
 

@@ -17,7 +17,6 @@ import {
   Plus,
   Settings2,
   Sparkles,
-  WandSparkles,
 } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import {
@@ -28,13 +27,11 @@ import {
   useParams,
 } from "react-router-dom";
 import { useStudioStore } from "../store/studio";
-import { downloadText, projectDuration } from "../utils";
-import {
-  exportDesktopProject,
-  isTauriDesktop,
-} from "../services/desktop";
+import { projectDuration } from "../utils";
+import { isTauriDesktop } from "../services/desktop";
 import { AssistantDrawer } from "./AssistantDrawer";
-import { Button, IconButton, Pill, Toasts } from "./ui";
+import { TitleBar } from "./TitleBar";
+import { Button, Toasts } from "./ui";
 import "./AppShell.css";
 
 const projectSteps = [
@@ -101,51 +98,10 @@ export function AppShell() {
     ]);
   }, [location.pathname, project]);
 
-  const exportProject = async () => {
-    if (!project) return;
-    if (isTauriDesktop) {
-      try {
-        const path = await exportDesktopProject(project);
-        useStudioStore.getState().pushToast({
-          type: "success",
-          title: "项目已导出",
-          message: path ? `文件已写入 ${path}` : undefined,
-        });
-      } catch (error) {
-        useStudioStore.getState().pushToast({
-          type: "error",
-          title: "项目导出失败",
-          message: error instanceof Error ? error.message : String(error),
-        });
-      }
-      return;
-    }
-    downloadText(
-      JSON.stringify({ ...project, isDemo: false }, null, 2),
-      `${project.title.replace(/[\\/:*?"<>|]/g, "-")}.knowmotion.json`,
-      "application/json",
-    );
-  };
-
   return (
     <div className="app-shell min-h-screen bg-studio-canvas text-studio-text antialiased">
+      <TitleBar />
       <aside className="sidebar">
-        <button
-          type="button"
-          className="brand"
-          aria-label="返回 Dashboard"
-          onClick={() => navigate("/")}
-        >
-          <span className="brand__mark">
-            <span />
-            <span />
-          </span>
-          <span className="brand__type">
-            <strong>KnowMotion</strong>
-            <small>AI STUDIO</small>
-          </span>
-        </button>
-
         <nav className="sidebar__main">
           <span className="sidebar__label">STUDIO</span>
           <NavLink to="/" end>
@@ -244,56 +200,6 @@ export function AppShell() {
       </aside>
 
       <div className="app-main">
-        <header className="topbar">
-          <div className="topbar__context">
-            {project ? (
-              <>
-                <span>PROJECT</span>
-                <i>/</i>
-                <strong>{project.title}</strong>
-                <Pill tone={project.isDemo ? "info" : "neutral"}>
-                  {project.isDemo ? "示例 · 可编辑" : "草稿"}
-                </Pill>
-              </>
-            ) : (
-              <>
-                <span>WORKSPACE</span>
-                <i>/</i>
-                <strong>
-                  {location.pathname.includes("models")
-                    ? "AI 模型配置"
-                    : location.pathname.includes("new")
-                      ? "新建项目"
-                      : "Dashboard"}
-                </strong>
-              </>
-            )}
-          </div>
-          <div className="topbar__actions">
-            {project && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={exportProject}
-                title="导出包含项目结构与内容的 JSON"
-              >
-                导出项目
-              </Button>
-            )}
-            <Button
-              variant={assistantOpen ? "soft" : "secondary"}
-              size="sm"
-              icon={<WandSparkles size={15} />}
-              onClick={() => setAssistantOpen(!assistantOpen)}
-            >
-              AI 助手
-            </Button>
-            <span className="topbar__divider" />
-            <IconButton label="新建项目" onClick={() => navigate("/projects/new")}>
-              <Plus size={18} />
-            </IconButton>
-          </div>
-        </header>
         <main className="page-shell">
           <Outlet />
         </main>
