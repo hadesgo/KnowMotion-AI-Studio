@@ -1031,6 +1031,13 @@ interface JobEnvelope<T> {
 8. 图片生成记录关联 sceneId、providerId、jobId、promptHash、seed 与 fingerprint。
 9. 失败只重试当前素材，不重跑整个分镜。
 
+批量生成与局部重绘：
+
+- 批量任务写入 `image_jobs`，同时生成 `tasks(kind='image')` 记录；worker 在应用启动时运行，按 600 ms 轮询、最多 2 并发，用事务原子领取 pending 任务。
+- 状态为 `pending / running / completed / failed / canceled / interrupted`；网络、429 和 5xx 自动重试一次，运行中的取消会在 Provider 返回后丢弃结果，重启时 running 转为 interrupted。
+- 每个任务通过 `image.job.changed` 推送完整视图，WebView 合并素材时按 assetId 去重，不覆盖项目里已有的素材。
+- 局部重绘在前端生成两张 PNG 遮罩（白底黑区 + 透明底黑区），后端只接受项目内源图与 PNG data URL：ComfyUI 走 `LoadImageMask → VAEEncodeForInpaint`，OpenAI 兼容通道走 multipart `images/edits`；结果另存为新素材并记录 `inpaint` 元数据。
+
 ### 13.3 TTS 任务
 
 1. Audio Agent 为每段旁白生成 TTS 请求，带语速、音色和情绪参数。

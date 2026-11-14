@@ -253,6 +253,15 @@ function buildDirective(input: {
   )}`;
 }
 
+/** 只有真正绑定了角色、场景或风格锁，锚点才算生效。 */
+export function hasSceneAnchors(anchors: SceneAnchors): boolean {
+  return (
+    anchors.characters.length > 0 ||
+    Boolean(anchors.location) ||
+    anchors.styleActive
+  );
+}
+
 export function composeAnchoredPrompt(
   basePrompt: string,
   anchors: SceneAnchors,
@@ -304,10 +313,7 @@ export function evaluateConsistency(
     ? project.assets.find((item) => item.id === scene.assetId)
     : undefined;
   const weak = anchors.referenceAssetIds.length === 0;
-  const hasAnchors =
-    anchors.characters.length > 0 ||
-    Boolean(anchors.location) ||
-    anchors.styleActive;
+  const hasAnchors = hasSceneAnchors(anchors);
 
   if (!hasAnchors) {
     return {

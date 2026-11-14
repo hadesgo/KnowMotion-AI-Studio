@@ -22,7 +22,7 @@ export interface ImageGenerationResult {
   anchorLabel: string;
 }
 
-export async function generateProjectImages(input: {
+export interface ImageGenerationRequestInput {
   projectId: string;
   sceneId: string;
   provider: ProviderProfile;
@@ -35,13 +35,47 @@ export async function generateProjectImages(input: {
   references?: ImageReferenceInput[];
   anchorLabel?: string;
   consistencyFingerprint?: string;
-}): Promise<ImageGenerationResult> {
+}
+
+export async function generateProjectImages(
+  input: ImageGenerationRequestInput,
+): Promise<ImageGenerationResult> {
   if (!isTauriDesktop) {
     throw new Error("在线图片生成需要 Tauri 桌面运行时。");
   }
   return invoke<ImageGenerationResult>("generate_project_images", {
     request: input,
   });
+}
+
+export interface InpaintResult {
+  asset: Asset;
+  providerId: string;
+  model: string;
+  elapsedMs: number;
+  mode: "openai-edits" | "comfyui-inpaint";
+  seed: number;
+}
+
+export async function inpaintProjectImage(input: {
+  projectId: string;
+  sceneId: string;
+  sourceAssetId: string;
+  provider: ProviderProfile;
+  prompt: string;
+  negativePrompt?: string;
+  size: string;
+  maskDataUrl: string;
+  maskAlphaDataUrl: string;
+  maskCoverage?: number;
+  seed?: number;
+  anchorLabel?: string;
+  consistencyFingerprint?: string;
+}): Promise<InpaintResult> {
+  if (!isTauriDesktop) {
+    throw new Error("局部重绘需要 Tauri 桌面运行时与已配置的图片 Provider。");
+  }
+  return invoke<InpaintResult>("inpaint_project_image", { request: input });
 }
 
 export async function generateCloudNarration(input: {

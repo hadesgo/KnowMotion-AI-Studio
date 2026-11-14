@@ -7,7 +7,9 @@ import {
   Image as ImageIcon,
   Images,
   Info,
+  ListChecks,
   LoaderCircle,
+  Paintbrush,
   Plus,
   ShieldCheck,
   Sparkles,
@@ -23,6 +25,8 @@ import {
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { PageHeading, useCurrentProject } from "../components/AppShell";
 import { ScenePreview } from "../components/ScenePreview";
+import { BatchImageDialog } from "../components/BatchImageDialog";
+import { InpaintStudio } from "../components/InpaintStudio";
 import {
   Button,
   EmptyState,
@@ -35,6 +39,7 @@ import {
   TextArea,
 } from "../components/ui";
 import { useStudioStore } from "../store/studio";
+import { useImageJobs } from "../hooks/useImageJobs";
 import type { Asset, ReferenceRole } from "../types";
 import { createVisualDraftSvg, formatBytes, makeId, nowIso } from "../utils";
 import { isTauriDesktop } from "../services/desktop";
@@ -46,6 +51,7 @@ import {
   composeAnchoredPrompt,
   createConsistencyStamp,
   evaluateConsistency,
+  hasSceneAnchors,
   resolveSceneAnchors,
   STYLE_LOCK_ENTITY_ID,
 } from "../services/consistency";
@@ -78,6 +84,8 @@ export default function ImageAssets() {
   const [collectOpen, setCollectOpen] = useState(false);
   const [collectRole, setCollectRole] = useState<ReferenceRole>("character");
   const [collectEntity, setCollectEntity] = useState("");
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [inpaintTarget, setInpaintTarget] = useState<Asset | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const scene = project?.scenes.find((item) => item.id === sceneId);
@@ -89,6 +97,15 @@ export default function ImageAssets() {
     () => (project && scene ? evaluateConsistency(project, scene).evaluation : null),
     [project, scene],
   );
+
+  const jobs = useImageJobs(project?.id, {
+    hasAsset: (assetId) =>
+      Boolean(project?.assets.some((asset) => asset.id === assetId)),
+    onAssets: (assets) => {
+      if (!project) return;
+      assets.forEach((asset) => addAsset(project.id, asset));
+    },
+  });
   const sceneAssets =
     project?.assets.filter((asset) => asset.sceneId === sceneId) ?? [];
   const selectedAsset =
@@ -117,7 +134,8 @@ export default function ImageAssets() {
       pushToast({ type: "error", title: "先写下画面描述" });
       return;
     }
-    const anchorContext = useAnchors ? anchors : null;
+    const anchorContext =
+      useAnchors && anchors && hasSceneAnchors(anchors) ? anchors : null;
     const composedPrompt = anchorContext
       ? composeAnchoredPrompt(prompt, anchorContext)
       : prompt;
@@ -370,6 +388,23 @@ export default function ImageAssets() {
           <>
             <Button
               variant="secondary"
+              icon={<ListChecks size={15} />}
+              onClick={() => {
+                if (!imageProvider) {
+                  pushToast({
+                    type: "error",
+                    title: "批量生成需要 Image Provider",
+                    message: "先在 AI 模型页配置一个声明 Image 能力的 Provider。",
+                  });
+                  return;
+                }
+                setBatchOpen(true);
+              }}
+            >
+              批量生成{jobs.activeCount ? ` · ${jobs.activeCount}` : ""}
+            </Button>
+            <Button
+              variant="secondary"
               icon={<Upload size={15} />}
               onClick={() => fileInput.current?.click()}
             >
@@ -392,6 +427,42 @@ export default function ImageAssets() {
         hidden
         onChange={upload}
       />
+
+      {jobs.jobs.length > 0 && (
+        <section className="asset-queue-strip" aria-label="图片生成队列">
+          <span className="asset-queue-strip__icon">
+            {jobs.activeCount ? (
+              <LoaderCircle className="spin" size={16} />
+            ) : (
+              <ListChecks size={16} />
+            )}
+          </span>
+          <div className="asset-queue-strip__body">
+            <strong>生成队列</strong>
+            <small>
+              {jobs.jobs.filter((job) => job.status === "running").length} 进行中 ·{" "}
+              {jobs.jobs.filter((job) => job.status === "pending").length} 等待 ·{" "}
+              {jobs.jobs.filter((job) => job.status === "completed").length} 完成 ·{" "}
+              {jobs.jobs.filter((job) => job.status === "failed").length} 失败
+            </small>
+          </div>
+          <div className="asset-queue-strip__thumbs">
+            {jobs.jobs
+              .flatMap((job) => job.assets)
+              .slice(0, 5)
+              .map((asset) => (
+                <img key={asset.id} src={asset.src} alt={asset.name} />
+              ))}
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setBatchOpen(true)}
+          >
+            打开队列
+          </Button>
+        </section>
+      )}
 
       <div className="assets-layout">
         <section className="asset-controls">
@@ -697,6 +768,24 @@ export default function ImageAssets() {
               <Button
                 variant="secondary"
                 className="full-button"
+                icon={<Paintbrush size={15} />}
+                onClick={() => {
+                  if (!imageProvider) {
+                    pushToast({
+                      type: "error",
+                      title: "局部重绘需要 Image Provider",
+                      message: "先在 AI 模型页配置一个声明 Image 能力的 Provider。",
+                    });
+                    return;
+                  }
+                  setInpaintTarget(selectedAsset);
+                }}
+              >
+                局部重绘遮罩区域
+              </Button>
+              <Button
+                variant="secondary"
+                className="full-button"
                 icon={<BookmarkPlus size={15} />}
                 onClick={openCollect}
               >
@@ -795,6 +884,44 @@ export default function ImageAssets() {
           </Button>
         </div>
       </Modal>
+
+      {batchOpen && (
+        <BatchImageDialog
+          open
+          onClose={() => setBatchOpen(false)}
+          project={project}
+          provider={imageProvider}
+          style={style}
+          size={
+            ratio === "square"
+              ? "1024x1024"
+              : ratio === "portrait"
+                ? "1024x1536"
+                : "1536x1024"
+          }
+          useAnchors={useAnchors}
+          jobs={jobs.jobs}
+          onEnqueue={jobs.enqueue}
+          onCancelJob={jobs.cancel}
+          onRetryJob={jobs.retry}
+          onClearFinished={jobs.clear}
+        />
+      )}
+
+      {inpaintTarget && (
+        <InpaintStudio
+          open
+          onClose={() => setInpaintTarget(null)}
+          project={project}
+          asset={inpaintTarget}
+          provider={imageProvider}
+          useAnchors={useAnchors}
+          onComplete={(asset) => {
+            addAsset(project.id, asset);
+            setSelectedAssetId(asset.id);
+          }}
+        />
+      )}
     </div>
   );
 }

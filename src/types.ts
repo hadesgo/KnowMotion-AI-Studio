@@ -143,6 +143,15 @@ export interface ReferenceAttachment {
   notes: string;
 }
 
+export interface InpaintMeta {
+  sourceAssetId: string;
+  mode: "openai-edits" | "comfyui-inpaint";
+  coverage: number;
+  seed: number;
+  anchorLabel: string;
+  fingerprint: string;
+}
+
 export interface ConsistencyStamp {
   fingerprint: string;
   anchorLabel: string;
@@ -170,6 +179,36 @@ export interface Asset {
   reference?: ReferenceAttachment;
   /** 生成时使用的锚点快照，用于检测设定漂移。 */
   consistency?: ConsistencyStamp;
+  /** 局部重绘来源与遮罩覆盖率。 */
+  inpaint?: InpaintMeta;
+}
+
+export type ImageJobStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "canceled"
+  | "interrupted";
+
+export interface ImageJob {
+  id: string;
+  taskId: string;
+  projectId: string;
+  sceneId: string;
+  status: ImageJobStatus;
+  providerName: string;
+  anchorLabel: string;
+  promptExcerpt: string;
+  count: number;
+  attempt: number;
+  maxAttempts: number;
+  assets: Asset[];
+  error?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
 }
 
 

@@ -1,6 +1,7 @@
 mod agent;
 mod capabilities;
 mod database;
+mod image_queue;
 mod job_object;
 mod logging;
 mod media;
@@ -727,6 +728,11 @@ pub fn run() {
                 projects_root.clone(),
                 app.handle(),
             )?;
+            let image_queue = image_queue::ImageQueue::new(
+                database.clone(),
+                projects_root.clone(),
+                app.handle(),
+            )?;
             app.manage(AppState {
                 database,
                 projects_root,
@@ -735,6 +741,7 @@ pub fn run() {
             app.manage(agent_runtime);
             app.manage(media_service);
             app.manage(render_manager);
+            app.manage(image_queue);
             logging::log_event(
                 logging::LogLevel::Info,
                 "app",
@@ -754,6 +761,12 @@ pub fn run() {
             desktop_status,
             write_webview_log,
             capabilities::generate_project_images,
+            capabilities::inpaint_project_image,
+            image_queue::enqueue_image_jobs,
+            image_queue::list_image_jobs,
+            image_queue::cancel_image_job,
+            image_queue::retry_image_job,
+            image_queue::clear_image_jobs,
             capabilities::generate_project_cloud_narration,
             capabilities::transcribe_project_audio,
             capabilities::embed_project_knowledge,

@@ -7,9 +7,11 @@ use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use rusqlite::Connection;
 use std::{
     net::IpAddr,
     path::Path,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tauri::State;
@@ -18,7 +20,7 @@ use uuid::Uuid;
 const MAX_REFERENCE_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_REFERENCE_IMAGES: usize = 3;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageProviderConfig {
     pub id: String,
@@ -32,7 +34,7 @@ pub struct ImageProviderConfig {
     pub capabilities: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageReferenceInput {
     #[serde(default)]
@@ -48,7 +50,7 @@ pub struct ImageReferenceInput {
     pub source: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageGenerationRequest {
     pub project_id: String,
@@ -70,7 +72,7 @@ pub struct ImageGenerationRequest {
     pub consistency_fingerprint: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageGenerationResult {
     pub assets: Vec<Value>,
@@ -673,9 +675,56 @@ fn wav_duration_ms(bytes: &[u8]) -> Result<i64, String> {
     Ok(duration_ms)
 }
 
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InpaintRequest {
+    pub project_id: String,
+    pub scene_id: String,
+    pub source_asset_id: String,
+    pub provider: ImageProviderConfig,
+    pub prompt: String,
+    #[serde(default)]
+    pub negative_prompt: String,
+    pub size: String,
+    /// 白底黑区（白=重绘）遮罩，供 ComfyUI LoadImageMask 使用。
+    pub mask_data_url: String,
+    /// 透明=重绘的遮罩，供 OpenAI images/edits 使用。
+    pub mask_alpha_data_url: String,
+    #[serde(default)]
+    pub mask_coverage: f32,
+    #[serde(default)]
+    pub seed: Option<i64>,
+    #[serde(default)]
+    pub anchor_label: String,
+    #[serde(default)]
+    pub consistency_fingerprint: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InpaintResult {
+    pub asset: Value,
+    pub provider_id: String,
+    pub model: String,
+    pub elapsed_ms: u128,
+    pub mode: String,
+    pub seed: i64,
+}
+
 #[tauri::command]
 pub async fn generate_project_images(
     state: State<'_, AppState>,
+    request: ImageGenerationRequest,
+) -> Result<ImageGenerationResult, String> {
+    execute_image_generation(&state.projects_root, &state.database, request).await
+}
+
+/// 队列 worker 与单次命令共用的生成入口：校验、Provider 调用、落盘、
+/// 用量记录和结构化日志都在这里完成。
+pub(crate) async fn execute_image_generation(
+    projects_root: &Path,
+    database: &Arc<Mutex<Connection>>,
     request: ImageGenerationRequest,
 ) -> Result<ImageGenerationResult, String> {
     if !safe_identifier(&request.project_id) || !safe_identifier(&request.scene_id) {
@@ -711,7 +760,7 @@ pub async fn generate_project_images(
     let mut reference_images: Vec<(&ImageReferenceInput, Vec<u8>)> = Vec::new();
     for reference in request.references.iter().take(MAX_REFERENCE_IMAGES) {
         match read_reference_bytes(
-            &state.projects_root,
+            projects_root,
             &request.project_id,
             &reference.source,
         ) {
@@ -774,18 +823,37 @@ pub async fn generate_project_images(
         }
     };
 
+    let reference_ids = reference_images
+        .iter()
+        .map(|(input, _)| input.asset_id.clone())
+        .collect::<Vec<_>>();
+    // 把锚点快照写进每个素材，批量队列产出的结果在重新打开应用后仍可判定是否过期。
+    let consistency = if request.consistency_fingerprint.is_empty() {
+        Value::Null
+    } else {
+        json!({
+            "fingerprint": request.consistency_fingerprint,
+            "anchorLabel": request.anchor_label,
+            "seed": seed,
+            "prompt": prompt,
+            "negativePrompt": request.negative_prompt,
+            "referenceAssetIds": reference_ids,
+            "conditioning": reference_mode,
+            "generatedAt": Utc::now().to_rfc3339()
+        })
+    };
     let mut assets = Vec::new();
     for (index, bytes) in images.into_iter().enumerate() {
         let asset_id = format!("asset_{}", Uuid::new_v4().simple());
         let mime_type = detect_image_mime(&bytes)?;
         let (relative, mime_type, _sha256) = persist_generated_image(
-            &state.projects_root,
+            projects_root,
             &request.project_id,
             &asset_id,
             &bytes,
             mime_type,
         )?;
-        assets.push(json!({
+        let mut asset = json!({
             "id": asset_id,
             "sceneId": request.scene_id,
             "name": format!("AI 视觉 {} · {}", index + 1, request.provider.name),
@@ -796,10 +864,14 @@ pub async fn generate_project_images(
             "local": false,
             "mimeType": mime_type,
             "providerId": request.provider.id,
-        }));
+        });
+        if consistency != Value::Null {
+            asset["consistency"] = consistency.clone();
+        }
+        assets.push(asset);
     }
 
-    if let Ok(database) = state.database.lock() {
+    if let Ok(database) = database.lock() {
         let _ = database.execute(
             r#"
             INSERT INTO usage_records(
@@ -890,6 +962,366 @@ fn read_reference_bytes(
     std::fs::read(&path).map_err(|error| format!("Unable to read reference image: {error}"))
 }
 
+#[tauri::command]
+pub async fn inpaint_project_image(
+    state: State<'_, AppState>,
+    request: InpaintRequest,
+) -> Result<InpaintResult, String> {
+    if !safe_identifier(&request.project_id)
+        || !safe_identifier(&request.scene_id)
+        || !safe_identifier(&request.source_asset_id)
+    {
+        return Err("Invalid inpaint request identifiers".to_string());
+    }
+    if !request.provider.enabled {
+        return Err("The selected image provider is disabled".to_string());
+    }
+    if !request
+        .provider
+        .capabilities
+        .iter()
+        .any(|capability| capability == "Image")
+    {
+        return Err("The selected provider does not declare Image capability".to_string());
+    }
+    if request.prompt.trim().is_empty() {
+        return Err("Inpaint prompt cannot be empty".to_string());
+    }
+    let (source_bytes, source_mime) = read_project_asset_image(
+        &state.projects_root,
+        &request.project_id,
+        &request.source_asset_id,
+    )?;
+    let mask = decode_png_data_url(&request.mask_data_url, "inpaint mask")?;
+    let seed = request.seed.unwrap_or_else(|| {
+        (Utc::now().timestamp_millis() as i64).rem_euclid(2_000_000_000)
+    });
+    let started = Instant::now();
+    let (bytes, mode) = match request.provider.protocol.as_str() {
+        "OpenAI Compatible" => {
+            let alpha_mask = decode_png_data_url(&request.mask_alpha_data_url, "alpha mask")?;
+            (
+                generate_openai_inpaint(
+                    &request.provider,
+                    request.prompt.trim(),
+                    &request.size,
+                    &source_bytes,
+                    source_mime,
+                    &alpha_mask,
+                )
+                .await?,
+                "openai-edits",
+            )
+        }
+        "ComfyUI" => (
+            generate_comfyui_inpaint(
+                &request.provider,
+                request.prompt.trim(),
+                &request.negative_prompt,
+                seed,
+                &source_bytes,
+                &mask,
+            )
+            .await?,
+            "comfyui-inpaint",
+        ),
+        other => {
+            return Err(format!(
+                "Provider protocol {other} does not implement image inpainting"
+            ))
+        }
+    };
+
+    let asset_id = format!("asset_{}", Uuid::new_v4().simple());
+    let mime_type = detect_image_mime(&bytes)?;
+    let (relative, mime_type, _sha256) = persist_generated_image(
+        &state.projects_root,
+        &request.project_id,
+        &asset_id,
+        &bytes,
+        mime_type,
+    )?;
+    let asset = json!({
+        "id": asset_id,
+        "sceneId": request.scene_id,
+        "name": format!("局部重绘 · {}", request.provider.name),
+        "kind": "image",
+        "src": crate::storage::public_asset_source(&request.project_id, &relative),
+        "prompt": request.prompt,
+        "createdAt": Utc::now().to_rfc3339(),
+        "local": false,
+        "mimeType": mime_type,
+        "providerId": request.provider.id,
+        "inpaint": {
+            "sourceAssetId": request.source_asset_id,
+            "mode": mode,
+            "coverage": request.mask_coverage.clamp(0.0, 1.0),
+            "seed": seed,
+            "anchorLabel": request.anchor_label,
+            "fingerprint": request.consistency_fingerprint
+        }
+    });
+    if let Ok(database) = state.database.lock() {
+        let _ = database.execute(
+            r#"
+            INSERT INTO usage_records(
+                id, project_id, capability, image_count, estimated_cost_micros,
+                currency, created_at
+            ) VALUES (?1, ?2, 'ImageEdit', 1, 0, 'USD', ?3)
+            "#,
+            rusqlite::params![
+                Uuid::new_v4().to_string(),
+                request.project_id,
+                Utc::now().to_rfc3339()
+            ],
+        );
+    }
+    logging::log_event(
+        LogLevel::Info,
+        "provider.image",
+        "Image inpaint completed",
+        Some(json!({
+            "projectId": request.project_id,
+            "sourceAssetId": request.source_asset_id,
+            "providerId": request.provider.id,
+            "mode": mode,
+            "seed": seed,
+            "coverage": request.mask_coverage,
+            "elapsedMs": started.elapsed().as_millis()
+        })),
+    );
+    Ok(InpaintResult {
+        asset,
+        provider_id: request.provider.id,
+        model: request.provider.model,
+        elapsed_ms: started.elapsed().as_millis(),
+        mode: mode.to_string(),
+        seed,
+    })
+}
+
+
+/// 读取项目内某张图片素材的本地字节。只接受项目目录内登记的素材，
+/// 保证重绘不会变成任意外部读取入口。
+fn read_project_asset_image(
+    projects_root: &Path,
+    project_id: &str,
+    asset_id: &str,
+) -> Result<(Vec<u8>, &'static str), String> {
+    let project_root = projects_root.join(project_id);
+    let project: Value = serde_json::from_str(
+        &std::fs::read_to_string(project_root.join("project.json"))
+            .map_err(|error| format!("Project manifest is unavailable: {error}"))?,
+    )
+    .map_err(|error| format!("Project manifest is invalid: {error}"))?;
+    let source = project
+        .get("assets")
+        .and_then(Value::as_array)
+        .and_then(|assets| {
+            assets.iter().find(|asset| {
+                asset.get("id").and_then(Value::as_str) == Some(asset_id)
+            })
+        })
+        .and_then(|asset| asset.get("src"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Inpaint source asset was not found in the project".to_string())?;
+    let relative = crate::storage::client_url_to_relative(project_id, source)
+        .unwrap_or_else(|| source.to_string());
+    let relative = crate::storage::safe_relative_path(&relative)
+        .ok_or_else(|| "Inpaint source path is unsafe".to_string())?;
+    let path = project_root.join(&relative);
+    let bytes = std::fs::read(&path)
+        .map_err(|error| format!("Unable to read inpaint source image: {error}"))?;
+    if bytes.is_empty() || bytes.len() > 25 * 1024 * 1024 {
+        return Err("Inpaint source image must be between 1 byte and 25 MB".to_string());
+    }
+    let mime = detect_image_mime(&bytes)?;
+    Ok((bytes, mime))
+}
+
+fn decode_png_data_url(source: &str, label: &str) -> Result<Vec<u8>, String> {
+    let data_url = source
+        .strip_prefix("data:")
+        .ok_or_else(|| format!("{label} must be a data URL"))?;
+    let (header, encoded) = data_url
+        .split_once(',')
+        .ok_or_else(|| format!("{label} contains a malformed data URL"))?;
+    if !header.ends_with(";base64") {
+        return Err(format!("{label} must be base64 encoded"));
+    }
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    let bytes = BASE64
+        .decode(encoded)
+        .map_err(|error| format!("Invalid {label} base64: {error}"))?;
+    if bytes.is_empty() || bytes.len() > MAX_REFERENCE_IMAGE_BYTES {
+        return Err(format!("{label} must be between 1 byte and 8 MiB"));
+    }
+    if detect_image_mime(&bytes)? != "image/png" {
+        return Err(format!("{label} must be a PNG image"));
+    }
+    Ok(bytes)
+}
+
+async fn generate_openai_inpaint(
+    provider: &ImageProviderConfig,
+    prompt: &str,
+    size: &str,
+    image: &[u8],
+    image_mime: &str,
+    mask: &[u8],
+) -> Result<Vec<u8>, String> {
+    let secret = get_provider_secret(&provider.id)
+        .ok_or_else(|| "No API key is stored for the image provider".to_string())?;
+    let boundary = format!("knowmotion-{}", Uuid::new_v4().simple());
+    let mut body = Vec::new();
+    append_multipart_field(&mut body, &boundary, "model", &provider.model);
+    append_multipart_field(&mut body, &boundary, "prompt", prompt);
+    append_multipart_field(&mut body, &boundary, "n", "1");
+    append_multipart_field(&mut body, &boundary, "size", size);
+    append_multipart_file(&mut body, &boundary, "image", "source.png", image_mime, image);
+    append_multipart_file(&mut body, &boundary, "mask", "mask.png", "image/png", mask);
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    let client = http_client()?;
+    let response = client
+        .post(format!(
+            "{}/images/edits",
+            provider.base_url.trim_end_matches('/')
+        ))
+        .bearer_auth(secret)
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .map_err(provider_network_error)?;
+    let status = response.status();
+    let payload: Value = response
+        .json()
+        .await
+        .map_err(|_| format!("Image edit provider returned non-JSON response ({status})"))?;
+    if !status.is_success() {
+        let message = payload
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .unwrap_or("Image edit failed");
+        return Err(format!(
+            "Image edit provider returned {status}: {}",
+            limit(message)
+        ));
+    }
+    let item = payload
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .ok_or_else(|| "Image edit provider returned no images".to_string())?;
+    if let Some(encoded) = item.get("b64_json").and_then(Value::as_str) {
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+        return BASE64
+            .decode(encoded)
+            .map_err(|error| format!("Invalid edited image base64: {error}"));
+    }
+    if let Some(url) = item.get("url").and_then(Value::as_str) {
+        return download_image(&client, url).await;
+    }
+    Err("Image edit provider returned neither b64_json nor url".to_string())
+}
+
+async fn generate_comfyui_inpaint(
+    provider: &ImageProviderConfig,
+    prompt: &str,
+    negative: &str,
+    seed: i64,
+    image: &[u8],
+    mask: &[u8],
+) -> Result<Vec<u8>, String> {
+    let base = provider.base_url.trim_end_matches('/');
+    let client = http_client()?;
+    let image_name = upload_comfyui_image(&client, base, image).await?;
+    let mask_name = upload_comfyui_image(&client, base, mask).await?;
+    let workflow = comfy_inpaint_workflow(
+        prompt,
+        negative,
+        &provider.model,
+        seed,
+        &image_name,
+        &mask_name,
+    );
+    submit_comfyui_workflow(&client, base, workflow).await
+}
+
+/// ComfyUI 局部重绘：源图与遮罩分别上传，LoadImageMask 取红通道，
+/// VAEEncodeForInpaint 生成 latent，KSampler 使用 denoise 1.0 完全重绘遮罩区。
+fn comfy_inpaint_workflow(
+    prompt: &str,
+    negative: &str,
+    model: &str,
+    seed: i64,
+    image_name: &str,
+    mask_name: &str,
+) -> Value {
+    let negative_text = if negative.trim().is_empty() {
+        "blurry, low quality, text artifacts, watermark"
+    } else {
+        negative.trim()
+    };
+    json!({
+        "3": {
+            "class_type": "KSampler",
+            "inputs": {
+                "seed": seed,
+                "steps": 24,
+                "cfg": 7.0,
+                "sampler_name": "euler",
+                "scheduler": "normal",
+                "denoise": 1.0,
+                "model": ["4", 0],
+                "positive": ["6", 0],
+                "negative": ["7", 0],
+                "latent_image": ["11", 0]
+            }
+        },
+        "4": {
+            "class_type": "CheckpointLoaderSimple",
+            "inputs": { "ckpt_name": model }
+        },
+        "6": {
+            "class_type": "CLIPTextEncode",
+            "inputs": { "text": prompt, "clip": ["4", 1] }
+        },
+        "7": {
+            "class_type": "CLIPTextEncode",
+            "inputs": { "text": negative_text, "clip": ["4", 1] }
+        },
+        "8": {
+            "class_type": "VAEDecode",
+            "inputs": { "samples": ["3", 0], "vae": ["4", 2] }
+        },
+        "9": {
+            "class_type": "SaveImage",
+            "inputs": { "filename_prefix": "knowmotion-inpaint", "images": ["8", 0] }
+        },
+        "10": {
+            "class_type": "LoadImage",
+            "inputs": { "image": image_name }
+        },
+        "13": {
+            "class_type": "LoadImageMask",
+            "inputs": { "image": mask_name, "channel": "red" }
+        },
+        "11": {
+            "class_type": "VAEEncodeForInpaint",
+            "inputs": {
+                "pixels": ["10", 0],
+                "vae": ["4", 2],
+                "mask": ["13", 0],
+                "grow_mask_by": 6
+            }
+        }
+    })
+}
+
 async fn generate_openai_images(
     provider: &ImageProviderConfig,
     prompt: &str,
@@ -963,7 +1395,7 @@ async fn generate_comfyui_images(
     let base = provider.base_url.trim_end_matches('/');
     let client = http_client()?;
     let reference_name = match reference {
-        Some((bytes, _)) => match upload_comfyui_reference(&client, base, bytes).await {
+        Some((bytes, _)) => match upload_comfyui_image(&client, base, bytes).await {
             Ok(name) => Some(name),
             Err(error) => {
                 logging::log_event(
@@ -991,6 +1423,16 @@ async fn generate_comfyui_images(
         reference_name.as_deref(),
         denoise,
     );
+    let bytes = submit_comfyui_workflow(&client, base, workflow).await?;
+    Ok((vec![bytes], conditioned))
+}
+
+/// 提交 ComfyUI 工作流并下载第 9 号 SaveImage 节点的输出。
+async fn submit_comfyui_workflow(
+    client: &Client,
+    base: &str,
+    workflow: Value,
+) -> Result<Vec<u8>, String> {
     let response = client
         .post(format!("{base}/prompt"))
         .json(&json!({
@@ -1074,9 +1516,7 @@ async fn generate_comfyui_images(
         .await
         .map_err(provider_network_error)?
         .to_vec();
-    Ok((vec![bytes], conditioned))
-}
-
+    Ok(bytes)}
 /// 参考权重直接映射到 img2img 强度：权重越高，denoise 越低，
 /// 越接近参考图。0.1 → 0.67，1.0 → 0.40，默认 0.85 → 约 0.445。
 fn reference_denoise(weight: f32) -> f64 {
@@ -1176,7 +1616,7 @@ fn comfy_image_workflow(
     workflow
 }
 
-async fn upload_comfyui_reference(
+async fn upload_comfyui_image(
     client: &Client,
     base: &str,
     bytes: &[u8],
@@ -1595,6 +2035,70 @@ mod tests {
             workflow.pointer("/3/inputs/denoise").and_then(Value::as_f64),
             Some(1.0)
         );
+    }
+
+    #[test]
+    fn comfy_inpaint_workflow_wires_mask_and_full_denoise() {
+        let workflow = comfy_inpaint_workflow(
+            "repaint the face",
+            "blurry",
+            "sdxl.safetensors",
+            99,
+            "knowmotion/source.png",
+            "knowmotion/mask.png",
+        );
+        assert_eq!(
+            workflow.pointer("/3/inputs/denoise").and_then(Value::as_f64),
+            Some(1.0)
+        );
+        assert_eq!(
+            workflow.pointer("/3/inputs/seed").and_then(Value::as_i64),
+            Some(99)
+        );
+        assert_eq!(
+            workflow.pointer("/11/inputs/pixels/0").and_then(Value::as_str),
+            Some("10")
+        );
+        assert_eq!(
+            workflow.pointer("/11/inputs/mask/0").and_then(Value::as_str),
+            Some("13")
+        );
+        assert_eq!(
+            workflow.pointer("/11/inputs/grow_mask_by").and_then(Value::as_u64),
+            Some(6)
+        );
+        assert_eq!(
+            workflow.pointer("/13/inputs/channel").and_then(Value::as_str),
+            Some("red")
+        );
+        assert_eq!(
+            workflow.pointer("/13/inputs/image").and_then(Value::as_str),
+            Some("knowmotion/mask.png")
+        );
+        assert_eq!(
+            workflow.pointer("/7/inputs/text").and_then(Value::as_str),
+            Some("blurry")
+        );
+    }
+
+    #[test]
+    fn mask_decoder_accepts_only_png_data_urls() {
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+        let png = format!(
+            "data:image/png;base64,{}",
+            BASE64.encode(b"\x89PNG\r\n\x1a\nmask")
+        );
+        assert_eq!(
+            decode_png_data_url(&png, "mask").expect("png mask"),
+            b"\x89PNG\r\n\x1a\nmask"
+        );
+        assert!(decode_png_data_url("https://example.com/mask.png", "mask").is_err());
+        let jpeg = format!(
+            "data:image/jpeg;base64,{}",
+            BASE64.encode(b"\xff\xd8\xffjpeg")
+        );
+        assert!(decode_png_data_url(&jpeg, "mask").is_err());
+        assert!(decode_png_data_url("data:image/png;base64,!!!", "mask").is_err());
     }
 
     #[test]

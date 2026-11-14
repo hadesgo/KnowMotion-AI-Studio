@@ -236,6 +236,30 @@
   - 参考图上传失败会降级为纯提示词条件并写警告日志，`referenceMode` 反映实际执行的路径。
 - 明确的边界：没有接入人脸识别、CLIP 或任何图像相似度打分；ComfyUI 仅覆盖 Checkpoint + img2img，不含 ControlNet/IP-Adapter/LoRA 角色锁；OpenAI `images/edits` 通道未接入；参考图一致性目前由提示词、种子和结构指纹共同保证，而不是像素级身份验证。
 
+### 3.14 批量图片队列与局部重绘
+
+- 新增 `image_jobs` 持久表和对应的 `tasks` 记录（`kind='image'`）；每个任务保存完整 `ImageGenerationRequest`、Provider、锚点名、attempt/max_attempts、结果 JSON 和 assetIds。
+- 入队限制：单批最多 24 个任务，队列深度上限 64，必须属于同一项目；所有任务校验 project/scene id、prompt 和 Provider 能力。
+- 队列 worker：应用启动即运行，600 ms 轮询；最多 2 个任务并发；用 SQLite 事务原子领取 pending 任务（`UPDATE ... WHERE status='pending'`），避免重复执行。
+- 状态机：`pending → running → completed / failed / canceled / interrupted`。网络、429、5xx 等可重试错误自动重试一次（max_attempts=2）；失败、取消、中断都支持手动重试（重置 attempt）。
+- 取消：pending 立即取消；running 标记取消，Provider 返回后丢弃结果并写 `canceled`，不会把已取消任务重新排队。
+- 重启恢复：启动时把 running 任务转为 `interrupted` 并保留 pending；已生成素材仍在 `assets/images` 和结果 JSON 中，可人工重试。
+- 事件：`image.job.changed` 携带完整任务视图（含素材 JSON）；前端队列 Hook 监听事件并回填素材库，回填前检查项目已有 assetId，避免重复；历史任务在 zustand hydration 完成后合并，避免初始示例项目覆盖真实素材判断。
+- 批量界面：镜头多选（默认选中未生成素材的镜头）、每镜头 1/2/4 张、锚点开关、任务预览数量、实时队列（进行中/等待/完成/失败）、取消、重试、清理已结束。
+- 批量结果与单次生成共用 `execute_image_generation`，并在素材 JSON 中写入 `consistency` 快照；因此批量产出的素材同样能判定设定漂移。
+
+局部重绘：
+
+- 交互：在图片上直接涂抹遮罩，笔刷 10–140 px、撤销、清空、实时遮罩覆盖率；遮罩坐标按图片归一化，窗口缩放不漂移。
+- 前端生成两张 PNG：黑底白区（ComfyUI `LoadImageMask` 取红通道）与透明底黑区（OpenAI 遮罩语义）；后端只接受 data URL、PNG、1 B–8 MiB。
+- 源图只接受项目内登记的图片素材（project.json → src → 安全相对路径），不接受外部 URL。
+- OpenAI Compatible：复用现有手写 multipart 构造器调用 `/images/edits`（model/prompt/n/size/image/mask），解析 b64_json 或 url，返回 `mode=openai-edits`。
+- ComfyUI：源图与遮罩分别上传到 input；工作流 `LoadImage → LoadImageMask(red) → VAEEncodeForInpaint(grow_mask_by=6) → KSampler(denoise 1.0)`，固定种子，返回 `mode=comfyui-inpaint`。
+- 结果作为新素材写入 `assets/images`，带 `inpaint { sourceAssetId, mode, coverage, seed, anchorLabel, fingerprint }`；不覆盖原图，可继续采用到场景或收进设定集。
+- 浏览器预览无 Provider 时禁用提交；本地 SVG 草案会提示先转为位图，避免把 SVG 发给需要位图的 Provider。
+
+边界：没有遮罩羽化/软边、没有文本自动生成遮罩、没有局部重绘历史对比；队列并发固定为 2，未按 Provider 单独限流；OpenAI 局部重绘的实际可用性仍取决于服务端是否支持 `images/edits`，当前无在线验收记录。
+
 ## 4. 部分实现
 
 | 功能 | 当前状态 | 缺口 |
@@ -261,7 +285,6 @@
 
 ## 5. 未实现
 
-- 批量图片生成队列、图片局部重绘。
 - 视频素材图层与视频剪辑。
 - Authenticode 签名、时间戳和 signed updater。
 - 真实外部 LLM/Image/TTS/ASR/Embedding 服务端到端验收。
@@ -319,8 +342,8 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 ### P1：完整素材能力
 
 1. 为素材缺失增加“重新生成当前资产”操作。
-2. 在现有设定集之上补 ComfyUI ControlNet/IP-Adapter 与 OpenAI `images/edits` 像素级参考通道。
-3. 增加批量图片任务队列和局部重绘。
+2. 在现有设定集之上补 ComfyUI ControlNet/IP-Adapter 像素级参考通道。
+3. 增加遮罩羽化、文本自动选区与重绘历史对比。
 4. 增加云端 TTS 情绪/角色模板。
 
 ### P2：平台完整性

@@ -11,6 +11,8 @@ AI-powered knowledge animation studio. 用户从一个知识主题开始，在�
 - 15 个工作区界面：Dashboard、新建项目、Agent 工作流、内容策划、脚本、分镜、图片素材、设定集、动画、Remotion Studio、时间轴、AI 助手、音频字幕、渲染、模型配置。
 - 设定集：角色、场景与全局风格锚点，参考图库与权重，稳定指纹/种子，逐镜头一致性报告与素材过期检测。
 - 图片生成支持负向提示词、固定种子和参考图：ComfyUI 走 img2img，OpenAI 通道以文字锚点传递参考。
+- 持久批量图片队列：按镜头批量入队、最多 2 个并发、实时状态、取消/重试、重启恢复，完成素材自动回填素材库。
+- 图片局部重绘：画布遮罩画笔，ComfyUI `VAEEncodeForInpaint` 与 OpenAI `images/edits` 双通道，结果另存为新素材。
 - 九个持久化 AI Agent 与 DAG Workflow：模型路由、审批、暂停恢复、局部重跑、受控项目工具、修订和撤销。
 - 原生 GGUF 本地推理：可直接选择 `.gguf` 模型文件，支持 CPU 与 DirectX 12 GPU 加速。
 - Remotion Scene/Composition DSL、可复用动画组件、实时 Player 和完整 H.264 渲染。

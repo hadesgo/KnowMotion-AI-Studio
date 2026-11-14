@@ -138,6 +138,29 @@ pub(crate) fn migrate(connection: &mut Connection) -> Result<(), String> {
                 created_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS image_jobs (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                scene_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                progress REAL NOT NULL DEFAULT 0,
+                provider_id TEXT NOT NULL,
+                provider_name TEXT NOT NULL,
+                anchor_label TEXT NOT NULL DEFAULT '',
+                request_json TEXT NOT NULL,
+                result_json TEXT,
+                asset_ids_json TEXT NOT NULL DEFAULT '[]',
+                attempt INTEGER NOT NULL DEFAULT 0,
+                max_attempts INTEGER NOT NULL DEFAULT 2,
+                error_code TEXT,
+                error_message TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS knowledge_chunks (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL,
@@ -155,6 +178,10 @@ pub(crate) fn migrate(connection: &mut Connection) -> Result<(), String> {
                 ON tasks(status, priority DESC, next_retry_at);
             CREATE INDEX IF NOT EXISTS idx_render_jobs_project
                 ON render_jobs(project_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_image_jobs_project
+                ON image_jobs(project_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_image_jobs_status
+                ON image_jobs(status, created_at);
             CREATE INDEX IF NOT EXISTS idx_usage_records_project
                 ON usage_records(project_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_artifact_refs_owner
@@ -284,6 +311,7 @@ mod tests {
             "schema_migrations",
             "tasks",
             "render_jobs",
+            "image_jobs",
             "usage_records",
             "artifact_refs",
         ] {
