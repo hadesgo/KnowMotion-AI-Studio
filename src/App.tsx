@@ -4,6 +4,7 @@ import { AppShell, ProjectGuard } from "./components/AppShell";
 import AnimationEditor from "./pages/AnimationEditor";
 import AgentWorkflow from "./pages/AgentWorkflow";
 import AudioSubtitles from "./pages/AudioSubtitles";
+import Canon from "./pages/Canon";
 import Dashboard from "./pages/Dashboard";
 import ImageAssets from "./pages/ImageAssets";
 import Models from "./pages/Models";
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="script" element={<ScriptEditor />} />
           <Route path="storyboard" element={<Storyboard />} />
           <Route path="assets" element={<ImageAssets />} />
+          <Route path="canon" element={<Canon />} />
           <Route path="animation" element={<AnimationEditor />} />
           <Route
             path="remotion"

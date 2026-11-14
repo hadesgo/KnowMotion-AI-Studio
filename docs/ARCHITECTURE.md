@@ -877,6 +877,49 @@ interface AssetRecord {
 
 WebView 通过受限自定义协议或经过严格 scope 的 Tauri asset protocol 访问素材，例如 `km-asset://project/{projectId}/{assetId}`；协议处理器只接受清单中登记的资产，不直接接受任意文件路径。
 
+### 10.5 设定集与一致性锚点
+
+角色、场景（环境）与全局风格作为项目级设定存放在 `project.json`，不复制进每个场景：
+
+```ts
+interface CharacterProfile {
+  id: string;
+  name: string;
+  role: string;
+  appearance: string;   // 外观锚点
+  wardrobe: string;
+  palette: string[];
+  negative: string;
+  seed?: number;
+  referenceAssetIds: string[];
+  locked: boolean;
+}
+
+interface LocationProfile {
+  id: string;
+  name: string;
+  environment: string;  // 环境锚点
+  lighting: string;
+  timeOfDay: string;
+  palette: string[];
+  seed?: number;
+  referenceAssetIds: string[];
+}
+
+interface StyleLock {
+  enabled: boolean;
+  descriptor: string;
+  palette: string[];
+  negative: string;
+  referenceAssetIds: string[];
+}
+```
+
+- 镜头通过 `scene.characterIds` 与 `scene.locationId` 引用设定卡；未绑定的镜头保持独立提示词。
+- 参考图仍是 `assets` 中的普通素材，附带 `reference { role, entityId, label, weight, locked, notes }` 归属信息，因此复用既有的落盘、哈希、复制和导出管线。
+- 生成前由 `resolveSceneAnchors` 解析出「锚点指令 + 负向词 + 稳定指纹 + 稳定种子」；指令按风格 → 角色 → 场景 → 参考图声明固定顺序拼接，保证同一锚点在任意一次生成中得到相同输入。
+- 每次生成把指纹与锚点快照写进素材；设定或参考图变更导致指纹变化时，旧素材被判定为 `stale`，需要重新生成而不是静默复用。
+
 ## 11. SQLite 数据模型
 
 数据库位置为应用数据目录中的 `studio.sqlite3`。启用：
@@ -979,12 +1022,14 @@ interface JobEnvelope<T> {
 ### 13.2 图片任务
 
 1. Art Director/Asset Agent 产出结构化图片需求。
-2. Task Scheduler 将每个场景素材需求入队，受 Provider 并发限制。
-3. Provider 返回 URL 或二进制流；Rust 下载到临时文件。
-4. 校验 HTTP 状态、MIME、大小、图片解码、尺寸和哈希。
-5. 原子提交到 `assets/images/`，更新 `assets/manifest.json`。
-6. 图片生成记录关联 sceneId、providerId、jobId 和 promptHash。
-7. 失败只重试当前素材，不重跑整个分镜。
+2. 生成前解析镜头锚点，得到提示词指令、负向词、参考图、稳定指纹和种子。
+3. Task Scheduler 将每个场景素材需求入队，受 Provider 并发限制。
+4. Provider 返回 URL 或二进制流；Rust 下载到临时文件。
+5. 校验 HTTP 状态、MIME、大小、图片解码、尺寸和哈希。
+6. 原子提交到 `assets/images/`，更新 `assets/manifest.json`，并把锚点快照写入素材记录。
+7. ComfyUI 通道有参考图时走 img2img，denoise 由参考权重派生；OpenAI 兼容通道只传文字锚点，响应如实标注 `referenceMode`。
+8. 图片生成记录关联 sceneId、providerId、jobId、promptHash、seed 与 fingerprint。
+9. 失败只重试当前素材，不重跑整个分镜。
 
 ### 13.3 TTS 任务
 

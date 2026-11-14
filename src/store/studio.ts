@@ -2,9 +2,12 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type {
   Asset,
+  CharacterProfile,
   CreateProjectInput,
+  LocationProfile,
   ProviderProfile,
   ProviderCapability,
+  StyleLock,
   SubtitleCue,
   TimelineClip,
   ToastMessage,
@@ -14,6 +17,7 @@ import {
   createProject,
   createScene,
   createTimeline,
+  defaultStyleLock,
   makeSkyBlueProject,
   makeSampleProject,
 } from "../data/demo";
@@ -37,6 +41,23 @@ interface StudioState {
   addScene: (projectId: string) => string;
   reorderScenes: (projectId: string, from: number, to: number) => void;
   addAsset: (projectId: string, asset: Asset) => void;
+  upsertCharacter: (projectId: string, character: CharacterProfile) => void;
+  removeCharacter: (projectId: string, characterId: string) => void;
+  upsertLocation: (projectId: string, location: LocationProfile) => void;
+  removeLocation: (projectId: string, locationId: string) => void;
+  updateStyleLock: (projectId: string, patch: Partial<StyleLock>) => void;
+  attachReference: (projectId: string, asset: Asset) => void;
+  updateReferenceAsset: (
+    projectId: string,
+    assetId: string,
+    patch: Partial<Asset>,
+  ) => void;
+  removeReferenceAsset: (projectId: string, assetId: string) => void;
+  setSceneAnchors: (
+    projectId: string,
+    sceneId: string,
+    patch: { characterIds?: string[]; locationId?: string },
+  ) => void;
   addTimelineClip: (projectId: string, clip: TimelineClip) => void;
   updateTimelineClip: (
     projectId: string,
@@ -56,6 +77,24 @@ interface StudioState {
 
 const sample = makeSampleProject();
 const skyMvp = makeSkyBlueProject();
+
+/**
+ * 历史项目（v2 及磁盘上的旧 project.json）没有设定集字段。
+ * 统一在此回填，避免每个页面重复判空。
+ */
+export function withConsistencyDefaults(project: VideoProject): VideoProject {
+  return {
+    ...project,
+    characters: project.characters ?? [],
+    locations: project.locations ?? [],
+    styleLock:
+      project.styleLock ?? defaultStyleLock(project.settings?.style ?? ""),
+    scenes: (project.scenes ?? []).map((scene) => ({
+      ...scene,
+      characterIds: scene.characterIds ?? [],
+    })),
+  };
+}
 
 const defaultProviders: ProviderProfile[] = [
   {
@@ -205,6 +244,221 @@ export const useStudioStore = create<StudioState>()(
           ),
         }));
       },
+      upsertCharacter: (projectId, character) => {
+        set((state) => ({
+          projects: state.projects.map((project) => {
+            if (project.id !== projectId) return project;
+            const exists = project.characters.some(
+              (item) => item.id === character.id,
+            );
+            return {
+              ...project,
+              characters: exists
+                ? project.characters.map((item) =>
+                    item.id === character.id
+                      ? { ...character, updatedAt: nowIso() }
+                      : item,
+                  )
+                : [...project.characters, character],
+              updatedAt: nowIso(),
+            };
+          }),
+        }));
+      },
+      removeCharacter: (projectId, characterId) => {
+        set((state) => ({
+          projects: state.projects.map((project) => {
+            if (project.id !== projectId) return project;
+            return {
+              ...project,
+              characters: project.characters.filter(
+                (item) => item.id !== characterId,
+              ),
+              assets: project.assets.filter(
+                (asset) =>
+                  !(
+                    asset.reference?.role === "character" &&
+                    asset.reference.entityId === characterId
+                  ),
+              ),
+              scenes: project.scenes.map((scene) => ({
+                ...scene,
+                characterIds: (scene.characterIds ?? []).filter(
+                  (id) => id !== characterId,
+                ),
+              })),
+              updatedAt: nowIso(),
+            };
+          }),
+        }));
+      },
+      upsertLocation: (projectId, location) => {
+        set((state) => ({
+          projects: state.projects.map((project) => {
+            if (project.id !== projectId) return project;
+            const exists = project.locations.some(
+              (item) => item.id === location.id,
+            );
+            return {
+              ...project,
+              locations: exists
+                ? project.locations.map((item) =>
+                    item.id === location.id
+                      ? { ...location, updatedAt: nowIso() }
+                      : item,
+                  )
+                : [...project.locations, location],
+              updatedAt: nowIso(),
+            };
+          }),
+        }));
+      },
+      removeLocation: (projectId, locationId) => {
+        set((state) => ({
+          projects: state.projects.map((project) => {
+            if (project.id !== projectId) return project;
+            return {
+              ...project,
+              locations: project.locations.filter(
+                (item) => item.id !== locationId,
+              ),
+              assets: project.assets.filter(
+                (asset) =>
+                  !(
+                    asset.reference?.role === "location" &&
+                    asset.reference.entityId === locationId
+                  ),
+              ),
+              scenes: project.scenes.map((scene) =>
+                scene.locationId === locationId
+                  ? { ...scene, locationId: undefined }
+                  : scene,
+              ),
+              updatedAt: nowIso(),
+            };
+          }),
+        }));
+      },
+      updateStyleLock: (projectId, patch) => {
+        set((state) => ({
+          projects: state.projects.map((project) =>
+            project.id === projectId
+              ? {
+                  ...project,
+                  styleLock: { ...project.styleLock, ...patch },
+                  updatedAt: nowIso(),
+                }
+              : project,
+          ),
+        }));
+      },
+      attachReference: (projectId, asset) => {
+        const meta = asset.reference;
+        set((state) => ({
+          projects: state.projects.map((project) => {
+            if (project.id !== projectId) return project;
+            const link = (ids: string[]) =>
+              ids.includes(asset.id) ? ids : [...ids, asset.id];
+            const characters = project.characters.map((character) =>
+              meta?.role === "character" && character.id === meta.entityId
+                ? {
+                    ...character,
+                    referenceAssetIds: link(character.referenceAssetIds),
+                    updatedAt: nowIso(),
+                  }
+                : character,
+            );
+            const locations = project.locations.map((location) =>
+              meta?.role === "location" && location.id === meta.entityId
+                ? {
+                    ...location,
+                    referenceAssetIds: link(location.referenceAssetIds),
+                    updatedAt: nowIso(),
+                  }
+                : location,
+            );
+            const styleLock =
+              meta?.role === "style"
+                ? {
+                    ...project.styleLock,
+                    referenceAssetIds: link(project.styleLock.referenceAssetIds),
+                  }
+                : project.styleLock;
+            return {
+              ...project,
+              assets: [asset, ...project.assets],
+              characters,
+              locations,
+              styleLock,
+              updatedAt: nowIso(),
+            };
+          }),
+        }));
+      },
+      updateReferenceAsset: (projectId, assetId, patch) => {
+        set((state) => ({
+          projects: state.projects.map((project) =>
+            project.id === projectId
+              ? {
+                  ...project,
+                  assets: project.assets.map((asset) =>
+                    asset.id === assetId
+                      ? {
+                          ...asset,
+                          ...patch,
+                          reference: patch.reference
+                            ? { ...asset.reference, ...patch.reference }
+                            : asset.reference,
+                        }
+                      : asset,
+                  ),
+                  updatedAt: nowIso(),
+                }
+              : project,
+          ),
+        }));
+      },
+      removeReferenceAsset: (projectId, assetId) => {
+        set((state) => ({
+          projects: state.projects.map((project) => {
+            if (project.id !== projectId) return project;
+            const detach = (ids: string[]) =>
+              ids.filter((id) => id !== assetId);
+            return {
+              ...project,
+              assets: project.assets.filter((asset) => asset.id !== assetId),
+              characters: project.characters.map((character) => ({
+                ...character,
+                referenceAssetIds: detach(character.referenceAssetIds),
+              })),
+              locations: project.locations.map((location) => ({
+                ...location,
+                referenceAssetIds: detach(location.referenceAssetIds),
+              })),
+              styleLock: {
+                ...project.styleLock,
+                referenceAssetIds: detach(project.styleLock.referenceAssetIds),
+              },
+              updatedAt: nowIso(),
+            };
+          }),
+        }));
+      },
+      setSceneAnchors: (projectId, sceneId, patch) => {
+        set((state) => ({
+          projects: state.projects.map((project) =>
+            project.id === projectId
+              ? {
+                  ...project,
+                  scenes: project.scenes.map((scene) =>
+                    scene.id === sceneId ? { ...scene, ...patch } : scene,
+                  ),
+                  updatedAt: nowIso(),
+                }
+              : project,
+          ),
+        }));
+      },
       addTimelineClip: (projectId, clip) => {
         set((state) => ({
           projects: state.projects.map((project) =>
@@ -295,18 +549,29 @@ export const useStudioStore = create<StudioState>()(
     }),
     {
       name: "knowmotion-studio-v1",
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => studioStorage),
+      merge: (persistedState, currentState) => {
+        const state = (persistedState ?? {}) as Partial<StudioState>;
+        return {
+          ...currentState,
+          ...state,
+          projects: (state.projects ?? currentState.projects).map(
+            withConsistencyDefaults,
+          ),
+          providers: state.providers ?? currentState.providers,
+          taskRoutes: state.taskRoutes ?? currentState.taskRoutes,
+        };
+      },
       migrate: (persistedState, version) => {
         const state = persistedState as Partial<StudioState>;
-        if (
+        const projects =
           version < 2 &&
           !state.projects?.some((project) => project.id === skyMvp.id)
-        ) {
-          return {
-            ...state,
-            projects: [skyMvp, ...(state.projects ?? [])],
-          };
+            ? [skyMvp, ...(state.projects ?? [])]
+            : (state.projects ?? []);
+        if (version < 3) {
+          return { ...state, projects: projects.map(withConsistencyDefaults) };
         }
         return state;
       },

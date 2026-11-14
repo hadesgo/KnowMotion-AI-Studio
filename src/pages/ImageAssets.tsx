@@ -1,37 +1,54 @@
 import {
+  Anchor,
   ArrowRight,
+  BookmarkPlus,
   Check,
   Download,
   Image as ImageIcon,
   Images,
+  Info,
   LoaderCircle,
   Plus,
+  ShieldCheck,
   Sparkles,
   Upload,
   WandSparkles,
 } from "lucide-react";
 import {
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
 } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { PageHeading, useCurrentProject } from "../components/AppShell";
 import { ScenePreview } from "../components/ScenePreview";
 import {
   Button,
   EmptyState,
   Field,
+  Modal,
   Pill,
   Progress,
   Segmented,
+  Select,
   TextArea,
 } from "../components/ui";
 import { useStudioStore } from "../store/studio";
-import type { Asset } from "../types";
+import type { Asset, ReferenceRole } from "../types";
 import { createVisualDraftSvg, formatBytes, makeId, nowIso } from "../utils";
 import { isTauriDesktop } from "../services/desktop";
-import { generateProjectImages } from "../services/capabilities";
+import {
+  generateProjectImages,
+  type ImageReferenceInput,
+} from "../services/capabilities";
+import {
+  composeAnchoredPrompt,
+  createConsistencyStamp,
+  evaluateConsistency,
+  resolveSceneAnchors,
+  STYLE_LOCK_ENTITY_ID,
+} from "../services/consistency";
 import "./ImageAssets.css";
 
 const styles = ["编辑部极简", "电影感纪录片", "复古科学杂志", "未来主义数据"];
@@ -41,6 +58,7 @@ export default function ImageAssets() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const addAsset = useStudioStore((state) => state.addAsset);
+  const attachReference = useStudioStore((state) => state.attachReference);
   const updateProject = useStudioStore((state) => state.updateProject);
   const pushToast = useStudioStore((state) => state.pushToast);
   const providers = useStudioStore((state) => state.providers);
@@ -56,9 +74,21 @@ export default function ImageAssets() {
   const [progress, setProgress] = useState(0);
   const [generating, setGenerating] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState("");
+  const [useAnchors, setUseAnchors] = useState(true);
+  const [collectOpen, setCollectOpen] = useState(false);
+  const [collectRole, setCollectRole] = useState<ReferenceRole>("character");
+  const [collectEntity, setCollectEntity] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
   const scene = project?.scenes.find((item) => item.id === sceneId);
+  const anchors = useMemo(
+    () => (project && scene ? resolveSceneAnchors(project, scene) : null),
+    [project, scene],
+  );
+  const evaluation = useMemo(
+    () => (project && scene ? evaluateConsistency(project, scene).evaluation : null),
+    [project, scene],
+  );
   const sceneAssets =
     project?.assets.filter((asset) => asset.sceneId === sceneId) ?? [];
   const selectedAsset =
@@ -87,6 +117,37 @@ export default function ImageAssets() {
       pushToast({ type: "error", title: "先写下画面描述" });
       return;
     }
+    const anchorContext = useAnchors ? anchors : null;
+    const composedPrompt = anchorContext
+      ? composeAnchoredPrompt(prompt, anchorContext)
+      : prompt;
+    const references: ImageReferenceInput[] = anchorContext
+      ? anchorContext.referenceAssetIds
+          .map((id) => project.assets.find((asset) => asset.id === id))
+          .filter((asset): asset is Asset => Boolean(asset?.reference))
+          .map((asset) => ({
+            assetId: asset.id,
+            role: asset.reference!.role,
+            label: asset.reference!.label,
+            weight: asset.reference!.weight,
+            source: asset.src,
+          }))
+      : [];
+    const withStamp = (
+      asset: Asset,
+      conditioning: "prompt" | "prompt+img2img",
+    ): Asset =>
+      anchorContext
+        ? {
+            ...asset,
+            consistency: createConsistencyStamp(
+              anchorContext,
+              composedPrompt,
+              conditioning,
+            ),
+          }
+        : asset;
+
     setGenerating(true);
     setProgress(8);
     if (imageProvider && isTauriDesktop) {
@@ -96,7 +157,7 @@ export default function ImageAssets() {
           projectId: project.id,
           sceneId,
           provider: imageProvider,
-          prompt,
+          prompt: composedPrompt,
           style,
           size:
             ratio === "square"
@@ -105,14 +166,26 @@ export default function ImageAssets() {
                 ? "1024x1536"
                 : "1536x1024",
           count,
+          negativePrompt: anchorContext?.negativePrompt ?? "",
+          seed: anchorContext?.seed,
+          references,
+          anchorLabel: anchorContext?.label ?? "",
+          consistencyFingerprint: anchorContext?.fingerprint ?? "",
         });
-        result.assets.forEach((asset) => addAsset(project.id, asset));
+        result.assets.forEach((asset) =>
+          addAsset(project.id, withStamp(asset, result.referenceMode)),
+        );
         setSelectedAssetId(result.assets[0]?.id ?? "");
         setProgress(100);
+        const conditioningNote = anchorContext
+          ? result.referenceMode === "prompt+img2img"
+            ? `锚点「${result.anchorLabel || anchorContext.label}」· ${result.referenceCount} 张参考图参与 img2img · 种子 ${result.seed}`
+            : `锚点「${result.anchorLabel || anchorContext.label}」· 参考图仅以文字锚点传递 · 种子 ${result.seed}`
+          : "未启用一致性锚点";
         pushToast({
           type: "success",
           title: `${result.assets.length} 张真实图片已生成并落盘`,
-          message: `${imageProvider.name} · ${result.model} · ${Math.round(result.elapsedMs / 1000)} 秒`,
+          message: `${imageProvider.name} · ${result.model} · ${Math.round(result.elapsedMs / 1000)} 秒 · ${conditioningNote}`,
         });
       } catch (error) {
         pushToast({
@@ -134,17 +207,31 @@ export default function ImageAssets() {
     window.setTimeout(() => {
       const firstId = makeId("asset");
       const assets: Asset[] = Array.from({ length: count }, (_, index) => {
-        const visual = createVisualDraftSvg(prompt, style, index + 1);
-        return {
-          id: index === 0 ? firstId : makeId("asset"),
-          sceneId,
-          name: `${scene.title} · 视觉草案 ${String(index + 1).padStart(2, "0")}`,
-          kind: "image",
-          src: visual.src,
+        const visual = createVisualDraftSvg(
           prompt,
-          createdAt: nowIso(),
-          local: true,
-        };
+          style,
+          index + 1,
+          anchorContext
+            ? {
+                seed: anchorContext.seed + index,
+                palette: anchorContext.characters[0]?.palette,
+                anchorLabel: anchorContext.label,
+              }
+            : undefined,
+        );
+        return withStamp(
+          {
+            id: index === 0 ? firstId : makeId("asset"),
+            sceneId,
+            name: `${scene.title} · 视觉草案 ${String(index + 1).padStart(2, "0")}`,
+            kind: "image",
+            src: visual.src,
+            prompt: composedPrompt,
+            createdAt: nowIso(),
+            local: true,
+          },
+          "prompt",
+        );
       });
       assets.forEach((asset) => addAsset(project.id, asset));
       setSelectedAssetId(firstId);
@@ -154,14 +241,15 @@ export default function ImageAssets() {
       pushToast({
         type: "success",
         title: `${assets.length} 张视觉草案已生成`,
-        message: "由本地 SVG 生成器创建，可直接采用到场景。",
+        message: anchorContext
+          ? `使用锚点「${anchorContext.label}」的固定种子 ${anchorContext.seed} 生成，可复现。`
+          : "由本地 SVG 生成器创建，可直接采用到场景。",
       });
       window.setTimeout(() => setProgress(0), 700);
     }, 1300);
   };
 
-  const applyAsset = (asset: Asset) => {
-    updateProject(project.id, (current) => ({
+  const applyAsset = (asset: Asset) => {    updateProject(project.id, (current) => ({
       ...current,
       assets: current.assets,
       scenes: current.scenes.map((item) =>
@@ -211,6 +299,65 @@ export default function ImageAssets() {
     };
     reader.readAsDataURL(file);
     event.target.value = "";
+  };
+
+  const openCollect = () => {
+    const role: ReferenceRole = project.characters.length
+      ? "character"
+      : project.locations.length
+        ? "location"
+        : "style";
+    setCollectRole(role);
+    setCollectEntity(
+      role === "character"
+        ? (scene.characterIds?.[0] ?? project.characters[0]?.id ?? "")
+        : role === "location"
+          ? (scene.locationId ?? project.locations[0]?.id ?? "")
+          : STYLE_LOCK_ENTITY_ID,
+    );
+    setCollectOpen(true);
+  };
+
+  const collectAsReference = () => {
+    if (!selectedAsset) return;
+    const entityId =
+      collectRole === "style" ? STYLE_LOCK_ENTITY_ID : collectEntity;
+    if (collectRole !== "style" && !entityId) {
+      pushToast({ type: "error", title: "先选择参考图归属的设定卡" });
+      return;
+    }
+    const entityLabel =
+      collectRole === "character"
+        ? project.characters.find((item) => item.id === entityId)?.name
+        : collectRole === "location"
+          ? project.locations.find((item) => item.id === entityId)?.name
+          : "全局风格";
+    attachReference(project.id, {
+      id: makeId("asset"),
+      sceneId: "",
+      name: `${selectedAsset.name} · 参考`,
+      kind: "image",
+      src: selectedAsset.src,
+      prompt: selectedAsset.prompt,
+      createdAt: nowIso(),
+      local: selectedAsset.local,
+      mimeType: selectedAsset.mimeType,
+      providerId: selectedAsset.providerId,
+      reference: {
+        role: collectRole,
+        entityId,
+        label: `${entityLabel ?? "设定"} · 参考`,
+        weight: 0.85,
+        locked: true,
+        notes: "由图片素材收进设定集",
+      },
+    });
+    setCollectOpen(false);
+    pushToast({
+      type: "success",
+      title: "已收进设定集",
+      message: "锚点指纹已更新，相关镜头需要重新生成才能保持一致。",
+    });
   };
 
   return (
@@ -281,6 +428,68 @@ export default function ImageAssets() {
               rows={6}
             />
           </Field>
+          <section
+            className={`asset-anchor-panel ${useAnchors ? "is-on" : ""}`}
+            aria-label="一致性锚点"
+          >
+            <header>
+              <span>
+                <Anchor size={14} /> 一致性锚点
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={useAnchors}
+                onClick={() => setUseAnchors((value) => !value)}
+              >
+                {useAnchors ? "已启用" : "已关闭"}
+              </button>
+            </header>
+            {anchors && (anchors.characters.length || anchors.location || anchors.styleActive) ? (
+              <>
+                <div className="asset-anchor-chips">
+                  {anchors.characters.map((item) => (
+                    <span key={item.id}>{item.name}</span>
+                  ))}
+                  {anchors.location && <span>{anchors.location.name}</span>}
+                  {anchors.styleActive && <span>风格锁定</span>}
+                </div>
+                <div className="asset-anchor-meta">
+                  <span>指纹</span>
+                  <code>{anchors.fingerprint}</code>
+                  <span>种子</span>
+                  <code>{anchors.seed}</code>
+                </div>
+                <div className="asset-anchor-refs">
+                  {anchors.referenceAssetIds.length ? (
+                    anchors.referenceAssetIds.slice(0, 5).map((id) => {
+                      const asset = project.assets.find((item) => item.id === id);
+                      return asset ? (
+                        <img key={id} src={asset.src} alt={asset.name} />
+                      ) : null;
+                    })
+                  ) : (
+                    <small>仅文字锚点</small>
+                  )}
+                  {anchors.referenceAssetIds.length > 5 && (
+                    <small>+{anchors.referenceAssetIds.length - 5}</small>
+                  )}
+                </div>
+                <Link
+                  className="asset-anchor-link"
+                  to={`/projects/${project.id}/canon`}
+                >
+                  调整角色与参考图 <ArrowRight size={12} />
+                </Link>
+              </>
+            ) : (
+              <p className="asset-anchor-empty">
+                这个镜头还没有绑定角色、场景或风格。先去{" "}
+                <Link to={`/projects/${project.id}/canon`}>设定集</Link>{" "}
+                建一张设定卡，之后每次生成都会复用同一指纹。
+              </p>
+            )}
+          </section>
           <Field label="视觉风格">
             <div className="style-token-grid">
               {styles.map((item) => (
@@ -370,6 +579,17 @@ export default function ImageAssets() {
             </div>
           </header>
 
+          {evaluation && evaluation.status !== "consistent" && (
+            <div className={`asset-consistency-banner is-${evaluation.tone}`}>
+              <Info size={15} />
+              <div>
+                <strong>{evaluation.title}</strong>
+                <span>{evaluation.detail}</span>
+              </div>
+              <Link to={`/projects/${project.id}/canon`}>去设定集</Link>
+            </div>
+          )}
+
           {sceneAssets.length ? (
             <div className="asset-grid">
               {sceneAssets.map((asset) => (
@@ -391,7 +611,9 @@ export default function ImageAssets() {
                   <div className="asset-card__meta">
                     <div>
                       <strong>{asset.name}</strong>
-                      <small>LOCAL VECTOR · {asset.prompt.slice(0, 42)}</small>
+                      <small>
+                        {asset.local ? "LOCAL" : "AI"} · {asset.prompt.slice(0, 42)}
+                      </small>
                     </div>
                     <button
                       type="button"
@@ -431,10 +653,39 @@ export default function ImageAssets() {
               <h3>{selectedAsset.name}</h3>
               <p>{selectedAsset.prompt}</p>
               <div className="asset-meta-list">
-                <div><span>类型</span><strong>本地 SVG</strong></div>
+                <div>
+                  <span>类型</span>
+                  <strong>
+                    {selectedAsset.reference
+                      ? "设定参考图"
+                      : selectedAsset.local
+                        ? "本地素材"
+                        : "AI 生成"}
+                  </strong>
+                </div>
                 <div><span>场景</span><strong>{scene.title}</strong></div>
                 <div><span>状态</span><strong>{scene.assetId === selectedAsset.id ? "已采用" : "候选"}</strong></div>
+                {selectedAsset.consistency && (
+                  <div>
+                    <span>锚点</span>
+                    <strong>{selectedAsset.consistency.anchorLabel}</strong>
+                  </div>
+                )}
+                {selectedAsset.consistency && (
+                  <div>
+                    <span>种子</span>
+                    <strong>{selectedAsset.consistency.seed}</strong>
+                  </div>
+                )}
               </div>
+              {selectedAsset.consistency && (
+                <p className="asset-inspector__fingerprint">
+                  指纹 <code>{selectedAsset.consistency.fingerprint}</code>
+                  {selectedAsset.consistency.conditioning === "prompt+img2img"
+                    ? " · 参考图参与 img2img"
+                    : " · 文字锚点"}
+                </p>
+              )}
               <Button
                 variant="primary"
                 className="full-button"
@@ -442,6 +693,14 @@ export default function ImageAssets() {
                 onClick={() => applyAsset(selectedAsset)}
               >
                 {scene.assetId === selectedAsset.id ? "重新应用到场景" : "采用到场景"}
+              </Button>
+              <Button
+                variant="secondary"
+                className="full-button"
+                icon={<BookmarkPlus size={15} />}
+                onClick={openCollect}
+              >
+                收进设定集作为参考图
               </Button>
               <Button
                 variant="secondary"
@@ -459,14 +718,83 @@ export default function ImageAssets() {
             </div>
           )}
           <div className="asset-consistency">
-            <span><Sparkles size={15} /></span>
+            <span>
+              <ShieldCheck size={15} />
+            </span>
             <p>
-              角色与风格一致性将在桌面 Provider
-              接入后建立，当前每个场景保留独立提示词。
+              当前镜头{evaluation?.status === "consistent" ? "与设定集一致" : `：${evaluation?.title ?? "未评估"}`}
+              。锚点由角色外观、场景环境、风格锁和参考图共同决定，任何一项修改都会把旧素材标记为过期。
             </p>
           </div>
         </aside>
       </div>
+
+      <Modal
+        open={collectOpen}
+        onClose={() => setCollectOpen(false)}
+        title="把这张图收进设定集"
+        description="参考图会参与之后的锚点指纹与生成条件。收进设定集不会影响当前场景已采用的素材。"
+        width={480}
+      >
+        <div className="modal__body">
+          <Field label="参考类型">
+            <Select
+              value={collectRole}
+              onChange={(event) => {
+                const value = event.target.value as ReferenceRole;
+                setCollectRole(value);
+                setCollectEntity(
+                  value === "character"
+                    ? (project.characters[0]?.id ?? "")
+                    : value === "location"
+                      ? (project.locations[0]?.id ?? "")
+                      : STYLE_LOCK_ENTITY_ID,
+                );
+              }}
+            >
+              <option value="character">角色</option>
+              <option value="location">场景（环境）</option>
+              <option value="style">全局风格</option>
+            </Select>
+          </Field>
+          {collectRole !== "style" && (
+            <Field label="归属设定卡">
+              <Select
+                value={collectEntity}
+                onChange={(event) => setCollectEntity(event.target.value)}
+              >
+                {collectRole === "character" ? (
+                  project.characters.length ? (
+                    project.characters.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">还没有角色</option>
+                  )
+                ) : project.locations.length ? (
+                  project.locations.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">还没有场景</option>
+                )}
+              </Select>
+            </Field>
+          )}
+        </div>
+        <div className="modal__footer">
+          <Button variant="secondary" onClick={() => setCollectOpen(false)}>
+            取消
+          </Button>
+          <Button variant="primary" onClick={collectAsReference}>
+            加入参考图
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

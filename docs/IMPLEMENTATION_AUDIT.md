@@ -216,13 +216,33 @@
 - 实际本机验收：20 个 runtime 文件校验通过；离线视频 127,085 字节、1.5 秒、SHA-256 `7C799D0EEDDB87AE56E20531F9F48D548B7CCF6BDB79C32DE4D8A2CE1D4E3B28`；启动与卸载均通过。
 - smoke 发现并修复了 FFmpeg/FFprobe 单独复制而未携带 compositor DLL 的发布缺陷；现在 15 个 DLL 一并打包并纳入哈希 manifest。
 
+### 3.13 设定集：角色一致性、场景一致性与参考图管理
+
+- 项目新增三组设定数据：`characters`（角色）、`locations`（场景/环境）、`styleLock`（全局风格锁定）；镜头通过 `characterIds`、`locationId` 绑定，旧项目在 store 迁移和 `merge` 时自动回填为空，不需要手工迁移。
+- 参考图不另建文件管线：仍存放在 `project.assets` 中并带 `reference { role, entityId, label, weight, locked, notes }`，因此继续复用既有的 Data URL 校验、`assets/images` 落盘、`assets/manifest.json`、哈希、复制、ZIP 导出和 `kmasset` 地址重写。
+- 一致性引擎 `src/services/consistency.ts`：
+  - 双 32 位 FNV-1a 稳定哈希生成 16 位指纹。
+  - 指纹覆盖风格描述/调色板、角色名/外观/服装/调色板、场景名/环境/光线/时段/调色板，以及参与生成的参考图 assetId。
+  - 种子优先取设定卡上手填的 seed，否则由指纹派生；同一锚点重复解析得到完全相同的提示词、指纹和种子。
+  - `[CONSISTENCY LOCK]` 指令块按“风格 → 角色（镜头内顺序）→ 场景 → 参考图声明”固定顺序拼接，重复调用幂等；负向词按风格/角色/场景去重合并。
+- 素材快照：每次生成把 `fingerprint / anchorLabel / seed / prompt / negativePrompt / referenceAssetIds / conditioning` 写进 `asset.consistency`。设定或参考图一旦修改，指纹变化，旧素材被判定为 `stale`，而不是静默沿用。
+- 审计报告：`consistencyReport` 逐镜头输出 `consistent / stale / unapplied / unanchored`，并给出锚点覆盖率评分。该评分是结构判定，不声称是图像相似度。
+- 设定集工作区（`/projects/:id/canon`）：角色卡与场景卡的外观/环境/光线/时段/调色板编辑、手填种子、参考图上传（≤2MB）、权重 0.1–1、强制参考开关、删除、矢量参考草案生成、一键应用到全部镜头、逐镜头绑定、状态胶囊、锚点指令与指纹预览。
+- 图片素材页接入：按当前镜头锚点组装提示词、负向词和种子后生成；结果带指纹入库；已有图片可通过“收进设定集”转为角色/场景/风格参考图；锚点变化时在画廊顶部显示“素材已过期”。
+- 后端 `generate_project_images` 扩展 `negativePrompt / seed / references / anchorLabel / consistencyFingerprint`：
+  - 参考图只接受项目内素材或 data URL，单张 ≤8 MiB、最多 3 张，读取后做文件头 MIME 校验。
+  - ComfyUI 使用请求中的固定种子；有参考图时先上传到 ComfyUI `input`，再以 `LoadImage → ImageScale（对齐请求画幅）→ VAEEncode → KSampler` 走 img2img，denoise 由参考权重派生（0.1→0.67，1.0→0.40，默认 0.85 约 0.445），并返回 `referenceMode=prompt+img2img`。
+  - OpenAI Compatible 通道没有像素级参考入口，参考图只通过锚点提示词传递，如实返回 `referenceMode=prompt`。
+  - 参考图上传失败会降级为纯提示词条件并写警告日志，`referenceMode` 反映实际执行的路径。
+- 明确的边界：没有接入人脸识别、CLIP 或任何图像相似度打分；ComfyUI 仅覆盖 Checkpoint + img2img，不含 ControlNet/IP-Adapter/LoRA 角色锁；OpenAI `images/edits` 通道未接入；参考图一致性目前由提示词、种子和结构指纹共同保证，而不是像素级身份验证。
+
 ## 4. 部分实现
 
 | 功能 | 当前状态 | 缺口 |
 |---|---|---|
 | 真实 AI 内容生成 | Agent 和 HTTP Adapter 已完成 | 当前无外部 Key/Ollama，未完成真实模型端到端验收 |
 | Research Agent | 来源候选、正文抓取、Embedding 与项目内检索 | 尚无搜索引擎 API、自动引用核验和跨项目知识库；抓取正文仍需人工核验 |
-| 图片生成 | OpenAI Images、ComfyUI、上传与 SVG 均可用 | ComfyUI 仅覆盖标准 Checkpoint 文本生图工作流，Reference/ControlNet 未配置 |
+| 图片生成 | OpenAI Images、ComfyUI、上传与 SVG 均可用；设定集锚点和参考图已接入 | ComfyUI 参考图只到 img2img 0.55，未配置 ControlNet/IP-Adapter；OpenAI 通道只有 prompt 级参考 |
 | 素材保存 | Data URL 与生成结果会落盘并记录哈希 | 外部远程 URL 尚未下载成本地资产 |
 | TTS | SAPI 与 OpenAI Compatible TTS 可用 | 情绪/角色模板、独立云端 Adapter 和真实服务验收仍缺 |
 | 字幕 | 已知旁白与云端 ASR 听写 | ASR 依赖服务返回 segment；无时间片段时回退按场景均分 |
@@ -241,11 +261,11 @@
 
 ## 5. 未实现
 
-- 角色一致性、场景一致性、参考图管理。
 - 批量图片生成队列、图片局部重绘。
 - 视频素材图层与视频剪辑。
 - Authenticode 签名、时间戳和 signed updater。
 - 真实外部 LLM/Image/TTS/ASR/Embedding 服务端到端验收。
+- 像素级角色身份验证（人脸/CLIP 相似度）与 ControlNet/IP-Adapter 角色锁。
 
 ## 6. 与架构文档不一致的关键项
 
@@ -299,7 +319,7 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 ### P1：完整素材能力
 
 1. 为素材缺失增加“重新生成当前资产”操作。
-2. 增加角色/参考图一致性和 ComfyUI ControlNet/Reference 工作流。
+2. 在现有设定集之上补 ComfyUI ControlNet/IP-Adapter 与 OpenAI `images/edits` 像素级参考通道。
 3. 增加批量图片任务队列和局部重绘。
 4. 增加云端 TTS 情绪/角色模板。
 

@@ -9,10 +9,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     net::IpAddr,
+    path::Path,
     time::{Duration, Instant},
 };
 use tauri::State;
 use uuid::Uuid;
+
+const MAX_REFERENCE_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_REFERENCE_IMAGES: usize = 3;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +32,22 @@ pub struct ImageProviderConfig {
     pub capabilities: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageReferenceInput {
+    #[serde(default)]
+    pub asset_id: String,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub weight: f32,
+    /// 项目内 kmasset URL 或 data URL；不接受任意外部 URL。
+    #[serde(default)]
+    pub source: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageGenerationRequest {
@@ -38,6 +58,16 @@ pub struct ImageGenerationRequest {
     pub style: String,
     pub size: String,
     pub count: u8,
+    #[serde(default)]
+    pub negative_prompt: String,
+    #[serde(default)]
+    pub seed: Option<i64>,
+    #[serde(default)]
+    pub references: Vec<ImageReferenceInput>,
+    #[serde(default)]
+    pub anchor_label: String,
+    #[serde(default)]
+    pub consistency_fingerprint: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,6 +77,10 @@ pub struct ImageGenerationResult {
     pub provider_id: String,
     pub model: String,
     pub elapsed_ms: u128,
+    pub reference_mode: String,
+    pub reference_count: usize,
+    pub seed: i64,
+    pub anchor_label: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -671,12 +705,68 @@ pub async fn generate_project_images(
             request.style.trim()
         )
     };
-    let started = Instant::now();
-    let images = match request.provider.protocol.as_str() {
-        "OpenAI Compatible" => {
-            generate_openai_images(&request.provider, &prompt, &request.size, count).await?
+    let seed = request.seed.unwrap_or_else(|| {
+        (Utc::now().timestamp_millis() as i64).rem_euclid(2_000_000_000)
+    });
+    let mut reference_images: Vec<(&ImageReferenceInput, Vec<u8>)> = Vec::new();
+    for reference in request.references.iter().take(MAX_REFERENCE_IMAGES) {
+        match read_reference_bytes(
+            &state.projects_root,
+            &request.project_id,
+            &reference.source,
+        ) {
+            Ok(bytes) => match detect_image_mime(&bytes) {
+                Ok(_) => reference_images.push((reference, bytes)),
+                Err(error) => logging::log_event(
+                    LogLevel::Warn,
+                    "provider.image.reference",
+                    "Reference image rejected by signature check",
+                    Some(json!({
+                        "projectId": request.project_id,
+                        "assetId": reference.asset_id,
+                        "error": limit(&error)
+                    })),
+                ),
+            },
+            Err(error) => logging::log_event(
+                LogLevel::Warn,
+                "provider.image.reference",
+                "Reference image could not be resolved",
+                Some(json!({
+                    "projectId": request.project_id,
+                    "assetId": reference.asset_id,
+                    "error": limit(&error)
+                })),
+            ),
         }
-        "ComfyUI" => generate_comfyui_images(&request.provider, &prompt, &request.size).await?,
+    }
+
+    let started = Instant::now();
+    let (images, reference_mode) = match request.provider.protocol.as_str() {
+        "OpenAI Compatible" => (
+            // OpenAI Images generations 没有 pixel-level reference 通道；
+            // 参考图已由前端写入锚点提示词，这里如实报告 prompt 模式。
+            generate_openai_images(&request.provider, &prompt, &request.size, count).await?,
+            "prompt",
+        ),
+        "ComfyUI" => {
+            let reference = reference_images
+                .first()
+                .map(|(input, bytes)| (bytes.as_slice(), input.weight));
+            let (images, conditioned) = generate_comfyui_images(
+                &request.provider,
+                &prompt,
+                &request.size,
+                &request.negative_prompt,
+                seed,
+                reference,
+            )
+            .await?;
+            (
+                images,
+                if conditioned { "prompt+img2img" } else { "prompt" },
+            )
+        }
         other => {
             return Err(format!(
                 "Provider protocol {other} does not implement Image generation"
@@ -736,7 +826,21 @@ pub async fn generate_project_images(
             "providerId": request.provider.id,
             "model": request.provider.model,
             "images": assets.len(),
-            "elapsedMs": started.elapsed().as_millis()
+            "elapsedMs": started.elapsed().as_millis(),
+            "seed": seed,
+            "references": reference_images.len(),
+            "referenceDetails": reference_images
+                .iter()
+                .map(|(input, _)| json!({
+                    "assetId": input.asset_id,
+                    "role": input.role,
+                    "label": input.label,
+                    "weight": input.weight
+                }))
+                .collect::<Vec<_>>(),
+            "referenceMode": reference_mode,
+            "anchorLabel": request.anchor_label,
+            "fingerprint": request.consistency_fingerprint
         })),
     );
     Ok(ImageGenerationResult {
@@ -744,7 +848,46 @@ pub async fn generate_project_images(
         provider_id: request.provider.id,
         model: request.provider.model,
         elapsed_ms: started.elapsed().as_millis(),
+        reference_mode: reference_mode.to_string(),
+        reference_count: reference_images.len(),
+        seed,
+        anchor_label: request.anchor_label,
     })
+}
+
+/// 把设定集参考图解析成本地字节。只接受项目内素材或 data URL，
+/// 避免把生成请求变成任意文件/网络读取通道。
+fn read_reference_bytes(
+    projects_root: &Path,
+    project_id: &str,
+    source: &str,
+) -> Result<Vec<u8>, String> {
+    if let Some(data_url) = source.strip_prefix("data:") {
+        let (header, encoded) = data_url
+            .split_once(',')
+            .ok_or_else(|| "Reference image contains a malformed data URL".to_string())?;
+        if !header.ends_with(";base64") {
+            return Err("Reference image must be base64 encoded".to_string());
+        }
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+        let bytes = BASE64
+            .decode(encoded)
+            .map_err(|error| format!("Invalid reference image base64: {error}"))?;
+        if bytes.len() > MAX_REFERENCE_IMAGE_BYTES {
+            return Err("Reference image exceeds the 8 MiB limit".to_string());
+        }
+        return Ok(bytes);
+    }
+    let relative = crate::storage::client_url_to_relative(project_id, source)
+        .or_else(|| crate::storage::safe_relative_path(source))
+        .ok_or_else(|| "Reference image must be a project asset".to_string())?;
+    let path = projects_root.join(project_id).join(&relative);
+    let metadata = std::fs::metadata(&path)
+        .map_err(|error| format!("Reference image is unavailable: {error}"))?;
+    if metadata.len() as usize > MAX_REFERENCE_IMAGE_BYTES {
+        return Err("Reference image exceeds the 8 MiB limit".to_string());
+    }
+    std::fs::read(&path).map_err(|error| format!("Unable to read reference image: {error}"))
 }
 
 async fn generate_openai_images(
@@ -812,54 +955,42 @@ async fn generate_comfyui_images(
     provider: &ImageProviderConfig,
     prompt: &str,
     size: &str,
-) -> Result<Vec<Vec<u8>>, String> {
+    negative: &str,
+    seed: i64,
+    reference: Option<(&[u8], f32)>,
+) -> Result<(Vec<Vec<u8>>, bool), String> {
     let (width, height) = parse_image_size(size)?;
     let base = provider.base_url.trim_end_matches('/');
     let client = http_client()?;
-    let workflow = json!({
-        "3": {
-            "class_type": "KSampler",
-            "inputs": {
-                "seed": Utc::now().timestamp_subsec_nanos(),
-                "steps": 24,
-                "cfg": 7.0,
-                "sampler_name": "euler",
-                "scheduler": "normal",
-                "denoise": 1.0,
-                "model": ["4", 0],
-                "positive": ["6", 0],
-                "negative": ["7", 0],
-                "latent_image": ["5", 0]
+    let reference_name = match reference {
+        Some((bytes, _)) => match upload_comfyui_reference(&client, base, bytes).await {
+            Ok(name) => Some(name),
+            Err(error) => {
+                logging::log_event(
+                    LogLevel::Warn,
+                    "provider.image.reference",
+                    "ComfyUI reference upload failed; continuing with prompt-only conditioning",
+                    Some(json!({ "error": limit(&error) })),
+                );
+                None
             }
         },
-        "4": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": { "ckpt_name": provider.model }
-        },
-        "5": {
-            "class_type": "EmptyLatentImage",
-            "inputs": { "width": width, "height": height, "batch_size": 1 }
-        },
-        "6": {
-            "class_type": "CLIPTextEncode",
-            "inputs": { "text": prompt, "clip": ["4", 1] }
-        },
-        "7": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {
-                "text": "blurry, low quality, text artifacts, watermark",
-                "clip": ["4", 1]
-            }
-        },
-        "8": {
-            "class_type": "VAEDecode",
-            "inputs": { "samples": ["3", 0], "vae": ["4", 2] }
-        },
-        "9": {
-            "class_type": "SaveImage",
-            "inputs": { "filename_prefix": "knowmotion", "images": ["8", 0] }
-        }
-    });
+        None => None,
+    };
+    let conditioned = reference_name.is_some();
+    let denoise = reference
+        .map(|(_, weight)| reference_denoise(weight))
+        .unwrap_or(1.0);
+    let workflow = comfy_image_workflow(
+        prompt,
+        negative,
+        &provider.model,
+        width,
+        height,
+        seed,
+        reference_name.as_deref(),
+        denoise,
+    );
     let response = client
         .post(format!("{base}/prompt"))
         .json(&json!({
@@ -943,7 +1074,147 @@ async fn generate_comfyui_images(
         .await
         .map_err(provider_network_error)?
         .to_vec();
-    Ok(vec![bytes])
+    Ok((vec![bytes], conditioned))
+}
+
+/// 参考权重直接映射到 img2img 强度：权重越高，denoise 越低，
+/// 越接近参考图。0.1 → 0.67，1.0 → 0.40，默认 0.85 → 约 0.445。
+fn reference_denoise(weight: f32) -> f64 {
+    let clamped = weight.clamp(0.1, 1.0) as f64;
+    (0.70 - 0.30 * clamped).clamp(0.35, 0.75)
+}
+
+/// ComfyUI 标准 Checkpoint 工作流。带参考图时切换为 img2img：
+/// 参考图先上传到 input，再经 VAEEncode 作为 latent。
+fn comfy_image_workflow(
+    prompt: &str,
+    negative: &str,
+    model: &str,
+    width: u32,
+    height: u32,
+    seed: i64,
+    reference_name: Option<&str>,
+    denoise: f64,
+) -> Value {
+    let negative_text = if negative.trim().is_empty() {
+        "blurry, low quality, text artifacts, watermark"
+    } else {
+        negative.trim()
+    };
+    let conditioned = reference_name.is_some();
+    let latent_image = if conditioned {
+        json!(["11", 0])
+    } else {
+        json!(["5", 0])
+    };
+    let mut workflow = json!({
+        "3": {
+            "class_type": "KSampler",
+            "inputs": {
+                "seed": seed,
+                "steps": 24,
+                "cfg": 7.0,
+                "sampler_name": "euler",
+                "scheduler": "normal",
+                "denoise": denoise,
+                "model": ["4", 0],
+                "positive": ["6", 0],
+                "negative": ["7", 0],
+                "latent_image": latent_image
+            }
+        },
+        "4": {
+            "class_type": "CheckpointLoaderSimple",
+            "inputs": { "ckpt_name": model }
+        },
+        "6": {
+            "class_type": "CLIPTextEncode",
+            "inputs": { "text": prompt, "clip": ["4", 1] }
+        },
+        "7": {
+            "class_type": "CLIPTextEncode",
+            "inputs": { "text": negative_text, "clip": ["4", 1] }
+        },
+        "8": {
+            "class_type": "VAEDecode",
+            "inputs": { "samples": ["3", 0], "vae": ["4", 2] }
+        },
+        "9": {
+            "class_type": "SaveImage",
+            "inputs": { "filename_prefix": "knowmotion", "images": ["8", 0] }
+        }
+    });
+    match reference_name {
+        Some(name) => {
+            workflow["10"] = json!({
+                "class_type": "LoadImage",
+                "inputs": { "image": name }
+            });
+            // 参考图可能比例不同，先对齐到请求画幅再做 img2img，避免输出尺寸漂移。
+            workflow["12"] = json!({
+                "class_type": "ImageScale",
+                "inputs": {
+                    "upscale_method": "lanczos",
+                    "width": width,
+                    "height": height,
+                    "crop": "center",
+                    "image": ["10", 0]
+                }
+            });
+            workflow["11"] = json!({
+                "class_type": "VAEEncode",
+                "inputs": { "pixels": ["12", 0], "vae": ["4", 2] }
+            });
+        }
+        None => {
+            workflow["5"] = json!({
+                "class_type": "EmptyLatentImage",
+                "inputs": { "width": width, "height": height, "batch_size": 1 }
+            });
+        }
+    }
+    workflow
+}
+
+async fn upload_comfyui_reference(
+    client: &Client,
+    base: &str,
+    bytes: &[u8],
+) -> Result<String, String> {
+    let mime = detect_image_mime(bytes)?;
+    let response = client
+        .post(format!(
+            "{base}/upload/image?overwrite=true&type=input&subfolder=knowmotion"
+        ))
+        .header(reqwest::header::CONTENT_TYPE, mime)
+        .body(bytes.to_vec())
+        .send()
+        .await
+        .map_err(provider_network_error)?;
+    let status = response.status();
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|_| format!("ComfyUI upload returned non-JSON response ({status})"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "ComfyUI reference upload failed ({status}): {}",
+            limit(&body.to_string())
+        ));
+    }
+    let name = body
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "ComfyUI upload response has no name".to_string())?;
+    let subfolder = body
+        .get("subfolder")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    Ok(if subfolder.is_empty() {
+        name.to_string()
+    } else {
+        format!("{subfolder}/{name}")
+    })
 }
 
 async fn download_image(client: &Client, url: &str) -> Result<Vec<u8>, String> {
@@ -1242,5 +1513,142 @@ mod tests {
     fn cosine_similarity_handles_parallel_vectors() {
         let score = cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]).expect("score");
         assert!((score - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn comfy_workflow_locks_seed_and_uses_reference_img2img() {
+        let workflow = comfy_image_workflow(
+            "anchored shot",
+            "",
+            "sdxl.safetensors",
+            1024,
+            576,
+            42,
+            Some("knowmotion/ref.png"),
+            0.45,
+        );
+        assert_eq!(
+            workflow.pointer("/3/inputs/seed").and_then(Value::as_i64),
+            Some(42)
+        );
+        assert_eq!(
+            workflow
+                .pointer("/3/inputs/latent_image/0")
+                .and_then(Value::as_str),
+            Some("11")
+        );
+        assert_eq!(
+            workflow
+                .pointer("/10/inputs/image")
+                .and_then(Value::as_str),
+            Some("knowmotion/ref.png")
+        );
+        assert_eq!(
+            workflow
+                .pointer("/11/inputs/pixels/0")
+                .and_then(Value::as_str),
+            Some("12")
+        );
+        assert_eq!(
+            workflow.pointer("/12/inputs/width").and_then(Value::as_u64),
+            Some(1024)
+        );
+        assert_eq!(
+            workflow.pointer("/3/inputs/denoise").and_then(Value::as_f64),
+            Some(0.45)
+        );
+        assert!(workflow.pointer("/5").is_none());
+        assert_eq!(
+            workflow.pointer("/7/inputs/text").and_then(Value::as_str),
+            Some("blurry, low quality, text artifacts, watermark")
+        );
+    }
+
+    #[test]
+    fn comfy_workflow_without_reference_uses_empty_latent_and_custom_negative() {
+        let workflow = comfy_image_workflow(
+            "plain shot",
+            "cartoon, watermark",
+            "sdxl.safetensors",
+            768,
+            768,
+            7,
+            None,
+            1.0,
+        );
+        assert_eq!(
+            workflow
+                .pointer("/3/inputs/latent_image/0")
+                .and_then(Value::as_str),
+            Some("5")
+        );
+        assert_eq!(
+            workflow.pointer("/5/inputs/width").and_then(Value::as_u64),
+            Some(768)
+        );
+        assert_eq!(
+            workflow.pointer("/7/inputs/text").and_then(Value::as_str),
+            Some("cartoon, watermark")
+        );
+        assert!(workflow.pointer("/10").is_none());
+        assert_eq!(
+            workflow.pointer("/3/inputs/denoise").and_then(Value::as_f64),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn reference_weight_maps_to_img2img_denoise() {
+        assert!((reference_denoise(0.5) - 0.55).abs() < 0.001);
+        assert!((reference_denoise(1.0) - 0.40).abs() < 0.001);
+        assert!((reference_denoise(0.1) - 0.67).abs() < 0.001);
+        assert!((reference_denoise(-5.0) - 0.67).abs() < 0.001);
+        assert!((reference_denoise(9.0) - 0.40).abs() < 0.001);
+    }
+
+    #[test]
+    fn reference_bytes_accept_project_assets_and_data_urls_only() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let project_root = temp.path().join("project-1");
+        std::fs::create_dir_all(project_root.join("assets/images")).expect("dirs");
+        std::fs::write(
+            project_root.join("assets/images/ref.png"),
+            b"\x89PNG\r\n\x1a\npayload",
+        )
+        .expect("write");
+
+        let local = read_reference_bytes(
+            temp.path(),
+            "project-1",
+            "assets/images/ref.png",
+        )
+        .expect("local reference");
+        assert_eq!(local, b"\x89PNG\r\n\x1a\npayload");
+
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+        let encoded = BASE64.encode(b"\x89PNG\r\n\x1a\ndata-url");
+        let decoded = read_reference_bytes(
+            temp.path(),
+            "project-1",
+            &format!("data:image/png;base64,{encoded}"),
+        )
+        .expect("data url reference");
+        assert_eq!(decoded, b"\x89PNG\r\n\x1a\ndata-url");
+
+        assert!(read_reference_bytes(
+            temp.path(),
+            "project-1",
+            "https://example.com/ref.png"
+        )
+        .is_err());
+        assert!(
+            read_reference_bytes(temp.path(), "project-1", "../secret.png").is_err()
+        );
+        assert!(read_reference_bytes(
+            temp.path(),
+            "project-1",
+            "assets/images/missing.png"
+        )
+        .is_err());
     }
 }

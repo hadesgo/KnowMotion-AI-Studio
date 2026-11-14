@@ -1,12 +1,25 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Asset, ProviderProfile } from "../types";
+import type { Asset, ProviderProfile, ReferenceRole } from "../types";
 import { isTauriDesktop } from "./desktop";
+
+export interface ImageReferenceInput {
+  assetId: string;
+  role: ReferenceRole;
+  label: string;
+  weight: number;
+  /** kmasset URL 或 data URL；后端只接受项目内文件。 */
+  source: string;
+}
 
 export interface ImageGenerationResult {
   assets: Asset[];
   providerId: string;
   model: string;
   elapsedMs: number;
+  referenceMode: "prompt" | "prompt+img2img";
+  referenceCount: number;
+  seed: number;
+  anchorLabel: string;
 }
 
 export async function generateProjectImages(input: {
@@ -17,6 +30,11 @@ export async function generateProjectImages(input: {
   style: string;
   size: "1024x1024" | "1536x1024" | "1024x1536";
   count: number;
+  negativePrompt?: string;
+  seed?: number;
+  references?: ImageReferenceInput[];
+  anchorLabel?: string;
+  consistencyFingerprint?: string;
 }): Promise<ImageGenerationResult> {
   if (!isTauriDesktop) {
     throw new Error("在线图片生成需要 Tauri 桌面运行时。");

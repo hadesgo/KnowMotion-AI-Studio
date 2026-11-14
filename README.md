@@ -8,7 +8,9 @@ AI-powered knowledge animation studio. 用户从一个知识主题开始，在�
 - Tailwind CSS v4 负责工具类与设计 Token，桌面界面组件层保留在工作站样式文件中。
 - Rust 后端通过 SQLite 保存项目、Provider 元数据和持久化状态。
 - 每个项目同步生成独立的 `project.json`、脚本、分镜、素材清单、动画时间轴和字幕目录。
-- 14 个工作区界面：Dashboard、新建项目、Agent 工作流、内容策划、脚本、分镜、图片素材、动画、Remotion Studio、时间轴、AI 助手、音频字幕、渲染、模型配置。
+- 15 个工作区界面：Dashboard、新建项目、Agent 工作流、内容策划、脚本、分镜、图片素材、设定集、动画、Remotion Studio、时间轴、AI 助手、音频字幕、渲染、模型配置。
+- 设定集：角色、场景与全局风格锚点，参考图库与权重，稳定指纹/种子，逐镜头一致性报告与素材过期检测。
+- 图片生成支持负向提示词、固定种子和参考图：ComfyUI 走 img2img，OpenAI 通道以文字锚点传递参考。
 - 九个持久化 AI Agent 与 DAG Workflow：模型路由、审批、暂停恢复、局部重跑、受控项目工具、修订和撤销。
 - 原生 GGUF 本地推理：可直接选择 `.gguf` 模型文件，支持 CPU 与 DirectX 12 GPU 加速。
 - Remotion Scene/Composition DSL、可复用动画组件、实时 Player 和完整 H.264 渲染。

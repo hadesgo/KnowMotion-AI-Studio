@@ -110,10 +110,20 @@ export function sceneSvgDataUrl(scene: Scene): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(sceneSvg(scene))}`;
 }
 
+export interface VisualDraftOptions {
+  /** 设定集派生种子：同一锚点每次生成得到同一张草案。 */
+  seed?: number;
+  /** 优先使用角色/场景调色板。 */
+  palette?: string[];
+  /** 画面上标注的锚点名称。 */
+  anchorLabel?: string;
+}
+
 export function createVisualDraftSvg(
   prompt: string,
   style: string,
   index: number,
+  options: VisualDraftOptions = {},
 ): { src: string; accent: string } {
   const palettes = [
     ["#c8ff65", "#0c3540", "#1f6b65"],
@@ -121,14 +131,25 @@ export function createVisualDraftSvg(
     ["#ffbc66", "#4b2d1c", "#9b6b3d"],
     ["#f3a7ff", "#352046", "#6f4c88"],
   ];
-  const seed = [...`${prompt}${style}${index}`].reduce(
-    (total, char) => total + char.charCodeAt(0),
-    0,
-  );
-  const palette = palettes[seed % palettes.length];
+  const seed =
+    options.seed ??
+    [...`${prompt}${style}${index}`].reduce(
+      (total, char) => total + char.charCodeAt(0),
+      0,
+    );
+  const palette = options.palette?.length
+    ? [
+        options.palette[0],
+        options.palette[1] ?? "#0c3540",
+        options.palette[2] ?? options.palette[1] ?? "#1f6b65",
+      ]
+    : palettes[seed % palettes.length];
   const rings = 3 + (seed % 4);
   const angle = seed % 360;
   const title = escapeXml(truncate(prompt || "Visual concept", 35));
+  const anchorLine = options.anchorLabel
+    ? escapeXml(truncate(options.anchorLabel, 52))
+    : "";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640">
     <defs>
       <radialGradient id="bg" cx="${25 + (seed % 55)}%" cy="25%" r="90%">
@@ -147,6 +168,7 @@ export function createVisualDraftSvg(
     <text x="64" y="76" fill="${palette[0]}" font-family="Segoe UI, sans-serif" font-size="14" letter-spacing="4">GENERATED VISUAL STUDY</text>
     <text x="64" y="510" fill="#f3f7f4" font-family="Segoe UI, sans-serif" font-size="40" font-weight="600">${title}</text>
     <text x="64" y="550" fill="#9aabba" font-family="Segoe UI, sans-serif" font-size="18">${escapeXml(style)} · local vector draft ${String(index).padStart(2, "0")}</text>
+    ${anchorLine ? `<text x="64" y="586" fill="${palette[0]}" font-family="Segoe UI, sans-serif" font-size="16" letter-spacing="1">${anchorLine}</text>` : ""}
   </svg>`;
   return {
     src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,

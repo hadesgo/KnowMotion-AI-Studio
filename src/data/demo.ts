@@ -1,14 +1,67 @@
 import type {
   AspectRatio,
+  CharacterProfile,
   CreateProjectInput,
+  LocationProfile,
   OutlineSection,
   Scene,
+  StyleLock,
   TimelineClip,
   VideoProject,
 } from "../types";
 import { makeId, nowIso } from "../utils";
 
 const accents = ["#c8ff65", "#79a9ff", "#ffbc66", "#9de7d7", "#a78bfa"];
+
+export function createCharacter(
+  name = "新角色",
+  role = "解说者",
+): CharacterProfile {
+  return {
+    id: makeId("character"),
+    name,
+    role,
+    summary: "",
+    appearance: "",
+    wardrobe: "",
+    palette: [],
+    negative: "",
+    referenceAssetIds: [],
+    locked: false,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+}
+
+export function createLocation(name = "新场景"): LocationProfile {
+  return {
+    id: makeId("location"),
+    name,
+    summary: "",
+    environment: "",
+    lighting: "",
+    timeOfDay: "",
+    palette: [],
+    negative: "",
+    referenceAssetIds: [],
+    locked: false,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+}
+
+
+/** 新建项目的默认风格锁定：关闭状态，仅记录项目视觉风格作为描述。 */
+export function defaultStyleLock(style = ""): StyleLock {
+  return {
+    enabled: false,
+    descriptor: style,
+    palette: [],
+    negative: "",
+    referenceAssetIds: [],
+  };
+}
+
 
 export const contentTypes = [
   "知识科普",
@@ -225,6 +278,9 @@ export function makeSampleProject(): VideoProject {
     researchSources: [],
     scenes,
     assets: [],
+    characters: [],
+    locations: [],
+    styleLock: defaultStyleLock("电影感纪录片 · 深空低照度"),
     subtitles: [
       {
         id: makeId("sub"),
@@ -393,6 +449,15 @@ export function makeSkyBlueProject(): VideoProject {
     researchSources: [],
     scenes,
     assets: [],
+    characters: [],
+    locations: [],
+    styleLock: {
+      enabled: true,
+      descriptor: "扁平矢量科普动画，明亮蓝天，圆润几何形状，粗体无衬线标题",
+      palette: ["#8ef2ff", "#58c7ff", "#ffd166", "#c8ff65"],
+      negative: "写实照片，昏暗色调，恐怖氛围，文字水印",
+      referenceAssetIds: [],
+    },
     subtitles,
     timeline: createTimeline(scenes),
     audio: {
@@ -462,6 +527,9 @@ export function createProject(input: CreateProjectInput): VideoProject {
     researchSources: [],
     scenes,
     assets: [],
+    characters: [],
+    locations: [],
+    styleLock: defaultStyleLock(input.style),
     subtitles: [],
     timeline: createTimeline(scenes),
     audio: {

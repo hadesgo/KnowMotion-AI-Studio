@@ -15,3 +15,4 @@ src-tauri/resources/runtime-manifest.json
 src-tauri/binaries/
 renders/
 e2e-artifacts/
+.workbuddy/
