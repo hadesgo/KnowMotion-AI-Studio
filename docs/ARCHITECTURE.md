@@ -1038,6 +1038,13 @@ interface JobEnvelope<T> {
 - 每个任务通过 `image.job.changed` 推送完整视图，WebView 合并素材时按 assetId 去重，不覆盖项目里已有的素材。
 - 局部重绘在前端生成两张 PNG 遮罩（白底黑区 + 透明底黑区），后端只接受项目内源图与 PNG data URL：ComfyUI 走 `LoadImageMask → VAEEncodeForInpaint`，OpenAI 兼容通道走 multipart `images/edits`；结果另存为新素材并记录 `inpaint` 元数据。
 
+### 13.2.1 视频素材与视频图层
+
+- 视频素材同样登记在 `assets` 中，落盘到 `assets/videos/{assetId}.{ext}`，经项目内 kmasset URL 访问；导入时校验容器头与扩展名，默认拒绝超过 128 MiB 的文件。
+- 场景图层新增 `video` 类型，字段包括素材 ID、源入点/出点、适配方式、音量、静音、播放速度与圆角；`editorVideoLayers` 负责编译到 Remotion DSL。
+- 渲染时 `SceneRenderer` 使用 `OffthreadVideo`，`trimBefore` 由入点换算成帧，`durationInFrames` 取图层时长与裁剪时长较小者，因此 Player 预览与 Renderer 输出行为一致。
+- 渲染前 `hydrate_composition_assets` 会把视频嵌入为 data URL；单文件超过 24 MB 会拒绝渲染并提示压缩或裁剪，避免长视频导致内存与 Composition 体积失控。
+
 ### 13.3 TTS 任务
 
 1. Audio Agent 为每段旁白生成 TTS 请求，带语速、音色和情绪参数。

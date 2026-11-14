@@ -14,6 +14,7 @@ import RenderPage from "./pages/RenderPage";
 import ScriptEditor from "./pages/ScriptEditor";
 import Storyboard from "./pages/Storyboard";
 import TimelineEditor from "./pages/TimelineEditor";
+import VideoAssets from "./pages/VideoAssets";
 
 const RemotionStudio = lazy(() => import("./pages/RemotionStudio"));
 
@@ -40,6 +41,7 @@ export default function App() {
           <Route path="storyboard" element={<Storyboard />} />
           <Route path="assets" element={<ImageAssets />} />
           <Route path="canon" element={<Canon />} />
+          <Route path="video" element={<VideoAssets />} />
           <Route path="animation" element={<AnimationEditor />} />
           <Route
             path="remotion"

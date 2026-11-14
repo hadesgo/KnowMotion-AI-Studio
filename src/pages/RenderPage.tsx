@@ -540,6 +540,7 @@ export default function RenderPage() {
                     asset={project.assets.find(
                       (asset) => asset.id === project.scenes[0]?.assetId,
                     )}
+                    assets={project.assets}
                     ratio={project.settings.aspectRatio}
                     time={0.8}
                   />

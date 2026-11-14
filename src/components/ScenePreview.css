@@ -222,3 +222,25 @@
   font-size: 12px;
 }
 
+
+.scene-layer--video {
+  overflow: hidden;
+  background: #05080c;
+}
+
+.scene-layer--video video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.scene-layer--video__missing {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: #ff6b7d;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+}

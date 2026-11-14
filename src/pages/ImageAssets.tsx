@@ -487,6 +487,7 @@ export default function ImageAssets() {
             <ScenePreview
               scene={scene}
               asset={project.assets.find((asset) => asset.id === scene.assetId)}
+              assets={project.assets}
               ratio={project.settings.aspectRatio}
               time={0.7}
             />

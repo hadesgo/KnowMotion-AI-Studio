@@ -7,6 +7,7 @@ mod logging;
 mod media;
 mod render;
 mod storage;
+mod video;
 
 use chrono::Utc;
 use database::open_database;
@@ -787,6 +788,7 @@ pub fn run() {
             agent::provider_test,
             media::generate_project_narration,
             media::generate_background_music,
+            video::import_project_video,
             render::render_start,
             render::render_get,
             render::render_list,

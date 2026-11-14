@@ -1343,14 +1343,25 @@ fn hydrate_composition_assets(
                 return Err("Composition contains an unsafe asset path".to_string());
             };
             let path = project_root.join(relative);
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("Unable to load render asset: {error}"))?;
-            let mime = match path
+            let extension = path
                 .extension()
                 .and_then(|extension| extension.to_str())
                 .unwrap_or_default()
-                .to_ascii_lowercase()
-                .as_str()
+                .to_ascii_lowercase();
+            if matches!(extension.as_str(), "mp4" | "m4v" | "webm" | "mov" | "ogv") {
+                let size = fs::metadata(&path)
+                    .map_err(|error| format!("Unable to inspect render video: {error}"))?
+                    .len();
+                if size > 24 * 1024 * 1024 {
+                    return Err(format!(
+                        "视频素材超过 24 MB 的渲染嵌入上限（当前 {:.1} MB），请先压缩或裁剪后再渲染。",
+                        size as f64 / 1024.0 / 1024.0
+                    ));
+                }
+            }
+            let bytes = fs::read(&path)
+                .map_err(|error| format!("Unable to load render asset: {error}"))?;
+            let mime = match extension.as_str()
             {
                 "png" => "image/png",
                 "jpg" | "jpeg" => "image/jpeg",
@@ -1359,7 +1370,10 @@ fn hydrate_composition_assets(
                 "svg" => "image/svg+xml",
                 "wav" => "audio/wav",
                 "mp3" => "audio/mpeg",
-                "mp4" => "video/mp4",
+                "mp4" | "m4v" => "video/mp4",
+                "webm" => "video/webm",
+                "mov" => "video/quicktime",
+                "ogv" => "video/ogg",
                 _ => "application/octet-stream",
             };
             asset["src"] = Value::String(format!(

@@ -91,7 +91,7 @@ export default function RemotionStudio() {
       for (const layer of scene.layers) stats[layer.type] += 1;
       return stats;
     },
-    { text: 0, svg: 0, image: 0, chart: 0, canvas: 0 },
+    { text: 0, svg: 0, image: 0, chart: 0, canvas: 0, video: 0 },
   );
 
   const validateNow = () => {
@@ -324,7 +324,7 @@ export default function RemotionStudio() {
         <div>
           <span className="eyebrow">LAYERS</span>
           <strong>{Object.values(layerStats).reduce((sum, value) => sum + value, 0)}</strong>
-          <small>{layerStats.text} 文本 · {layerStats.svg} SVG · {layerStats.image} 图片 · {layerStats.chart} 图表 · {layerStats.canvas} Canvas</small>
+          <small>{layerStats.text} 文本 · {layerStats.svg} SVG · {layerStats.image} 图片 · {layerStats.video} 视频 · {layerStats.chart} 图表 · {layerStats.canvas} Canvas</small>
         </div>
       </div>
 

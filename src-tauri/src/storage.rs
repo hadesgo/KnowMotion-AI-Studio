@@ -685,7 +685,10 @@ fn mime_for_path(path: &Path) -> &'static str {
         "svg" => "image/svg+xml",
         "wav" => "audio/wav",
         "mp3" => "audio/mpeg",
-        "mp4" => "video/mp4",
+        "mp4" | "m4v" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "ogv" => "video/ogg",
         _ => "application/octet-stream",
     }
 }

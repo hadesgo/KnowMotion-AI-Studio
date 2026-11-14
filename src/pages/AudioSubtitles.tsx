@@ -826,6 +826,7 @@ export default function AudioSubtitles() {
             <ScenePreview
               scene={scene}
               asset={asset}
+              assets={project.assets}
               ratio={project.settings.aspectRatio}
               time={0.6}
             />

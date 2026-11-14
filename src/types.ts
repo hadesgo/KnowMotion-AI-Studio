@@ -84,7 +84,7 @@ export interface StyleLock {
 
 export interface SceneLayer {
   id: string;
-  type: "text" | "shape" | "canvas";
+  type: "text" | "shape" | "canvas" | "video";
   name: string;
   content: string;
   x: number;
@@ -108,6 +108,16 @@ export interface SceneLayer {
   lineWidth?: number;
   intensity?: number;
   seed?: number;
+  /** 视频图层：引用的项目视频素材。 */
+  assetId?: string;
+  /** 源视频入点/出点（秒）。 */
+  trimStart?: number;
+  trimEnd?: number;
+  fit?: "cover" | "contain" | "fill";
+  volume?: number;
+  muted?: boolean;
+  playbackRate?: number;
+  borderRadius?: number;
   gsapMotion?: GsapMotionConfig;
 }
 
@@ -167,12 +177,15 @@ export interface Asset {
   id: string;
   sceneId: string;
   name: string;
-  kind: "image" | "audio";
+  kind: "image" | "audio" | "video";
   src: string;
   prompt: string;
   createdAt: string;
   local: boolean;
   durationMs?: number;
+  bytes?: number;
+  width?: number;
+  height?: number;
   mimeType?: string;
   providerId?: string;
   /** 设定集参考图的归属；普通场景素材没有该字段。 */

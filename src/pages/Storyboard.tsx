@@ -215,6 +215,7 @@ export default function Storyboard() {
                     <ScenePreview
                       scene={scene}
                       asset={asset}
+                      assets={project.assets}
                       ratio={project.settings.aspectRatio}
                       time={0.8}
                     />
@@ -278,6 +279,7 @@ export default function Storyboard() {
                 <ScenePreview
                   scene={selected}
                   asset={project.assets.find((item) => item.id === selected.assetId)}
+                  assets={project.assets}
                   ratio={project.settings.aspectRatio}
                   time={0.6}
                 />

@@ -8,6 +8,7 @@ export function ScenePreview({
   scene,
   ratio = "16:9",
   asset,
+  assets,
   time,
   showGuides = false,
   className = "",
@@ -15,6 +16,8 @@ export function ScenePreview({
   scene?: Scene;
   ratio?: AspectRatio;
   asset?: Asset;
+  /** 用于解析视频图层引用的项目素材。 */
+  assets?: Asset[];
   time?: number;
   showGuides?: boolean;
   className?: string;
@@ -98,6 +101,54 @@ export function ScenePreview({
                 intensity={layer.intensity ?? 0.85}
                 seed={layer.seed ?? 41}
               />
+            </div>
+          );
+        }
+        if (layer.type === "video") {
+          const videoAsset = layer.assetId
+            ? assets?.find(
+                (item) => item.id === layer.assetId && item.kind === "video",
+              )
+            : undefined;
+          return (
+            <div
+              key={layer.id}
+              className="scene-layer scene-layer--video"
+              style={{
+                left: `${layer.x}%`,
+                top: `${layer.y}%`,
+                width: `${layer.width}%`,
+                height: `${layer.height}%`,
+                opacity: layer.opacity * entrance,
+                transform,
+                transformOrigin: "center center",
+                borderRadius: layer.borderRadius ?? 0,
+              }}
+            >
+              {videoAsset ? (
+                <video
+                  src={videoAsset.src}
+                  muted={layer.muted ?? true}
+                  playsInline
+                  preload="auto"
+                  onLoadedMetadata={(event) => {
+                    const element = event.currentTarget;
+                    const target = Math.min(
+                      Math.max(0, layer.trimStart ?? 0),
+                      Math.max(0, (element.duration || 1) - 0.05),
+                    );
+                    element.currentTime = target;
+                  }}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: layer.fit ?? "cover",
+                    borderRadius: layer.borderRadius ?? 0,
+                  }}
+                />
+              ) : (
+                <span className="scene-layer--video__missing">VIDEO MISSING</span>
+              )}
             </div>
           );
         }

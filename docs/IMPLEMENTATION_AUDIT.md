@@ -260,6 +260,16 @@
 
 边界：没有遮罩羽化/软边、没有文本自动生成遮罩、没有局部重绘历史对比；队列并发固定为 2，未按 Provider 单独限流；OpenAI 局部重绘的实际可用性仍取决于服务端是否支持 `images/edits`，当前无在线验收记录。
 
+### 3.15 视频素材图层与视频剪辑
+
+- 数据模型：`Asset.kind` 增加 `video`，记录 `durationMs / width / height / bytes / mimeType`；`SceneLayer` 增加 `video` 类型与 `assetId / trimStart / trimEnd / fit / volume / muted / playbackRate / borderRadius`。
+- 导入：新增 `import_project_video`，只接受 mp4/m4v/webm/mov/ogv，读取文件头校验容器与扩展名一致，拒绝大于 128 MiB 的文件；复制到 `assets/videos/{assetId}.{ext}`，返回 kmasset URL 与 bytes；前端用 `<video>` 探测时长与分辨率并回写素材。
+- Remotion：新增 `videoLayerSchema`；项目素材集合纳入 video；`editorVideoLayers` 把场景视频图层编译为 `trimStartMs / trimEndMs / fit / volume / muted / playbackRate`；`SceneRenderer` 使用 `OffthreadVideo`（`trimBefore` + `durationInFrames`）渲染，Player 与 Renderer 共用同一图层；`compositionSchema` 校验引用素材必须是视频、出点必须晚于入点。
+- 渲染素材注入：`hydrate_composition_assets` 把视频转成 data URL；单文件超过 24 MB 直接报错，提示压缩或裁剪，避免静默失败或把整段长视频塞进内存。
+- 视频素材工作区：导入、素材库、播放器、入点/出点（可用播放头定位）、适配（裁切/完整/拉伸）、0.5–2× 速度、音量与静音、插入当前镜头或全部镜头、引用镜头跳转。
+- 动画编辑器：图层栏新增视频图层按钮与类型图标；检查器可修改素材、入出点、适配、速度、音量、静音；场景预览在入点处取首帧。
+- 边界：没有多轨 NLE、转场/蒙版/关键帧、代理转码和音频波形；视频图层只在场景内编辑，时间轴仍是场景级；mov 是否可解码取决于 Chrome/Remotion，导入时会提示；导入上限 128 MiB、渲染嵌入上限 24 MiB。
+
 ## 4. 部分实现
 
 | 功能 | 当前状态 | 缺口 |
@@ -276,7 +286,7 @@
 | 项目导出 | 含素材、渲染和修订的 ZIP 包 | 无独立迁移工具和跨设备自动升级 |
 | 渲染 | 持久 Job、进度、取消、Windows Job Object、离线 runtime、验证和原子提交 | 尚无跨平台进程树容器；当前发行目标是 Windows |
 | 4K/60 FPS | Composition 与 Renderer 支持参数 | UI 只验证了 1080P；没有 4K/60 实测和资源限制 |
-| 动画组件 | 文本、SVG、图片、图表、Canvas 2D 与确定性 GSAP 已实现 | 没有专用视频图层 |
+| 动画组件 | 文本、SVG、图片、图表、视频、Canvas 2D 与确定性 GSAP 已实现 | 视频仅场景内图层，无多轨剪辑、转场、蒙版；渲染嵌入上限 24 MB |
 | 质量检查 | `status=fail` 在 UI 与 Rust 渲染入口双重阻断 | 没有自动修复、逐项修复按钮或可配置发布规则 |
 | 错误恢复 | Agent 自动指数退避重试；App 重启安全暂停/中断 | 尚无租约调度器和统一 `tasks` worker 消费器 |
 | 用量统计 | LLM token、图片数、音频时长写入 `usage_records` | 无价格表、成本估算、额度与预算限制 |
@@ -285,7 +295,6 @@
 
 ## 5. 未实现
 
-- 视频素材图层与视频剪辑。
 - Authenticode 签名、时间戳和 signed updater。
 - 真实外部 LLM/Image/TTS/ASR/Embedding 服务端到端验收。
 - 像素级角色身份验证（人脸/CLIP 相似度）与 ControlNet/IP-Adapter 角色锁。
@@ -344,6 +353,7 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 1. 为素材缺失增加“重新生成当前资产”操作。
 2. 在现有设定集之上补 ComfyUI ControlNet/IP-Adapter 像素级参考通道。
 3. 增加遮罩羽化、文本自动选区与重绘历史对比。
+4. 增加 FFmpeg 视频代理转码与多轨时间轴剪辑（转场、蒙版、关键帧）。
 4. 增加云端 TTS 情绪/角色模板。
 
 ### P2：平台完整性

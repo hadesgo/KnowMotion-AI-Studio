@@ -18,6 +18,7 @@ import {
   Settings2,
   Sparkles,
   Users,
+  Video,
 } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import {
@@ -42,6 +43,7 @@ const projectSteps = [
   { path: "storyboard", label: "分镜工作区", icon: LayoutDashboard },
   { path: "canon", label: "设定集", icon: Users },
   { path: "assets", label: "图片素材", icon: Image },
+  { path: "video", label: "视频素材", icon: Video },
   { path: "animation", label: "动画编辑", icon: Clapperboard },
   { path: "remotion", label: "Remotion Studio", icon: PlaySquare },
   { path: "timeline", label: "时间轴", icon: ListTree },
@@ -92,6 +94,10 @@ export function AppShell() {
       ],
       ["storyboard", project.scenes.some((scene) => scene.description) ? "done" : "todo"],
       ["assets", project.assets.length ? "done" : "todo"],
+      [
+        "video",
+        project.assets.some((asset) => asset.kind === "video") ? "done" : "todo",
+      ],
       [
         "canon",
         project.characters.length ||

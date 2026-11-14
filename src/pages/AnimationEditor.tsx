@@ -3,6 +3,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Film,
   Image as ImageIcon,
   Layers3,
   MonitorPlay,
@@ -46,7 +47,11 @@ export default function AnimationEditor() {
     project?.scenes.find((scene) => scene.id === params.get("sceneId")) ??
     project?.scenes[0];
   const [sceneId, setSceneId] = useState(initialScene?.id ?? "");
-  const [layerId, setLayerId] = useState(initialScene?.layers[0]?.id ?? "");
+  const [layerId, setLayerId] = useState(
+    initialScene?.layers.find((item) => item.id === params.get("layerId"))?.id ??
+      initialScene?.layers[0]?.id ??
+      "",
+  );
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [guides, setGuides] = useState(true);
@@ -57,6 +62,8 @@ export default function AnimationEditor() {
   const layer =
     scene?.layers.find((item) => item.id === layerId) ?? scene?.layers[0];
   const asset = project?.assets.find((item) => item.id === scene?.assetId);
+  const videoAssets =
+    project?.assets.filter((item) => item.kind === "video") ?? [];
 
   useEffect(() => {
     if (!playing || !scene) return;
@@ -163,6 +170,48 @@ export default function AnimationEditor() {
       type: "success",
       title: `已添加${type === "text" ? "文字" : type === "canvas" ? "Canvas 动画" : "图形"}图层`,
     });
+  };
+
+  const addVideoLayer = (assetId: string) => {
+    const videoAsset = videoAssets.find((item) => item.id === assetId);
+    if (!videoAsset) return;
+    const sourceDuration = videoAsset.durationMs
+      ? videoAsset.durationMs / 1000
+      : scene.duration;
+    const next: SceneLayer = {
+      id: makeId("layer"),
+      type: "video",
+      name: `视频 · ${videoAsset.name}`,
+      content: "",
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+      opacity: 1,
+      start: 0,
+      end: Math.min(scene.duration, sourceDuration),
+      color: "#000000",
+      fontSize: 16,
+      assetId: videoAsset.id,
+      trimStart: 0,
+      trimEnd: sourceDuration,
+      fit: "cover",
+      volume: 0.8,
+      muted: true,
+      playbackRate: 1,
+      borderRadius: 0,
+    };
+    updateProject(project.id, (current) => ({
+      ...current,
+      stage: "animation",
+      scenes: current.scenes.map((item) =>
+        item.id === sceneId
+          ? { ...item, layers: [...item.layers, next] }
+          : item,
+      ),
+    }));
+    setLayerId(next.id);
+    pushToast({ type: "success", title: "已添加视频图层" });
   };
 
   const duplicateLayer = () => {
@@ -283,6 +332,15 @@ export default function AnimationEditor() {
                 <IconButton label="添加 Canvas 动画图层" onClick={() => addLayer("canvas")}>
                   <Waves size={15} />
                 </IconButton>
+                <IconButton
+                  label="添加视频图层"
+                  disabled={!videoAssets.length}
+                  onClick={() =>
+                    videoAssets[0] && addVideoLayer(videoAssets[0].id)
+                  }
+                >
+                  <Film size={15} />
+                </IconButton>
               </div>
             </header>
             <div className="layer-list">
@@ -298,6 +356,8 @@ export default function AnimationEditor() {
                       <Type size={14} />
                     ) : item.type === "canvas" ? (
                       <Waves size={14} />
+                    ) : item.type === "video" ? (
+                      <Film size={14} />
                     ) : (
                       <Square size={14} />
                     )}
@@ -309,7 +369,11 @@ export default function AnimationEditor() {
                         ? item.content || "空文字"
                         : item.type === "canvas"
                           ? item.canvasVariant ?? "particleFlow"
-                          : item.shape}
+                          : item.type === "video"
+                            ? videoAssets.find(
+                                (video) => video.id === item.assetId,
+                              )?.name ?? "视频素材"
+                            : item.shape}
                     </small>
                   </div>
                   <span className="layer-list__eye">
@@ -387,6 +451,7 @@ export default function AnimationEditor() {
               <ScenePreview
                 scene={scene}
                 asset={asset}
+                assets={project.assets}
                 ratio={project.settings.aspectRatio}
                 time={time}
                 showGuides={guides}
@@ -599,6 +664,136 @@ export default function AnimationEditor() {
                         }
                       />
                       <code>{layer.color}</code>
+                    </label>
+                  </>
+                ) : layer.type === "video" ? (
+                  <>
+                    <label className="inspector-field">
+                      <span>视频素材</span>
+                      <select
+                        value={layer.assetId ?? ""}
+                        onChange={(event) => {
+                          const nextAsset = videoAssets.find(
+                            (item) => item.id === event.target.value,
+                          );
+                          if (!nextAsset) return;
+                          const duration = nextAsset.durationMs
+                            ? nextAsset.durationMs / 1000
+                            : scene.duration;
+                          updateLayer({
+                            assetId: nextAsset.id,
+                            name: `视频 · ${nextAsset.name}`,
+                            trimStart: 0,
+                            trimEnd: duration,
+                            end: Math.min(scene.duration, duration),
+                          });
+                        }}
+                      >
+                        {videoAssets.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
+                            {item.durationMs
+                              ? ` · ${(item.durationMs / 1000).toFixed(1)}s`
+                              : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="inspector-split">
+                      <label className="inspector-field">
+                        <span>入点（秒）</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.1}
+                          value={Number((layer.trimStart ?? 0).toFixed(2))}
+                          onChange={(event) =>
+                            updateLayer({
+                              trimStart: Math.max(
+                                0,
+                                Number(event.target.value),
+                              ),
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="inspector-field">
+                        <span>出点（秒）</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.1}
+                          value={Number((layer.trimEnd ?? 0).toFixed(2))}
+                          onChange={(event) =>
+                            updateLayer({
+                              trimEnd: Math.max(
+                                0,
+                                Number(event.target.value),
+                              ),
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+                    <label className="inspector-field">
+                      <span>适配方式</span>
+                      <select
+                        value={layer.fit ?? "cover"}
+                        onChange={(event) =>
+                          updateLayer({
+                            fit: event.target.value as SceneLayer["fit"],
+                          })
+                        }
+                      >
+                        <option value="cover">裁切填充</option>
+                        <option value="contain">完整显示</option>
+                        <option value="fill">拉伸</option>
+                      </select>
+                    </label>
+                    <label className="inspector-field">
+                      <span>播放速度</span>
+                      <select
+                        value={String(layer.playbackRate ?? 1)}
+                        onChange={(event) =>
+                          updateLayer({
+                            playbackRate: Number(event.target.value),
+                          })
+                        }
+                      >
+                        <option value="0.5">0.5×</option>
+                        <option value="1">1×</option>
+                        <option value="1.5">1.5×</option>
+                        <option value="2">2×</option>
+                      </select>
+                    </label>
+                    <label className="inspector-field">
+                      <span>音量</span>
+                      <div className="property-range">
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={layer.volume ?? 0.8}
+                          disabled={layer.muted}
+                          onChange={(event) =>
+                            updateLayer({
+                              volume: Number(event.target.value),
+                            })
+                          }
+                        />
+                        <em>{Math.round((layer.volume ?? 0.8) * 100)}%</em>
+                      </div>
+                    </label>
+                    <label className="inspector-field inspector-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={layer.muted ?? true}
+                        onChange={(event) =>
+                          updateLayer({ muted: event.target.checked })
+                        }
+                      />
+                      <span>静音（推荐旁白镜头默认静音）</span>
                     </label>
                   </>
                 ) : layer.type === "canvas" ? (

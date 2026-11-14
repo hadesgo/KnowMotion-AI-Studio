@@ -96,6 +96,21 @@ const imageLayerSchema = z
   })
   .strict();
 
+const videoLayerSchema = z
+  .object({
+    ...baseLayerShape,
+    type: z.literal("video"),
+    assetId: z.string().min(1).max(120),
+    fit: z.enum(["cover", "contain", "fill"]).default("cover"),
+    trimStartMs: z.number().finite().min(0).max(600_000).default(0),
+    trimEndMs: z.number().finite().min(0).max(600_000).default(0),
+    volume: z.number().finite().min(0).max(1).default(1),
+    muted: z.boolean().default(false),
+    playbackRate: z.number().finite().min(0.25).max(4).default(1),
+    borderRadius: z.number().finite().min(0).max(100).default(0),
+  })
+  .strict();
+
 const chartDatumSchema = z
   .object({
     label: z.string().min(1).max(80),
@@ -140,6 +155,7 @@ export const sceneLayerSchema = z.discriminatedUnion("type", [
   textLayerSchema,
   svgLayerSchema,
   imageLayerSchema,
+  videoLayerSchema,
   chartLayerSchema,
   canvasLayerSchema,
 ]);
@@ -295,6 +311,28 @@ export const compositionSchema = z
             path: ["scenes"],
           });
         }
+        if (layer.type === "video") {
+          const asset = composition.assets.find(
+            (item) => item.id === layer.assetId,
+          );
+          if (!asset || asset.type !== "video") {
+            context.addIssue({
+              code: "custom",
+              message: `视频图层 ${layer.id} 引用了不存在的视频素材 ${layer.assetId}`,
+              path: ["scenes"],
+            });
+          }
+          if (
+            layer.trimEndMs > 0 &&
+            layer.trimEndMs <= layer.trimStartMs + 100
+          ) {
+            context.addIssue({
+              code: "custom",
+              message: `视频图层 ${layer.id} 的出点必须晚于入点`,
+              path: ["scenes"],
+            });
+          }
+        }
       }
     }
     for (const track of composition.audioTracks) {
@@ -324,6 +362,7 @@ export type SceneLayerDsl = z.infer<typeof sceneLayerSchema>;
 export type TextLayerDsl = z.infer<typeof textLayerSchema>;
 export type SvgLayerDsl = z.infer<typeof svgLayerSchema>;
 export type ImageLayerDsl = z.infer<typeof imageLayerSchema>;
+export type VideoLayerDsl = z.infer<typeof videoLayerSchema>;
 export type ChartLayerDsl = z.infer<typeof chartLayerSchema>;
 export type CanvasLayerDsl = z.infer<typeof canvasLayerSchema>;
 export type GsapMotionDsl = z.infer<typeof gsapMotionSchema>;
@@ -609,6 +648,7 @@ export function sceneToRemotionDsl(
   }
 
   layers.push(...editorCanvasLayers(scene, durationMs));
+  layers.push(...editorVideoLayers(scene, durationMs));
 
   const defaultBackgrounds: Record<
     SceneDsl["styleVariant"],
@@ -761,6 +801,47 @@ function editorCanvasLayers(scene: Scene, durationMs: number): CanvasLayerDsl[] 
     });
 }
 
+function editorVideoLayers(scene: Scene, durationMs: number): VideoLayerDsl[] {
+  return scene.layers
+    .filter((layer) => layer.type === "video" && Boolean(layer.assetId))
+    .map((layer) => {
+      const fromMs = Math.min(
+        Math.max(0, durationMs - 250),
+        Math.max(0, layer.start * 1000),
+      );
+      const toMs = Math.max(
+        Math.min(durationMs, Math.max(fromMs + 250, layer.end * 1000)),
+        fromMs + 250,
+      );
+      return {
+        type: "video" as const,
+        id: layer.id,
+        timing: { fromMs, toMs: Math.min(durationMs, toMs) },
+        animation: {
+          type: "fade" as const,
+          delayMs: 0,
+          durationMs: 240,
+          easing: "easeOut",
+        },
+        opacity: layer.opacity,
+        x: layer.x,
+        y: layer.y,
+        width: layer.width,
+        height: layer.height,
+        rotation: 0,
+        assetId: layer.assetId!,
+        fit: layer.fit ?? "cover",
+        trimStartMs: Math.max(0, (layer.trimStart ?? 0) * 1000),
+        trimEndMs: Math.max(0, (layer.trimEnd ?? 0) * 1000),
+        volume: Math.min(1, Math.max(0, layer.volume ?? 1)),
+        muted: layer.muted ?? false,
+        playbackRate: Math.min(4, Math.max(0.25, layer.playbackRate ?? 1)),
+        borderRadius: layer.borderRadius ?? 0,
+        gsap: layer.gsapMotion,
+      };
+    });
+}
+
 function ensureFallbackAsset(
   project: VideoProject,
   scene: Scene,
@@ -831,14 +912,14 @@ export function buildProjectComposition(project: VideoProject): CompositionDsl {
         : 1080;
   const fps = 30;
   const assets: CompositionDsl["assets"] = project.assets
-    .filter((asset) => asset.kind === "image" || asset.kind === "audio")
+    .filter((asset) => asset.kind === "image" || asset.kind === "audio" || asset.kind === "video")
     .map((asset) => ({
       id: asset.id,
       type: asset.kind,
       src: asset.src,
       mimeType: asset.src.startsWith("data:image/svg+xml")
         ? "image/svg+xml"
-        : undefined,
+        : asset.mimeType,
     }));
   const audioTracks: CompositionDsl["audioTracks"] = project.timeline
     .filter(

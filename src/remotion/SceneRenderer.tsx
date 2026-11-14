@@ -5,6 +5,7 @@ import {
   Audio,
   Easing,
   Img,
+  OffthreadVideo,
   Sequence,
   continueRender,
   delayRender,
@@ -24,6 +25,7 @@ import type {
   SceneLayerDsl,
   SvgLayerDsl,
   TextLayerDsl,
+  VideoLayerDsl,
 } from "./schema";
 
 const easingMap = {
@@ -344,6 +346,55 @@ function ImageRenderer({
   );
 }
 
+function VideoRenderer({
+  layer,
+  composition,
+}: {
+  layer: VideoLayerDsl;
+  composition: CompositionDsl;
+}) {
+  const { fps } = useVideoConfig();
+  const asset = composition.assets.find(
+    (item) => item.id === layer.assetId && item.type === "video",
+  );
+  if (!asset) return null;
+  const trimBefore = Math.max(0, Math.round((layer.trimStartMs / 1000) * fps));
+  const layerFrames = Math.max(
+    1,
+    Math.round(((layer.timing.toMs - layer.timing.fromMs) / 1000) * fps),
+  );
+  const trimmedFrames =
+    layer.trimEndMs > layer.trimStartMs
+      ? Math.round(((layer.trimEndMs - layer.trimStartMs) / 1000) * fps)
+      : layerFrames;
+  return (
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        overflow: "hidden",
+        borderRadius: layer.borderRadius,
+        background: "#05080c",
+      }}
+    >
+      <OffthreadVideo
+        src={asset.src}
+        trimBefore={trimBefore}
+        durationInFrames={Math.max(1, Math.min(layerFrames, trimmedFrames))}
+        playbackRate={layer.playbackRate}
+        muted={layer.muted}
+        volume={layer.muted ? 0 : layer.volume}
+        pauseWhenBuffering
+        style={{
+          width: "100%",
+          height: "100%",
+          objectFit: layer.fit,
+        }}
+      />
+    </div>
+  );
+}
+
 function ChartRenderer({ layer }: { layer: ChartLayerDsl }) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -513,6 +564,8 @@ function LayerRenderer({
         <SvgRenderer layer={layer} />
       ) : layer.type === "image" ? (
         <ImageRenderer layer={layer} composition={composition} />
+      ) : layer.type === "video" ? (
+        <VideoRenderer layer={layer} composition={composition} />
       ) : layer.type === "chart" ? (
         <ChartRenderer layer={layer} />
       ) : (

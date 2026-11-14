@@ -217,6 +217,7 @@ export default function TimelineEditor() {
             <ScenePreview
               scene={currentScene}
               asset={currentAsset}
+              assets={project.assets}
               ratio={project.settings.aspectRatio}
               time={currentTime}
             />

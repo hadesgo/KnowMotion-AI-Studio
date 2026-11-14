@@ -83,7 +83,12 @@ function ProjectCard({
   return (
     <article className="project-card">
       <button type="button" className="project-card__preview" onClick={onOpen}>
-        <ScenePreview scene={scene} asset={asset} ratio={project.settings.aspectRatio} />
+        <ScenePreview
+          scene={scene}
+          asset={asset}
+          assets={project.assets}
+          ratio={project.settings.aspectRatio}
+        />
         <span className="project-card__play">
           <Play size={16} fill="currentColor" />
         </span>
@@ -378,6 +383,7 @@ export default function Dashboard() {
                 <ScenePreview
                   scene={heroScene}
                   asset={heroAsset}
+                  assets={activeProject.assets}
                   ratio={activeProject.settings.aspectRatio}
                   time={heroPreviewTime}
                 />
