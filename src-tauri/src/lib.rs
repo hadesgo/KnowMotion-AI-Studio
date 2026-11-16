@@ -3,6 +3,7 @@ mod capabilities;
 mod database;
 mod image_queue;
 mod job_object;
+mod local_model_scheduler;
 mod local_runtime;
 mod logging;
 mod media;
@@ -719,6 +720,7 @@ pub fn run() {
             fs::create_dir_all(&projects_root).map_err(|error| error.to_string())?;
             let database_path = app_data.join("studio.sqlite3");
             local_runtime::configure(app_data.join("runtimes"));
+            local_model_scheduler::configure(app_data.clone());
             agent::configure_llama_runtime(
                 app.path()
                     .resource_dir()
@@ -750,6 +752,7 @@ pub fn run() {
             app.manage(media_service);
             app.manage(render_manager);
             app.manage(image_queue);
+            local_model_scheduler::start_idle_reaper();
             logging::log_event(
                 logging::LogLevel::Info,
                 "app",
@@ -769,6 +772,8 @@ pub fn run() {
             desktop_status,
             write_webview_log,
             local_runtime::ensure_local_runtime,
+            local_model_scheduler::local_model_scheduler_status,
+            local_model_scheduler::unload_local_models,
             capabilities::generate_project_images,
             capabilities::inpaint_project_image,
             image_queue::enqueue_image_jobs,
@@ -810,6 +815,7 @@ pub fn run() {
             tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
         ) {
             logging::info("app", "Desktop application exiting");
+            local_model_scheduler::shutdown();
             agent::shutdown_llama_runtime();
             logging::shutdown();
         }

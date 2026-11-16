@@ -305,6 +305,16 @@ export interface VideoProject {
 export type ProviderCapability = "LLM" | "Image" | "TTS" | "ASR" | "Embedding";
 export type GgufInferenceBackend = "auto" | "gpu" | "cpu";
 
+export interface LocalModelRuntimeConfig {
+  modelPath?: string;
+  modelDirectory?: string;
+  modelFamily?: string;
+  diffusionModel?: string;
+  textEncoder?: string;
+  vae?: string;
+  idleUnloadSeconds?: number;
+}
+
 export interface ProviderProfile {
   id: string;
   name: string;
@@ -320,6 +330,7 @@ export interface ProviderProfile {
   model: string;
   contextSize?: number;
   inferenceBackend?: GgufInferenceBackend;
+  runtime?: LocalModelRuntimeConfig;
   capabilities: ProviderCapability[];
   enabled: boolean;
   health: "healthy" | "unchecked" | "error";

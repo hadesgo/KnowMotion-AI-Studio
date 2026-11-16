@@ -1,6 +1,7 @@
 use super::model::ProviderConfig;
 use super::provider::{LlmProvider, LlmRequest, LlmResponse};
 use crate::job_object::ProcessJobObject;
+use crate::local_model_scheduler::GpuLease;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::{json, Value};
@@ -30,10 +31,36 @@ pub struct GgufLlmProvider {
     server: Arc<LlamaServer>,
     model_name: String,
     client: Client,
+    _gpu_lease: Option<GpuLease>,
+}
+
+struct ServerActivity<'a>(&'a Mutex<Instant>);
+
+impl Drop for ServerActivity<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut last_used) = self.0.lock() {
+            *last_used = Instant::now();
+        }
+    }
 }
 
 impl GgufLlmProvider {
+    #[cfg(test)]
     pub fn load(config: &ProviderConfig) -> Result<Self, String> {
+        Self::load_internal(config, None)
+    }
+
+    pub(crate) fn load_with_lease(
+        config: &ProviderConfig,
+        lease: GpuLease,
+    ) -> Result<Self, String> {
+        Self::load_internal(config, Some(lease))
+    }
+
+    fn load_internal(
+        config: &ProviderConfig,
+        lease: Option<GpuLease>,
+    ) -> Result<Self, String> {
         let server = load_cached_server(config)?;
         let client = Client::builder()
             .timeout(Duration::from_secs(600))
@@ -45,6 +72,7 @@ impl GgufLlmProvider {
             server,
             model_name: configured_model_name(config),
             client,
+            _gpu_lease: lease,
         })
     }
 }
@@ -52,6 +80,7 @@ impl GgufLlmProvider {
 #[async_trait]
 impl LlmProvider for GgufLlmProvider {
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, String> {
+        let _activity = ServerActivity(&self.server.last_used);
         let requested_model = if request.model.trim().is_empty() {
             self.model_name.clone()
         } else {
@@ -144,6 +173,7 @@ struct LlamaServer {
     context_size: u32,
     preference: BackendPreference,
     log: Arc<Mutex<String>>,
+    last_used: Mutex<Instant>,
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +230,33 @@ pub(crate) fn shutdown_runtime() {
     for (_, server) in servers {
         server.stop();
     }
+}
+
+pub(crate) fn unload_idle(max_idle: Duration) -> usize {
+    let Some(cache) = SERVER_CACHE.get() else {
+        return 0;
+    };
+    let Ok(mut cache) = cache.lock() else {
+        return 0;
+    };
+    let stale = cache
+        .iter()
+        .filter_map(|(path, server)| {
+            let idle = server
+                .last_used
+                .lock()
+                .map(|last_used| last_used.elapsed() >= max_idle)
+                .unwrap_or(false);
+            (idle || server.exit_status().is_some()).then(|| path.clone())
+        })
+        .collect::<Vec<_>>();
+    let count = stale.len();
+    for path in stale {
+        if let Some(server) = cache.remove(&path) {
+            server.stop();
+        }
+    }
+    count
 }
 
 fn load_cached_server(config: &ProviderConfig) -> Result<Arc<LlamaServer>, String> {
@@ -352,6 +409,7 @@ fn start_server(
         context_size,
         preference,
         log,
+        last_used: Mutex::new(Instant::now()),
     };
     wait_until_ready(&server, port).map_err(|error| {
         server.stop();
@@ -707,6 +765,7 @@ mod tests {
             model: "knowmotion-test".to_string(),
             context_size: Some(512),
             inference_backend: Some("cpu".to_string()),
+            runtime: None,
             enabled: true,
             capabilities: vec!["LLM".to_string()],
         })
@@ -742,6 +801,7 @@ mod tests {
             model: "knowmotion-test".to_string(),
             context_size: Some(512),
             inference_backend: Some("auto".to_string()),
+            runtime: None,
             enabled: true,
             capabilities: vec!["LLM".to_string()],
         })

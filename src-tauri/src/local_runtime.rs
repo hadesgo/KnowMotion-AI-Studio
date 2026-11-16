@@ -36,6 +36,13 @@ impl RuntimeAcceleration {
             Self::Vulkan => "vulkan",
         }
     }
+
+    fn backend_name(self) -> &'static str {
+        match self {
+            Self::Cuda => "cuda",
+            Self::Vulkan => "vulkan",
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -232,6 +239,12 @@ fn any_installed_manifest(spec: RuntimeSpec) -> Option<(RuntimeManifest, PathBuf
 pub(crate) fn installed_executable(runtime: &str) -> Option<PathBuf> {
     let spec = runtime_spec(runtime).ok()?;
     any_installed_manifest(spec).map(|(_, executable)| executable)
+}
+
+pub(crate) fn installed_acceleration(runtime: &str) -> Option<String> {
+    let spec = runtime_spec(runtime).ok()?;
+    any_installed_manifest(spec)
+        .map(|(manifest, _)| manifest.acceleration.backend_name().to_string())
 }
 
 #[cfg(test)]

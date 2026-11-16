@@ -24,6 +24,10 @@ pub(crate) fn shutdown_llama_runtime() {
     gguf::shutdown_runtime();
 }
 
+pub(crate) fn unload_idle_llama_runtime(max_idle: std::time::Duration) -> usize {
+    gguf::unload_idle(max_idle)
+}
+
 #[tauri::command]
 pub fn agent_workflow_definition() -> WorkflowDefinition {
     workflow_definition()

@@ -575,6 +575,7 @@ type ProviderErrorCode =
 - `GeminiLlm`。
 - `OllamaLlm`。
 - `GgufLocalLlm`：按需启动随包分发的官方 llama.cpp `llama-server`，缓存模型进程，并按配置选择 Vulkan GPU 或 CPU 进行推理。
+- `LocalModelScheduler`：统一持有 llama.cpp、audio.cpp 与 stable-diffusion.cpp 的 GPU 工作租约；请求前卸载竞争模型并检查显存安全余量，按需启动本地服务，空闲后调用运行时卸载 API 或停止进程。
 - `OpenAiCompatibleImage` / `StableDiffusionCppImage`。
 - `OpenAiCompatibleTts` / 可插拔本地 TTS。
 - `WhisperCompatibleAsr`。

@@ -1,6 +1,11 @@
 use crate::{
     agent::get_provider_secret, logging, logging::LogLevel, safe_identifier,
-    storage::persist_generated_image, AppState,
+    local_model_scheduler::{
+        acquire_gpu, ensure_audio, ensure_diffusion, is_loopback_base_url, GpuLease,
+        LocalRuntimeConfig, Workload,
+    },
+    storage::persist_generated_image,
+    AppState,
 };
 use chrono::Utc;
 use reqwest::Client;
@@ -29,6 +34,10 @@ pub struct ImageProviderConfig {
     pub protocol: String,
     pub base_url: String,
     pub model: String,
+    #[serde(default)]
+    pub inference_backend: Option<String>,
+    #[serde(default)]
+    pub runtime: Option<LocalRuntimeConfig>,
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
@@ -210,6 +219,28 @@ pub async fn transcribe_project_audio(
         return Err("ASR requires an OpenAI Compatible or audio.cpp provider".to_string());
     }
     let uses_audio_cpp = request.provider.protocol == AUDIO_CPP_PROTOCOL;
+    let _local_lease = if uses_audio_cpp && is_loopback_base_url(&request.provider.base_url) {
+        let lease = acquire_gpu(
+            Workload::Audio,
+            &request.provider.id,
+            &request.provider.base_url,
+            request.provider.runtime.as_ref(),
+            request.provider.inference_backend.as_deref(),
+        )
+        .await?;
+        ensure_audio(
+            &request.provider.id,
+            &request.provider.base_url,
+            &request.provider.model,
+            "ASR",
+            request.provider.runtime.as_ref(),
+            request.provider.inference_backend.as_deref(),
+        )
+        .await?;
+        Some(lease)
+    } else {
+        None
+    };
     let secret = if uses_audio_cpp {
         None
     } else {
@@ -566,6 +597,28 @@ pub async fn generate_project_cloud_narration(
         return Err("TTS request must contain between 1 and 100 scenes".to_string());
     }
     let uses_audio_cpp = request.provider.protocol == AUDIO_CPP_PROTOCOL;
+    let _local_lease = if uses_audio_cpp && is_loopback_base_url(&request.provider.base_url) {
+        let lease = acquire_gpu(
+            Workload::Audio,
+            &request.provider.id,
+            &request.provider.base_url,
+            request.provider.runtime.as_ref(),
+            request.provider.inference_backend.as_deref(),
+        )
+        .await?;
+        ensure_audio(
+            &request.provider.id,
+            &request.provider.base_url,
+            &request.provider.model,
+            "TTS",
+            request.provider.runtime.as_ref(),
+            request.provider.inference_backend.as_deref(),
+        )
+        .await?;
+        Some(lease)
+    } else {
+        None
+    };
     let secret = if uses_audio_cpp {
         None
     } else {
@@ -745,6 +798,32 @@ fn optional_provider_secret(provider: &ImageProviderConfig) -> Result<Option<Str
     Ok(None)
 }
 
+async fn prepare_local_diffusion(
+    provider: &ImageProviderConfig,
+) -> Result<Option<GpuLease>, String> {
+    if provider.protocol != STABLE_DIFFUSION_CPP_PROTOCOL
+        || !is_loopback_base_url(&provider.base_url)
+    {
+        return Ok(None);
+    }
+    let lease = acquire_gpu(
+        Workload::Diffusion,
+        &provider.id,
+        &provider.base_url,
+        provider.runtime.as_ref(),
+        provider.inference_backend.as_deref(),
+    )
+    .await?;
+    ensure_diffusion(
+        &provider.id,
+        &provider.base_url,
+        provider.runtime.as_ref(),
+        provider.inference_backend.as_deref(),
+    )
+    .await?;
+    Ok(Some(lease))
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InpaintRequest {
@@ -851,6 +930,7 @@ pub(crate) async fn execute_image_generation(
         }
     }
 
+    let _local_lease = prepare_local_diffusion(&request.provider).await?;
     let started = Instant::now();
     let (images, reference_mode) = match request.provider.protocol.as_str() {
         "OpenAI Compatible" | STABLE_DIFFUSION_CPP_PROTOCOL => (
@@ -1038,6 +1118,7 @@ pub async fn inpaint_project_image(
     let seed = request
         .seed
         .unwrap_or_else(|| (Utc::now().timestamp_millis() as i64).rem_euclid(2_000_000_000));
+    let _local_lease = prepare_local_diffusion(&request.provider).await?;
     let started = Instant::now();
     let (bytes, mode) = match request.provider.protocol.as_str() {
         "OpenAI Compatible" | STABLE_DIFFUSION_CPP_PROTOCOL => {

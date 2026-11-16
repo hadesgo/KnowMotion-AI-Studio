@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+use crate::local_model_scheduler::LocalRuntimeConfig;
 
 pub const WORKFLOW_KEY: &str = "knowledge-animation-v1";
 pub const WORKFLOW_VERSION: &str = "1.0";
@@ -55,6 +56,8 @@ pub struct ProviderConfig {
     pub context_size: Option<u32>,
     #[serde(default)]
     pub inference_backend: Option<String>,
+    #[serde(default)]
+    pub runtime: Option<LocalRuntimeConfig>,
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]

@@ -64,7 +64,11 @@ Qwen-Image-2.1 remains subject to the Qwen Research License.
 ## audio.cpp
 
 Selecting `audio.cpp` in Models downloads the correct runtime package. Model
-weights are still managed separately with audio.cpp's native model manager:
+weights are still stored separately. Set the audio.cpp Provider's local model
+file/package directory in Models; KnowMotion generates a server configuration
+with `lazy_load: true`, `max_loaded_models: 1`, starts `audiocpp_server` on the
+Provider's loopback port, and waits for `/health` before the first request.
+Models can also be installed ahead of time with audio.cpp's native manager:
 
 ```powershell
 audiocpp_model_manager install qwen3_tts_1_7b_customvoice_q8_0 --models-root D:/models
@@ -100,7 +104,7 @@ An example `audio-server.json`:
 }
 ```
 
-Start it with:
+The equivalent manual start command is:
 
 ```powershell
 audiocpp_server.exe --config audio-server.json --no-ui
@@ -174,16 +178,47 @@ The app sends `response_format: b64_json` and reuses the existing image
 generation and inpainting pipeline. Before a large generation, keep the model
 at 1024×1024 or lower and keep `llama.cpp` unloaded.
 
+### Automatic startup
+
+`stable-diffusion.cpp` can likewise be started automatically. Point the Provider
+at the model root containing `diffusion_models/`, `text_encoders/` and `vae/`.
+KnowMotion discovers the recommended Qwen components and starts `sd-server`
+with `--diffusion-model`, `--llm` and `--vae`, so no manual WebUI model selection
+is required. Explicit component paths can also be retained in Provider metadata
+for nonstandard model layouts.
+
 ## Resource lifecycle
 
-The current integration connects to already-running audio.cpp and
-stable-diffusion.cpp servers. A future Rust `LocalModelScheduler` should own all
-three processes and enforce one GPU-heavy lease at a time:
+The Rust `LocalModelScheduler` now owns all app-started native runtimes and
+serializes GPU-heavy work through one lease:
 
-1. Stop any idle `llama-server` before TTS, ASR, or image work.
-2. Use audio.cpp `max_loaded_models: 1`.
-3. Call stable-diffusion.cpp `/sdcpp/v1/models/unload` after an image batch.
-4. Call audio.cpp `/v1/tasks/unload_all_models` before starting diffusion.
-5. Preserve a 768–1024 MiB device-memory margin.
-6. Idle-unload the LLM after 180 seconds and audio models after 60 seconds.
+1. Acquiring audio/diffusion stops cached `llama-server` instances; acquiring
+   diffusion also calls audio.cpp `unload_all_models`, and acquiring TTS/ASR
+   unloads the active diffusion context.
+2. Before a GPU lease is granted, `nvidia-smi` free memory is checked when the
+   command is available against a 768–1024 MiB safety margin. The wait defaults
+   to 20 seconds; the exclusive lease still applies when no NVIDIA telemetry is
+   available.
+3. audio.cpp uses `max_loaded_models: 1`; multiple TTS/ASR Providers on the same
+   loopback port are merged into one generated configuration.
+4. Diffusion starts with its model components preloaded. Image work is not
+   multiplexed with another local GPU workload.
+5. Audio models idle-unload after 60 seconds by default. Diffusion contexts
+   unload after 120 seconds; llama.cpp stops after 180 seconds.
+6. Models UI shows the active lease and exposes an explicit “unload all” action.
+
+Provider-specific `idleUnloadSeconds` overrides the audio/diffusion defaults.
+Deployment-level controls use:
+
+```text
+KNOWMOTION_VRAM_RESERVE_MIB=896
+KNOWMOTION_VRAM_WAIT_SECONDS=20
+KNOWMOTION_AUDIO_BACKEND=cuda|vulkan|cpu
+KNOWMOTION_LLM_IDLE_SECONDS=180
+KNOWMOTION_IDLE_CHECK_SECONDS=10
+```
+
+Managed process logs are retained in memory and included in startup failures.
+Every child process is attached to a Windows Job Object, so application exit
+also terminates any server tree it launched.
 

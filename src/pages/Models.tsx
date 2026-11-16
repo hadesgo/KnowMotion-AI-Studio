@@ -7,6 +7,7 @@ import {
   HardDrive,
   KeyRound,
   Plus,
+  Power,
   RefreshCw,
   Server,
   ShieldCheck,
@@ -14,7 +15,7 @@ import {
   Trash2,
   Zap,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { PageHeading } from "../components/AppShell";
 import {
@@ -41,7 +42,10 @@ import {
 } from "../services/agentWorkflow";
 import {
   ensureLocalRuntime,
+  getLocalModelSchedulerStatus,
+  unloadLocalModels,
   type LocalRuntimeId,
+  type LocalModelSchedulerStatus,
 } from "../services/localRuntime";
 import "./Models.css";
 
@@ -92,6 +96,9 @@ interface ProviderDraft {
   model: string;
   contextSize: number;
   inferenceBackend: GgufInferenceBackend;
+  runtimeModelPath: string;
+  runtimeModelFamily: string;
+  runtimeIdleSeconds: number;
   capabilities: ProviderCapability[];
   apiKey: string;
   enabled: boolean;
@@ -106,6 +113,9 @@ const emptyDraft: ProviderDraft = {
   model: "gpt-5.1",
   contextSize: 8192,
   inferenceBackend: "auto",
+  runtimeModelPath: "",
+  runtimeModelFamily: "",
+  runtimeIdleSeconds: 60,
   capabilities: ["LLM"],
   apiKey: "",
   enabled: true,
@@ -130,6 +140,50 @@ export default function Models() {
     status: "downloading" | "ready" | "error" | "unsupported";
     message: string;
   } | null>(null);
+  const [schedulerStatus, setSchedulerStatus] =
+    useState<LocalModelSchedulerStatus | null>(null);
+  const [unloadingModels, setUnloadingModels] = useState(false);
+
+  useEffect(() => {
+    if (!isTauriDesktop) return;
+    let cancelled = false;
+    const refresh = () => {
+      void getLocalModelSchedulerStatus()
+        .then((status) => {
+          if (!cancelled) setSchedulerStatus(status);
+        })
+        .catch(() => {
+          if (!cancelled) setSchedulerStatus(null);
+        });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const unloadAllLocalModels = async () => {
+    setUnloadingModels(true);
+    try {
+      const status = await unloadLocalModels();
+      setSchedulerStatus(status);
+      pushToast({
+        type: "success",
+        title: "本地模型已卸载",
+        message: "GPU 显存租约已释放，下次请求会按需重新启动并加载模型。",
+      });
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: "模型卸载失败",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setUnloadingModels(false);
+    }
+  };
 
   const installRuntimeForProtocol = async (
     protocol: ProviderProfile["protocol"],
@@ -195,6 +249,12 @@ export default function Models() {
         : "external",
       contextSize: provider.contextSize ?? 8192,
       inferenceBackend: provider.inferenceBackend ?? "auto",
+      runtimeModelPath:
+        provider.runtime?.modelDirectory ?? provider.runtime?.modelPath ?? "",
+      runtimeModelFamily: provider.runtime?.modelFamily ?? "",
+      runtimeIdleSeconds:
+        provider.runtime?.idleUnloadSeconds ??
+        (provider.protocol === "audio.cpp" ? 60 : 120),
       apiKey: "",
     });
     setFormError("");
@@ -269,6 +329,19 @@ export default function Models() {
         return;
       }
     }
+    const runtime =
+      draft.protocol === "audio.cpp"
+        ? {
+            modelPath: draft.runtimeModelPath.trim() || undefined,
+            modelFamily: draft.runtimeModelFamily.trim() || undefined,
+            idleUnloadSeconds: Math.max(0, Math.min(86_400, draft.runtimeIdleSeconds)),
+          }
+        : draft.protocol === "stable-diffusion.cpp"
+          ? {
+              modelDirectory: draft.runtimeModelPath.trim() || undefined,
+              idleUnloadSeconds: Math.max(0, Math.min(86_400, draft.runtimeIdleSeconds)),
+            }
+          : undefined;
     const provider: ProviderProfile = {
       id: providerId,
       name: draft.name.trim(),
@@ -277,6 +350,7 @@ export default function Models() {
       model: draft.model.trim(),
       contextSize: Math.max(512, Math.min(1_048_576, draft.contextSize || 8192)),
       inferenceBackend: draft.inferenceBackend,
+      runtime,
       capabilities: draft.capabilities,
       enabled: draft.enabled,
       health: draft.id
@@ -379,6 +453,34 @@ export default function Models() {
     }
   };
 
+  const pickRuntimeModelPath = async (directory: boolean) => {
+    if (!isTauriDesktop) {
+      setFormError("浏览器预览无法读取本地模型路径，请运行桌面版。");
+      return;
+    }
+    try {
+      const selected = await open({
+        multiple: false,
+        directory,
+        filters:
+          !directory &&
+          (draft.protocol === "GGUF" || draft.protocol === "audio.cpp")
+            ? [{ name: "GGUF 模型", extensions: ["gguf"] }]
+            : undefined,
+      });
+      if (typeof selected !== "string") return;
+      setDraft((current) => ({
+        ...current,
+        runtimeModelPath: selected,
+      }));
+      setFormError("");
+    } catch (error) {
+      setFormError(
+        error instanceof Error ? error.message : `路径选择失败：${String(error)}`,
+      );
+    }
+  };
+
   const removeProvider = async (provider: ProviderProfile) => {
     if (window.confirm(`删除 Provider「${provider.name}」？`)) {
       if (isTauriDesktop && provider.hasSecret) {
@@ -424,6 +526,39 @@ export default function Models() {
           {isTauriDesktop ? "桌面凭据库" : "浏览器预览"}
         </Pill>
       </div>
+
+      {isTauriDesktop && (
+        <div className="model-security-banner mt-2.5">
+          <span><Power size={20} /></span>
+          <div>
+            <strong>本地模型调度器</strong>
+            <p>
+              {schedulerStatus
+                ? `单一 GPU 租约 · ${
+                    schedulerStatus.freeVramMib !== null
+                      ? `${schedulerStatus.freeVramMib} MiB 可用`
+                      : "显存遥测不可用"
+                  } · ${schedulerStatus.vramReserveMib} MiB 安全余量 · ${
+                    schedulerStatus.activeLease
+                      ? `${schedulerStatus.activeLease.workload.toUpperCase()} 正在运行`
+                      : "当前空闲"
+                  } · ${schedulerStatus.managedProcesses} 个 HTTP 托管进程`
+                : "按需启动 llama.cpp、audio.cpp 与 stable-diffusion.cpp，并在空闲时自动卸载模型。"}
+            </p>
+          </div>
+          <Pill tone={schedulerStatus?.activeLease ? "accent" : "success"}>
+            {schedulerStatus?.activeLease ? "GPU LEASED" : "READY"}
+          </Pill>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void unloadAllLocalModels()}
+            disabled={unloadingModels}
+          >
+            {unloadingModels ? "卸载中" : "卸载全部"}
+          </Button>
+        </div>
+      )}
 
       <div className="models-summary">
         <div>
@@ -505,6 +640,16 @@ export default function Models() {
                       : provider.inferenceBackend === "gpu"
                         ? "VULKAN GPU"
                         : "AUTO GPU"}
+                  </Pill>
+                )}
+                {["audio.cpp", "stable-diffusion.cpp"].includes(
+                  provider.protocol,
+                ) && (
+                  <Pill tone="accent">
+                    {provider.runtime?.modelPath ||
+                    provider.runtime?.modelDirectory
+                      ? "AUTO START"
+                      : "EXTERNAL"}
                   </Pill>
                 )}
               </div>
@@ -720,6 +865,24 @@ export default function Models() {
                         defaults?.baseUrl ??
                         (protocol === "GGUF" ? "" : current.baseUrl),
                       model: defaults?.model ?? "",
+                      runtimeModelPath:
+                        protocol === current.protocol
+                          ? current.runtimeModelPath
+                          : "",
+                      runtimeModelFamily:
+                        protocol === "audio.cpp"
+                          ? current.runtimeModelFamily
+                          : "",
+                      runtimeIdleSeconds:
+                        protocol === "audio.cpp"
+                          ? current.protocol === "audio.cpp"
+                            ? Math.max(0, current.runtimeIdleSeconds)
+                            : 60
+                          : protocol === "stable-diffusion.cpp"
+                            ? current.protocol === "stable-diffusion.cpp"
+                              ? Math.max(0, current.runtimeIdleSeconds)
+                              : 120
+                            : current.runtimeIdleSeconds,
                       capabilities,
                     };
                   });
@@ -775,6 +938,109 @@ export default function Models() {
               </span>
             )}
           </div>
+          {["audio.cpp", "stable-diffusion.cpp"].includes(draft.protocol) && (
+            <div className="field flex flex-col gap-[7px]">
+              <span className="text-[12px] font-medium text-[var(--subtext)]">
+                {draft.protocol === "audio.cpp"
+                  ? "本地模型文件或包目录"
+                  : "stable-diffusion 模型目录"}
+              </span>
+              <TextInput
+                value={draft.runtimeModelPath}
+                onChange={(event) =>
+                  setDraft({
+                    ...draft,
+                    runtimeModelPath: event.target.value,
+                  })
+                }
+                placeholder={
+                  draft.protocol === "audio.cpp"
+                    ? "D:\\models\\Qwen3-TTS-1.7B"
+                    : "D:\\models\\stable-diffusion"
+                }
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<FolderOpen size={14} />}
+                  onClick={() => void pickRuntimeModelPath(true)}
+                >
+                  选择目录
+                </Button>
+                {draft.protocol === "audio.cpp" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<HardDrive size={14} />}
+                    onClick={() => void pickRuntimeModelPath(false)}
+                  >
+                    选择 .gguf
+                  </Button>
+                )}
+              </div>
+              <span className="text-[11px] leading-[1.5] text-[var(--faint)]">
+                {draft.protocol === "audio.cpp"
+                  ? "填写后应用会自动生成 max_loaded_models=1 的服务配置；留空则连接你手动启动的服务。"
+                  : "填写后会自动发现 diffusion_models、text_encoders 与 vae 组件并预载；留空则连接手动服务。"}
+              </span>
+            </div>
+          )}
+          {draft.protocol === "audio.cpp" && (
+            <div className="form-grid">
+              <Field
+                label="audio.cpp 模型族"
+                hint="Qwen3 模型可自动识别；其他模型建议填写官方 family。"
+              >
+                <TextInput
+                  value={draft.runtimeModelFamily}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      runtimeModelFamily: event.target.value,
+                    })
+                  }
+                  placeholder="例如 qwen3_tts"
+                />
+              </Field>
+              <Field
+                label="空闲卸载（秒）"
+                hint="请求结束且租约释放后，达到此时间会卸载模型权重。"
+              >
+                <TextInput
+                  type="number"
+                  min={0}
+                  max={86_400}
+                  value={draft.runtimeIdleSeconds}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      runtimeIdleSeconds: Number(event.target.value),
+                    })
+                  }
+                />
+              </Field>
+            </div>
+          )}
+          {draft.protocol === "stable-diffusion.cpp" && (
+            <Field
+              label="空闲卸载（秒）"
+              hint="图片批次结束后释放扩散模型；默认 120 秒。"
+            >
+              <TextInput
+                type="number"
+                min={0}
+                max={86_400}
+                value={draft.runtimeIdleSeconds}
+                onChange={(event) =>
+                  setDraft({
+                    ...draft,
+                    runtimeIdleSeconds: Number(event.target.value),
+                  })
+                }
+              />
+            </Field>
+          )}
           <Field label="默认模型">
             <TextInput
               value={draft.model}
@@ -804,10 +1070,12 @@ export default function Models() {
               />
             </Field>
           )}
-          {draft.protocol === "GGUF" && (
+          {["GGUF", "audio.cpp", "stable-diffusion.cpp"].includes(
+            draft.protocol,
+          ) && (
             <Field
               label="推理设备"
-              hint="由 llama.cpp 加载模型。自动模式优先使用 Vulkan GPU；未检测到兼容设备时回退 CPU。"
+              hint="自动模式使用已安装运行时的 CUDA/Vulkan 加速；CPU 模式会降低显存占用。"
             >
               <Select
                 value={draft.inferenceBackend}
@@ -820,7 +1088,7 @@ export default function Models() {
                 }
               >
                 <option value="auto">自动（GPU 优先）</option>
-                <option value="gpu">GPU（Vulkan）</option>
+                <option value="gpu">GPU（已安装加速）</option>
                 <option value="cpu">CPU</option>
               </Select>
             </Field>

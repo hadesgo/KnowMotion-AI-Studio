@@ -30,7 +30,7 @@
 - NSIS 安装包和干净 Windows VM 安装/离线渲染 smoke 已实际执行；当前仍未做 Authenticode 签名、时间戳和 signed updater。
 - 图片生成已支持 OpenAI Compatible 与 stable-diffusion.cpp，TTS、ASR、Embedding/RAG、网页正文抓取已有 Rust 实现。
 - Data URL 素材会落入 `assets/images` 或 `assets/audio`，项目 JSON 成为恢复事实来源；复制、归档删除、缺失扫描和 ZIP 包导入导出已接通。
-- llama.cpp、audio.cpp、stable-diffusion.cpp 已接入按需运行时下载、SHA-256 归档校验及 CUDA/Vulkan 选择；llama.cpp 可由应用实际拉起，audio.cpp 和 stable-diffusion.cpp 仍依赖用户手动启动服务。
+- llama.cpp、audio.cpp、stable-diffusion.cpp 已接入按需运行时下载、SHA-256 归档校验及 CUDA/Vulkan 选择；三种运行时均可由统一本地模型调度器按需拉起或复用回环服务。
 
 仍不能宣称“所有外部服务均已在线验收”：当前没有可用 LLM/图片/TTS/ASR/Embedding 凭据，相关网络路径只有结构和单元测试，没有真实付费/私有服务端到端记录。
 
@@ -44,7 +44,7 @@
 | Phase 2：AI 内容创作 | 框架完成，真实调用待验收 | 九个 Agent、DAG 和 GGUF 本地通道已实现；没有执行外部真实 LLM 端到端测试 |
 | Phase 3：素材生成 | 部分完成 | 本地 SVG、图片导入、OpenAI Images、stable-diffusion.cpp、文件落盘与清单已实现；局部重绘遮罩方向存在 P1 缺陷 |
 | Phase 4：Remotion 动画 | 主体完成 | Scene DSL、组件库、Player、单场景和整片预览可用 |
-| Phase 5：音频和渲染 | 完成工程闭环 | SAPI/OpenAI Compatible/audio.cpp TTS、ASR、字幕、音乐、持久渲染 Job、离线 sidecar、进度、取消、验证和安装包已实现；audio.cpp 与 stable-diffusion.cpp 服务生命周期未托管 |
+| Phase 5：音频和渲染 | 完成工程闭环 | SAPI/OpenAI Compatible/audio.cpp TTS、ASR、字幕、音乐、持久渲染 Job、离线 sidecar、进度、取消、验证和安装包已实现；本地服务生命周期、GPU 租约和空闲卸载已托管 |
 | Phase 6：完整 AI 工作流 | 大部分完成 | 审批、局部重跑、自动重试、自然语言场景 Patch、图片/TTS/ASR/RAG/网页正文入口已实现；真实外部服务尚未在线验收 |
 | Phase 7：本地模型运行时 | 部分完成 | 三种 GGUF 类运行时支持按需下载、固定版本和归档校验；正式模型包、服务自动启动、显存租约和空闲卸载仍未闭环 |
 
@@ -282,8 +282,9 @@
 - 使用 `nvidia-smi` 的驱动版本和计算能力选择 CUDA 12.4 或 Vulkan 归档；CUDA 通道同时下载对应运行库。
 - 每个归档在解压前校验固定 SHA-256，单个归档设置 1 GiB 下载上限；安装使用 staging 目录后重命名。
 - GGUF Provider 通过应用拉起的 `llama-server` 执行推理，使用随机回环端口、临时 API Key、Windows Job Object 和结构化日志。
-- audio.cpp 与 stable-diffusion.cpp 已接入其配置和请求协议，但当前没有自动启动进程、模型自动安装、健康状态机、GPU 互斥、空闲卸载或显存预算执行器。
-- `docs/LOCAL_MODEL_RUNTIMES.md` 明确将跨运行时调度器列为未来工作；当前 UI 的“运行时已就绪”仅表示二进制安装，不代表对应模型或 localhost 服务已就绪。
+- `LocalModelScheduler` 统一管理三种本地运行时的 GPU 租约、进程状态、启动健康检查和空闲卸载；显存租约默认保留 896 MiB，并允许在 768–1024 MiB 范围内由环境变量调整。
+- audio.cpp 根据 Provider 的模型路径动态生成 `max_loaded_models: 1` 配置并自动启动；stable-diffusion.cpp 从模型目录发现扩散模型、文本编码器和 VAE，以启动参数预载并等待模型 ready。
+- `docs/LOCAL_MODEL_RUNTIMES.md` 已更新为实际自动启动和生命周期协议。运行时二进制就绪与模型文件就绪仍是两个独立状态。
 
 ## 4. 第三轮重新审计发现
 
@@ -366,7 +367,7 @@ manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对�
 | `cargo fmt --check` | 失败 | 存在多处格式差异 |
 | `cargo clippy -- -D warnings` | 失败 | 6 个严格 lint 错误 |
 | 桌面 E2E | 未在本轮执行 | 需要完整 release 构建与 WebDriver 环境 |
-| 真实本地模型服务 | 未在本轮执行 | 需要模型文件、运行时和手动启动的 audio.cpp/stable-diffusion.cpp 服务 |
+| 真实本地模型服务 | 未在本轮执行 | 自动启动链路已实现；实机验收仍需要模型文件和已安装运行时 |
 
 ## 5. 部分实现
 
@@ -376,18 +377,18 @@ manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对�
 | Research Agent | 来源候选、正文抓取、Embedding 与项目内检索 | 尚无搜索引擎 API、自动引用核验和跨项目知识库；抓取正文仍需人工核验 |
 | 图片生成 | OpenAI Images、stable-diffusion.cpp、上传与 SVG 均可用；设定集锚点和参考图已接入 | 局部重绘遮罩语义待修复；本地与外部生成通道目前都只有 prompt 级参考，没有像素级身份锁 |
 | 素材保存 | Data URL 与生成结果会落盘并记录哈希 | 外部远程 URL 尚未下载成本地资产 |
-| TTS | SAPI、OpenAI Compatible 与 audio.cpp TTS 已接入 | audio.cpp 服务需手动启动；情绪/角色模板和真实服务验收仍缺 |
+| TTS | SAPI、OpenAI Compatible 与 audio.cpp TTS 已接入 | audio.cpp 支持自动启动和空闲卸载；情绪/角色模板和真实服务验收仍缺 |
 | 字幕 | 已知旁白与云端 ASR 听写 | ASR 依赖服务返回 segment；无时间片段时回退按场景均分 |
 | 项目保存 | debounce、项目锁、文档和修订目录已接通 | 仍是项目级状态合并；修订无去重/保留策略；文档级 revision/expectedRevision 冲突协议未启用 |
 | 项目版本 | Agent 修订与保存快照 | 手动 UI 编辑没有同等全局 undo/redo 栈 |
 | 项目复制 | 本地素材与项目数据可复制 | 数据库工作流/渲染历史不复制到新项目 |
 | 项目导入导出 | 含素材、渲染和修订的 ZIP 包 | 跨项目素材来源边界待加固；ZIP 导入缺少资源预算；无独立迁移工具和跨设备自动升级 |
-| 本地模型运行时 | llama.cpp 可按需安装并启动；三种运行时均支持固定版本下载；CUDA/Vulkan 自动选择已接通 | 安装后完整性复验偏弱；audio.cpp/stable-diffusion.cpp 服务、模型和显存生命周期未托管 |
+| 本地模型运行时 | 三种运行时支持固定版本下载；统一调度器负责 GPU 租约、自动启动、健康检查、互斥和空闲卸载 | 安装后完整性复验偏弱；真实 audio.cpp/stable-diffusion.cpp 模型仍需实机验收 |
 | 渲染 | 持久 Job、进度、取消、Windows Job Object、离线 runtime、验证和原子提交 | 尚无跨平台进程树容器；当前发行目标是 Windows |
 | 4K/60 FPS | Composition 与 Renderer 支持参数 | UI 只验证了 1080P；没有 4K/60 实测和资源限制 |
 | 动画组件 | 文本、SVG、图片、图表、视频、Canvas 2D 与确定性 GSAP 已实现 | 视频仅场景内图层，无多轨剪辑、转场、蒙版；渲染嵌入上限 24 MB |
 | 质量检查 | `status=fail` 在 UI 与 Rust 渲染入口双重阻断 | 没有自动修复、逐项修复按钮或可配置发布规则 |
-| 错误恢复 | Agent 自动指数退避重试；App 重启安全暂停/中断 | 尚无租约调度器和统一 `tasks` worker 消费器 |
+| 错误恢复 | Agent 自动指数退避重试；App 重启安全暂停/中断；本地模型有进程和租约回收 | 尚无统一 `tasks` worker 消费器 |
 | 用量统计 | LLM token、图片数、音频时长写入 `usage_records` | 无价格表、成本估算、额度与预算限制 |
 | IPC 契约 | Rust/TS 手工定义对应类型 | 没有使用 Specta/Tauri Specta 自动生成 |
 | JSON Schema | 有设计用 Schema 文件 | 与运行时 TS/Rust 模型没有自动生成关系，存在重复定义 |
@@ -397,7 +398,6 @@ manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对�
 - Authenticode 签名、时间戳和 signed updater。
 - 真实外部 LLM/Image/TTS/ASR/Embedding 服务端到端验收。
 - 像素级角色身份验证（人脸/CLIP 相似度）与 ControlNet/IP-Adapter 角色锁。
-- 统一的本地模型调度器、GPU 显存租约、audio.cpp/stable-diffusion.cpp 自动启动和空闲卸载。
 - 完整的公网 URL DNS/IP/重定向安全解析器。
 
 ## 7. 与架构文档不一致的关键项
@@ -426,7 +426,7 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 
 ### 7.6 本地模型运行时
 
-架构与 README 已明确本地运行时按需下载，不以安装包分发；`docs/LOCAL_MODEL_RUNTIMES.md` 也已说明 audio.cpp 和 stable-diffusion.cpp 目前需要用户手动启动。代码与这些边界基本一致，但 Models 页面的“运行时已就绪”容易被理解为“模型与服务均已就绪”，需要更精确的状态文案。
+架构与 README 已明确本地运行时按需下载，不以安装包分发；`docs/LOCAL_MODEL_RUNTIMES.md` 已更新自动启动、GPU 租约和空闲卸载协议。Models 页现在同时显示运行时安装结果与调度器状态，避免把“二进制已就绪”误解为“模型已加载”。
 
 ## 8. 端到端验收对照
 
@@ -437,7 +437,7 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 | 配置实际 AI Provider | 实现，未在线验收 | 真实 HTTP 路径已完成，缺实际 Key |
 | AI 生成结构化脚本和分镜 | 实现，未在线验收 | Agent 与 Schema 已完成 |
 | 本地 GGUF 模型推理 | 实现，未完成第三轮实机验收 | llama.cpp 启停和缓存已有测试入口，真实模型测试默认忽略 |
-| audio.cpp TTS/ASR | 实现，未完成实机验收 | 协议适配已接通，服务需手动启动 |
+| audio.cpp TTS/ASR | 实现，未完成实机验收 | 协议适配、自动启动、健康检查和空闲卸载已接通；仍需真实模型 smoke test |
 | stable-diffusion.cpp 图片生成/编辑 | 实现，有阻断缺陷 | 请求链路已接通，但局部重绘遮罩语义错误 |
 | 至少三个动画场景预览 | 通过 | 蓝天项目 6 个场景五风格 |
 | 生成真实视频 | 通过 | 60.011 秒 H.264/AAC |
@@ -461,11 +461,10 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 ### P1：可靠性与本地模型闭环
 
 1. 为本地运行时建立关键文件哈希、损坏检测和自动修复。
-2. 实现 audio.cpp/stable-diffusion.cpp 的启动、健康状态、模型加载与卸载管理。
-3. 实现 GPU 显存租约、运行时互斥、空闲卸载和 768–1024 MiB 安全余量。
-4. 为素材缺失增加“重新生成当前资产”操作。
-5. 增加遮罩羽化、文本自动选区与重绘历史对比。
-6. 为 `kmasset` 增加视频 Range 和完整 MIME 支持。
+2. 对自动启动的 audio.cpp/stable-diffusion.cpp 模型完成真实 GPU smoke test。
+3. 为素材缺失增加“重新生成当前资产”操作。
+4. 增加遮罩羽化、文本自动选区与重绘历史对比。
+5. 为 `kmasset` 增加视频 Range 和完整 MIME 支持。
 
 ### P2：平台完整性
 

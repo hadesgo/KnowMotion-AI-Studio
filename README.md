@@ -16,6 +16,7 @@ AI-powered knowledge animation studio. 用户从一个知识主题开始，在�
 - 视频素材与图层：导入 MP4/WebM 等容器，剪出入点/速度/音量后插入镜头；Remotion 用 `OffthreadVideo` 参与 Player 预览与最终渲染。
 - 九个持久化 AI Agent 与 DAG Workflow：模型路由、审批、暂停恢复、局部重跑、受控项目工具、修订和撤销。
 - 原生 GGUF 本地推理：可直接选择 `.gguf` 模型文件，由 llama.cpp 加载，支持 CPU 与 Vulkan GPU 加速。
+- 统一本地模型调度：llama.cpp、audio.cpp 与 stable-diffusion.cpp 共享单一 GPU 租约，按需启动、保留 768–1024 MiB 显存余量，并按空闲阈值卸载模型。
 - Remotion Scene/Composition DSL、可复用动画组件、实时 Player 和完整 H.264 渲染。
 - 确定性 Canvas 2D 动画图层：粒子流、动态波形、知识网络和轨道拖尾。
 - 帧驱动 GSAP 运动：漂浮、呼吸、摆动、环绕和弹性入场，Player 与 Renderer 结果一致。
@@ -64,12 +65,15 @@ npm run desktop:dev
 
 运行时按需保存到应用数据目录的 `runtimes/`。安装器优先通过 `nvidia-smi` 检测可用的 NVIDIA 驱动与计算能力，满足 CUDA 12.4 条件时下载 CUDA 包及其运行库，否则下载 Vulkan 包。GGUF 使用官方 llama.cpp `llama-server`，不依赖 Ollama。模型文件本身不复制到应用数据目录；Provider 只保存本地文件路径、上下文长度和推理设备偏好。
 
+本地 Provider 可填写 audio.cpp 模型文件/包目录或 stable-diffusion.cpp 模型目录。应用会生成受限的本地服务配置、自动发现扩散模型组件、启动服务并等待健康状态；请求之间由同一 `LocalModelScheduler` 串行化 GPU 工作，audio.cpp 和扩散模型空闲后通过各自 API 卸载，llama.cpp 空闲超过默认 180 秒后停止。
+
 ```text
 %APPDATA%/com.knowmotion.studio/
 ├─ studio.sqlite3
 ├─ logs/
 │  ├─ knowmotion.log
 │  └─ knowmotion.{1..7}.log
+├─ scheduler/          # 应用生成的 audio.cpp 配置
 └─ projects/
    └─ {projectId}/
       ├─ project.json

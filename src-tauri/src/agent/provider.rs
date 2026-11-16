@@ -1,5 +1,8 @@
 use super::gguf::GgufLlmProvider;
 use super::model::{ProviderConfig, ProviderTestResult};
+use crate::local_model_scheduler::{
+    acquire_gpu, ensure_audio, ensure_diffusion, is_loopback_base_url, Workload,
+};
 use async_trait::async_trait;
 use keyring::Entry;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
@@ -388,6 +391,58 @@ pub async fn test_provider(config: ProviderConfig) -> Result<ProviderTestResult,
         .any(|capability| capability == "LLM")
     {
         let started = Instant::now();
+        let mut _local_lease = None;
+        if is_loopback_base_url(&config.base_url) {
+            match config.protocol.as_str() {
+                "audio.cpp" => {
+                    let lease = acquire_gpu(
+                        Workload::Audio,
+                        &config.id,
+                        &config.base_url,
+                        config.runtime.as_ref(),
+                        config.inference_backend.as_deref(),
+                    )
+                    .await?;
+                    let capability = config
+                        .capabilities
+                        .iter()
+                        .find(|capability| {
+                            matches!(capability.as_str(), "TTS" | "ASR")
+                        })
+                        .map(String::as_str)
+                        .unwrap_or("TTS");
+                    ensure_audio(
+                        &config.id,
+                        &config.base_url,
+                        &config.model,
+                        capability,
+                        config.runtime.as_ref(),
+                        config.inference_backend.as_deref(),
+                    )
+                    .await?;
+                    _local_lease = Some(lease);
+                }
+                "stable-diffusion.cpp" => {
+                    let lease = acquire_gpu(
+                        Workload::Diffusion,
+                        &config.id,
+                        &config.base_url,
+                        config.runtime.as_ref(),
+                        config.inference_backend.as_deref(),
+                    )
+                    .await?;
+                    ensure_diffusion(
+                        &config.id,
+                        &config.base_url,
+                        config.runtime.as_ref(),
+                        config.inference_backend.as_deref(),
+                    )
+                    .await?;
+                    _local_lease = Some(lease);
+                }
+                _ => {}
+            }
+        }
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10))
@@ -479,9 +534,19 @@ pub async fn resolve_provider(
         }
     }
     if provider.protocol == "GGUF" {
-        let local = tokio::task::spawn_blocking(move || GgufLlmProvider::load(&provider))
-            .await
-            .map_err(|error| format!("GGUF model loading task failed: {error}"))??;
+        let lease = acquire_gpu(
+            Workload::Llm,
+            &provider.id,
+            &provider.base_url,
+            provider.runtime.as_ref(),
+            provider.inference_backend.as_deref(),
+        )
+        .await?;
+        let local = tokio::task::spawn_blocking(move || {
+            GgufLlmProvider::load_with_lease(&provider, lease)
+        })
+        .await
+        .map_err(|error| format!("GGUF model loading task failed: {error}"))??;
         return Ok(Box::new(local));
     }
     let secret = if provider.protocol == "Ollama" {
@@ -556,5 +621,30 @@ mod tests {
         .expect("legacy provider config should deserialize");
         assert_eq!(config.context_size, None);
         assert_eq!(config.inference_backend, None);
+        assert!(config.runtime.is_none());
+    }
+
+    #[test]
+    fn provider_config_accepts_local_runtime_lifecycle_settings() {
+        let config: ProviderConfig = serde_json::from_value(json!({
+            "id": "audio-local",
+            "name": "Local audio",
+            "protocol": "audio.cpp",
+            "baseUrl": "http://127.0.0.1:8080",
+            "model": "qwen3-tts",
+            "inferenceBackend": "gpu",
+            "runtime": {
+                "modelPath": "D:\\models\\qwen3-tts",
+                "modelFamily": "qwen3_tts",
+                "idleUnloadSeconds": 45
+            },
+            "enabled": true,
+            "capabilities": ["TTS"]
+        }))
+        .expect("local runtime settings should deserialize");
+        let runtime = config.runtime.expect("runtime settings");
+        assert_eq!(runtime.model_path.as_deref(), Some("D:\\models\\qwen3-tts"));
+        assert_eq!(runtime.model_family.as_deref(), Some("qwen3_tts"));
+        assert_eq!(runtime.idle_unload_seconds, Some(45));
     }
 }
