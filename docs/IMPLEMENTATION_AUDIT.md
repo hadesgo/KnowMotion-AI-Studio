@@ -1,6 +1,6 @@
 # KnowMotion AI Studio 实现审计
 
-> 审计更新：2026-11-16（第三轮重新审计，基线提交 `c327fd7`）
+> 审计更新：2026-11-16（第三轮重新审计 + 第四轮真实服务验收，基线提交 `c327fd7`）
 >
 > 基线：原始《项目开发总提示词》、`docs/ARCHITECTURE.md`、`docs/AGENT_WORKFLOW.md`、`docs/REMOTION_ENGINE.md`、`docs/MVP_ACCEPTANCE.md`、`docs/LOCAL_MODEL_RUNTIMES.md` 及最新运行时代码。
 > 判定原则：代码、持久化数据、自动化测试或真实产物可证明的，才算已实现；只有 UI、提示词或设计文档的不算。
@@ -32,7 +32,9 @@
 - Data URL 素材会落入 `assets/images` 或 `assets/audio`，项目 JSON 成为恢复事实来源；复制、归档删除、缺失扫描和 ZIP 包导入导出已接通。
 - llama.cpp、audio.cpp、stable-diffusion.cpp 已接入按需运行时下载、SHA-256 归档校验及 CUDA/Vulkan 选择；三种运行时均可由统一本地模型调度器按需拉起或复用回环服务。
 
-仍不能宣称“所有外部服务均已在线验收”：当前没有可用 LLM/图片/TTS/ASR/Embedding 凭据，相关网络路径只有结构和单元测试，没有真实付费/私有服务端到端记录。
+第四轮补充了真实服务端到端验收：在 RTX 5070 上用本机真实模型和三个固定版本运行时（llama.cpp / audio.cpp / stable-diffusion.cpp）跑通了 LLM、Embedding、TTS、ASR、Image 五项能力，判定基于可解析 JSON、向量语义排序、WAV 时长、TTS→ASR 闭环和 PNG 尺寸/哈希，产物与报告见 `docs/REAL_SERVICE_ACCEPTANCE.md`。因此“真实模型服务完全没跑过”不再成立。
+
+仍未覆盖的是第三方云端凭据路径（OpenAI/Anthropic/Gemini）与九 Agent 全流程实跑；云端通道目前依然只有实现与单元测试，没有真实 Key 的在线记录。
 
 **发布判断：不通过。** 基础工程可构建，原有主链路测试基本健康，但第三轮审计发现 3 个 P1 问题：局部重绘遮罩语义相反、跨项目素材复制存在本地文件路径穿越、远程 URL 私网/DNS/重定向校验不完整。修复并完成对应回归测试前，不应将当前版本判定为发布级完成。
 
@@ -286,6 +288,15 @@
 - audio.cpp 根据 Provider 的模型路径动态生成 `max_loaded_models: 1` 配置并自动启动；stable-diffusion.cpp 从模型目录发现扩散模型、文本编码器和 VAE，以启动参数预载并等待模型 ready。
 - `docs/LOCAL_MODEL_RUNTIMES.md` 已更新为实际自动启动和生命周期协议。运行时二进制就绪与模型文件就绪仍是两个独立状态。
 
+### 3.17 真实本地服务端到端验收
+
+- `src-tauri/src/acceptance.rs` 提供 `real_service_acceptance` 用例（`#[ignore]`，不进 CI）。它通过应用自身代码发起全部请求：`GGUF` Provider 走 `llama-server`，`OpenAI Compatible` 走 `/v1/embeddings`，`audio.cpp` Provider 由 `LocalModelScheduler` 生成配置并拉起 `audiocpp_server`，`stable-diffusion.cpp` Provider 自动发现三个模型组件并拉起 `sd-server`。
+- 判定是产物级的，不是“HTTP 200”：LLM 必须产出可解析且字段完整的 JSON；Embedding 必须维度一致且语义排序成立（相关句比无关句高 0.02 以上）；TTS 必须是 `hound` 可解析且时长 > 1.5 s 的 WAV；ASR 直接识别 TTS 产物并要求字符重合率 ≥ 0.4；Image 必须返回尺寸匹配的 PNG 并记录 SHA-256。
+- 实测结果（2026-11-16，RTX 5070 12 GB，全部五项一次通过）：LLM 35.9 s / 136 输入 token / 269 输出 token；Embedding 1.5 s / 768 维 / 相关 0.8213 vs 无关 0.6357；TTS 6.3 s / 8 800 ms WAV；ASR 5.6 s / 字符重合率 1.000；Image 62.7 s / 768×768 PNG 713 281 字节。
+- `scripts/acceptance/install-local-runtimes.mjs` 按 `local_runtime.rs` 的固定版本与 SHA-256 安装三个运行时，避免验收依赖手工解压。`npm run acceptance:runtimes` 与 `npm run acceptance:services` 是对外入口。
+- 本轮同时修掉一个真实缺陷：固定版本 CUDA 12.4 归档无法为 Blackwell（计算能力 10.x/12.x）生成 kernel，原 `cuda_available()` 只校验下限会在 RTX 50 系上选中不可用后端；现在按计算能力上限选择 Vulkan，并补了 `cuda_asset_selection_excludes_blackwell` 测试。
+- 明确的边界：本地 Embedding 服务仍由验收脚本拉起，调度器没有托管这一类工作负载；ASR 无时间片段（模型只返回文本与推理耗时）；局部重绘两条通道和九 Agent 全流程不在本轮范围内。
+
 ## 4. 第三轮重新审计发现
 
 ### 4.1 P1：局部重绘遮罩语义相反
@@ -369,7 +380,7 @@ manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对�
 | `cargo fmt --check` | 失败 | 存在多处格式差异 |
 | `cargo clippy -- -D warnings` | 失败 | 6 个严格 lint 错误 |
 | 桌面 E2E | 未在本轮执行 | 需要完整 release 构建与 WebDriver 环境 |
-| 真实本地模型服务 | 未在本轮执行 | 自动启动链路已实现；实机验收仍需要模型文件和已安装运行时 |
+| 真实本地模型服务 | 通过 | 五项能力（LLM/Embedding/TTS/ASR/Image）在 RTX 5070 上以真实模型 + 真实运行时完成端到端验收，详见第 3.17 节 |
 
 ## 5. 部分实现
 
@@ -398,7 +409,7 @@ manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对�
 ## 6. 未实现
 
 - Authenticode 签名、时间戳和 signed updater。
-- 真实外部 LLM/Image/TTS/ASR/Embedding 服务端到端验收。
+- 第三方云端 LLM/Image/TTS/ASR/Embedding 服务（OpenAI/Anthropic/Gemini）凭据验收：本地真实服务已完成，云端仍无 Key 记录。
 - 像素级角色身份验证（人脸/CLIP 相似度）与 ControlNet/IP-Adapter 角色锁。
 
 ## 7. 与架构文档不一致的关键项
@@ -435,11 +446,11 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 |---|---|---|
 | Windows 桌面启动 | 通过 | Debug 与 release EXE 均已完成启动 smoke test |
 | 创建和保存项目 | 通过 | SQLite、项目目录和 JSON 已验证 |
-| 配置实际 AI Provider | 实现，未在线验收 | 真实 HTTP 路径已完成，缺实际 Key |
-| AI 生成结构化脚本和分镜 | 实现，未在线验收 | Agent 与 Schema 已完成 |
-| 本地 GGUF 模型推理 | 实现，未完成第三轮实机验收 | llama.cpp 启停和缓存已有测试入口，真实模型测试默认忽略 |
-| audio.cpp TTS/ASR | 实现，未完成实机验收 | 协议适配、自动启动、健康检查和空闲卸载已接通；仍需真实模型 smoke test |
-| stable-diffusion.cpp 图片生成/编辑 | 实现，有阻断缺陷 | 请求链路已接通，但局部重绘遮罩语义错误 |
+| 配置实际 AI Provider | 本地通道通过，云端未验收 | GGUF 本地通道已实跑；云端 HTTP 路径仍缺实际 Key |
+| AI 生成结构化脚本和分镜 | Provider 层通过 | Qwen3.8-27B 产出可解析分镜 JSON；九 Agent 完整编排仍未实跑 |
+| 本地 GGUF 模型推理 | 通过 | Qwen3.8-27B 在 Vulkan 上完成真实结构化生成 |
+| audio.cpp TTS/ASR | 通过 | Qwen3-TTS 合成 8.8 s 旁白，Qwen3-ASR 识别字符重合率 1.000；ASR 无时间片段 |
+| stable-diffusion.cpp 图片生成/编辑 | 生成通过，编辑未验收 | Qwen Image 2.1 生成 768×768 PNG；局部重绘仍受遮罩语义 P1 阻断 |
 | 至少三个动画场景预览 | 通过 | 蓝天项目 6 个场景五风格 |
 | 生成真实视频 | 通过 | 60.011 秒 H.264/AAC |
 | 离线 Worker smoke render | 通过 | 随包 Node/Chrome/FFmpeg 输出 966,517 字节 MP4 |
@@ -454,9 +465,10 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 
 1. 修复局部重绘遮罩方向，并增加真实 Canvas alpha 像素测试及两条图片通道验收。
 2. 修复跨项目素材来源的路径校验，禁止导入包触发项目目录外文件复制。
-3. 使用实际 LLM Provider 完成一次 Research → Quality 全流程验收。
-4. 使用真实 Image/TTS/ASR/Embedding 服务完成各能力 smoke test。
-5. 配置 Authenticode、签名 updater，并重新执行干净 Windows VM 安装/卸载/离线渲染验收。
+3. 使用实际 LLM Provider 完成一次 Research → Quality 全流程验收（本地 Provider 能力已验收，工作流编排未跑）。
+4. 为第三方云端 Image/TTS/ASR/Embedding 补充凭据验收；本地真实服务 smoke test 已完成。
+5. 完成局部重绘两条通道的真实服务验收。
+6. 配置 Authenticode、签名 updater，并重新执行干净 Windows VM 安装/卸载/离线渲染验收。
 
 ### P1：可靠性与本地模型闭环
 

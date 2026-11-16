@@ -17,3 +17,4 @@ src-tauri/binaries/
 renders/
 e2e-artifacts/
 .workbuddy/
+models/

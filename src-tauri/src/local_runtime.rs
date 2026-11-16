@@ -290,6 +290,16 @@ fn hidden_command(program: &str) -> Command {
     Command::new(program)
 }
 
+/// 判断固定版本 CUDA 12.4 运行时能否在这块显卡上真正执行。
+///
+/// 只判断驱动下限是不够的：CUDA 12.4 工具链最高只能生成 compute capability
+/// 9.x 的 kernel，Blackwell（10.x/12.x，如 RTX 50 系）在 CUDA 12.4 归档里没有
+/// 可执行的 kernel image，启动后会退回 CPU 或直接报错。这类设备必须改用
+/// 便携 Vulkan 归档。
+fn cuda_12_4_supports(driver_major: u32, compute_capability: f32) -> bool {
+    driver_major >= 551 && (5.0..10.0).contains(&compute_capability)
+}
+
 fn cuda_available() -> bool {
     let candidates = [
         "nvidia-smi.exe",
@@ -333,7 +343,7 @@ fn cuda_available() -> bool {
                 .get(1)
                 .and_then(|value| value.parse::<f32>().ok())
                 .unwrap_or(5.0);
-            if driver_major >= 551 && compute_cap >= 5.0 {
+            if cuda_12_4_supports(driver_major, compute_cap) {
                 return true;
             }
         }
@@ -584,6 +594,21 @@ mod tests {
             .cuda
             .iter()
             .any(|archive| archive.name.starts_with("cudart-")));
+    }
+
+    #[test]
+    fn cuda_asset_selection_excludes_blackwell() {
+        // Ampere / Ada 可用 CUDA 12.4 归档。
+        assert!(cuda_12_4_supports(551, 5.0));
+        assert!(cuda_12_4_supports(566, 8.9));
+        assert!(cuda_12_4_supports(621, 9.0));
+        // 驱动过旧。
+        assert!(!cuda_12_4_supports(550, 8.6));
+        // Blackwell（RTX 50 系）在 CUDA 12.4 归档中没有 kernel，必须走 Vulkan。
+        assert!(!cuda_12_4_supports(621, 10.0));
+        assert!(!cuda_12_4_supports(621, 12.0));
+        // 低于受支持的最低计算能力。
+        assert!(!cuda_12_4_supports(600, 3.5));
     }
 
     #[test]

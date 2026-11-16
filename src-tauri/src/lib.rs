@@ -11,6 +11,8 @@ mod public_url;
 mod render;
 mod storage;
 mod video;
+#[cfg(test)]
+mod acceptance;
 
 use chrono::Utc;
 use database::open_database;

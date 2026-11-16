@@ -25,6 +25,7 @@ AI-powered knowledge animation studio. 用户从一个知识主题开始，在�
 - 结构化 JSONL 日志、5 MiB 轮转、7 份历史、30 天保留和统一 API Key/Authorization 脱敏。
 - 构建时打包固定 Node sidecar、Chrome Headless Shell、FFmpeg/FFprobe，并校验 runtime manifest。
 - OpenAI Compatible / stable-diffusion.cpp 图片，audio.cpp 本地 TTS/ASR，OpenAI Compatible TTS/ASR，Embedding/RAG 和网页来源正文抓取。
+- 真实本地服务端到端验收：Qwen3.8-27B、EmbeddingGemma、Qwen3-TTS/ASR、Qwen Image 2.1 在 RTX 5070 上经真实运行时进程（llama.cpp / audio.cpp / stable-diffusion.cpp）完成 LLM / Embedding / TTS / ASR / Image 五项验收，判定基于可解析 JSON、语义排序、WAV 时长、TTS→ASR 闭环与 PNG 尺寸哈希，见 [docs/REAL_SERVICE_ACCEPTANCE.md](docs/REAL_SERVICE_ACCEPTANCE.md)。
 - 公网 URL 安全抓取：研究网页与远程图片统一执行 DNS/IP 分类、解析地址固定、逐跳重定向校验、HTTPS 降级阻断、响应大小与内容类型限制。
 - 项目文件锁、素材落盘、缺失扫描、可恢复归档删除及含素材的 ZIP 项目包导入导出。
 - 浏览器预览支持完整项目持久化、SVG 视觉草案、系统语音试听、字幕导出和真实 WebM 视频录制。
@@ -44,9 +45,13 @@ npm run test:frontend
 npm run test:components
 cd src-tauri && cargo test
 npm run renderer:smoke
+npm run acceptance:runtimes
+npm run acceptance:services
 npm run test:e2e:desktop:full
 npm run test:smoke:windows:sandbox
 ```
+
+`acceptance:runtimes` 按固定版本与 SHA-256 安装 llama.cpp / audio.cpp / stable-diffusion.cpp；`acceptance:services` 用本机真实模型跑五项能力验收（默认全部，可用 `KNOWMOTION_ACCEPTANCE_ONLY=LLM,TTS` 只跑部分）。两项都需要本机已下载模型和一块可用 GPU，不进 CI。
 
 `renderer:smoke` 需要先执行 `npm run renderer:prepare`，会启动随包 Node/Chrome/FFmpeg 渲染一个短视频片段。
 
@@ -106,6 +111,9 @@ src-tauri/target/release/bundle/nsis/
 
 本地模型运行时、GGUF 模型包和 12 GB 显存配置见
 [docs/LOCAL_MODEL_RUNTIMES.md](docs/LOCAL_MODEL_RUNTIMES.md)。
+
+真实本地服务验收的环境、产物与限制见
+[docs/REAL_SERVICE_ACCEPTANCE.md](docs/REAL_SERVICE_ACCEPTANCE.md)。
 
 ## 第一条端到端示例
 

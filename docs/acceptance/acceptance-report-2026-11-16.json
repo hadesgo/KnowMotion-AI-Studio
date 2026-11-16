@@ -1,0 +1,114 @@
+{
+  "capabilities": [
+    {
+      "capability": "LLM",
+      "checks": {
+        "artifact": "D:\\code\\KnowMotion-AI-Studio\\src-tauri\\target/acceptance\\llm-storyboard.json",
+        "backend": "GGUF / llama.cpp",
+        "inputTokens": 136,
+        "keywords": 4,
+        "model": "Qwen3.8-27B-UD-IQ2_S",
+        "narration": "阳光进入大气时，蓝光被空气分子散射得更多，所以天空呈现蓝色。",
+        "outputTokens": 269
+      },
+      "detail": "阳光进入大气时，蓝光被空气分子散射得更多，所以天空呈现蓝色。",
+      "elapsedMs": 35893,
+      "model": "Qwen3.8-27B-UD-IQ2_S.gguf",
+      "ok": true,
+      "protocol": "GGUF / llama.cpp"
+    },
+    {
+      "capability": "Embedding",
+      "checks": {
+        "artifact": "D:\\code\\KnowMotion-AI-Studio\\src-tauri\\target/acceptance\\embedding-vectors.json",
+        "baseUrl": "http://127.0.0.1:59549",
+        "dimensions": 768,
+        "relatedScore": 0.8213013448844054,
+        "unrelatedScore": 0.6357085019724573
+      },
+      "detail": "dim=768 related=0.8213 unrelated=0.6357",
+      "elapsedMs": 1545,
+      "model": "embeddinggemma-2-Q8_0.gguf",
+      "ok": true,
+      "protocol": "OpenAI Compatible / llama.cpp"
+    },
+    {
+      "capability": "TTS",
+      "checks": {
+        "artifact": "D:\\code\\KnowMotion-AI-Studio\\src-tauri\\target/acceptance\\narration.wav",
+        "baseUrl": "http://127.0.0.1:8091",
+        "bytes": 422444,
+        "durationMs": 8800,
+        "voice": "serena"
+      },
+      "detail": "8800 ms / 422444 bytes",
+      "elapsedMs": 6300,
+      "model": "qwen3-tts-12hz-1.7b-customvoice-q8_0.gguf",
+      "ok": true,
+      "protocol": "audio.cpp"
+    },
+    {
+      "capability": "ASR",
+      "checks": {
+        "artifact": "D:\\code\\KnowMotion-AI-Studio\\src-tauri\\target/acceptance\\asr-result.json",
+        "charOverlap": 1.0,
+        "cues": 0,
+        "text": "阳光穿过大气时，蓝光被空气分子散射到四面八方，于是我们抬头看见整片天空都是蓝色的。"
+      },
+      "detail": "阳光穿过大气时，蓝光被空气分子散射到四面八方，于是我们抬头看见整片天空都是蓝色的。 / cues=0 / overlap=1.000",
+      "elapsedMs": 5647,
+      "model": "qwen3-asr-1.7b-q8_0.gguf",
+      "ok": true,
+      "protocol": "audio.cpp"
+    },
+    {
+      "capability": "Image",
+      "checks": {
+        "artifact": "D:\\code\\KnowMotion-AI-Studio\\src-tauri\\target/acceptance\\image-scene.png",
+        "bytes": 713281,
+        "height": 768,
+        "mode": "prompt",
+        "requestedSize": "768x768",
+        "sha256": "ce44a2cddec6d09aedc8178b57adec1baa532886ecb0265a59ff70531205f856",
+        "width": 768
+      },
+      "detail": "768x768 / 713281 bytes",
+      "elapsedMs": 62652,
+      "model": "qwen-image-2.1-turbo-Q4_K_M.gguf + Qwen3-VL-8B + VAE",
+      "ok": true,
+      "protocol": "stable-diffusion.cpp"
+    }
+  ],
+  "environment": {
+    "arch": "x86_64",
+    "gpu": "NVIDIA GeForce RTX 5070, 621.24, 12227 MiB",
+    "nvidiaSmi": "NVIDIA GeForce RTX 5070, 621.24, 12227 MiB",
+    "os": "windows"
+  },
+  "generatedAt": "2026-11-16T15:37:38.027513100+00:00",
+  "runtimes": {
+    "audio.cpp": {
+      "acceleration": "vulkan",
+      "executable": "C:\\Users\\lys\\AppData\\Roaming\\com.knowmotion.studio\\runtimes\\audio.cpp\\audiocpp_server.exe",
+      "installed": true,
+      "root": "C:\\Users\\lys\\AppData\\Roaming\\com.knowmotion.studio\\runtimes\\audio.cpp"
+    },
+    "llama.cpp": {
+      "acceleration": "vulkan",
+      "executable": "C:\\Users\\lys\\AppData\\Roaming\\com.knowmotion.studio\\runtimes\\llama.cpp\\llama-server.exe",
+      "installed": true,
+      "root": "C:\\Users\\lys\\AppData\\Roaming\\com.knowmotion.studio\\runtimes\\llama.cpp"
+    },
+    "stable-diffusion.cpp": {
+      "acceleration": "vulkan",
+      "executable": "C:\\Users\\lys\\AppData\\Roaming\\com.knowmotion.studio\\runtimes\\stable-diffusion.cpp\\sd-server.exe",
+      "installed": true,
+      "root": "C:\\Users\\lys\\AppData\\Roaming\\com.knowmotion.studio\\runtimes\\stable-diffusion.cpp"
+    }
+  },
+  "summary": {
+    "failed": 0,
+    "passed": 5,
+    "total": 5
+  }
+}

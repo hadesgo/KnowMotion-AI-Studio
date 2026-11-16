@@ -7,6 +7,7 @@
 | 前端逻辑 | Node test + tsx | Composition/Scene DSL 校验、Canvas 与 GSAP 确定性 |
 | 组件 | Vitest + Testing Library + jsdom | 受控控件、Modal 键盘与焦点、进度可访问性、新建项目流程 |
 | Rust | cargo test | 存储、迁移、Agent、Provider、Canvas/GSAP 归一化、日志脱敏、轮转、Job Object 进程树 |
+| 真实服务验收 | cargo test --ignored + 本地模型 | LLM / Embedding / TTS / ASR / Image 五项真实运行时端到端 |
 | 桌面 E2E | tauri-driver + WebDriverIO + msedgedriver | 真实 Tauri release 应用、页面导航、Canvas 操作与重启持久化 |
 
 ## 组件测试
@@ -16,6 +17,15 @@ npm run test:components
 ```
 
 测试 DOM 环境在 `tests/components/setup.ts` 中提供 Testing Library cleanup、matchMedia、ResizeObserver 和 Canvas 2D mock。组件测试不连接真实 Provider，也不写用户项目目录。
+
+## 真实本地服务验收
+
+```bash
+npm run acceptance:runtimes   # 首次准备：按固定版本与 SHA-256 安装三个运行时
+npm run acceptance:services   # 用本机真实模型跑五项能力验收
+```
+
+用例是 `src-tauri/src/acceptance.rs` 的 `real_service_acceptance`，带 `#[ignore]`，因此普通 `cargo test` 不会触发它。它需要本机已下载模型、已安装运行时和一块能跑 Vulkan 的 GPU，不进 CI。默认约 2 分钟，产物与 JSON 报告写入 `src-tauri/target/acceptance/`；可用 `KNOWMOTION_ACCEPTANCE_ONLY=LLM,TTS` 只跑部分能力。判定标准、实测数据与限制见 `docs/REAL_SERVICE_ACCEPTANCE.md`。
 
 ## 桌面 E2E
 

@@ -27,7 +27,9 @@
     "llama:prepare": "node scripts/prepare-llama-runtime.mjs",
     "llama:smoke": "node scripts/smoke-llama-runtime.mjs",
     "renderer:smoke": "node --import tsx scripts/smoke-render-worker.mjs",
-    "mvp:render": "tsx scripts/render-sky-blue-mvp.ts"
+    "mvp:render": "tsx scripts/render-sky-blue-mvp.ts",
+    "acceptance:runtimes": "node scripts/acceptance/install-local-runtimes.mjs",
+    "acceptance:services": "cargo test --manifest-path src-tauri/Cargo.toml --lib real_service_acceptance -- --ignored --nocapture --test-threads=1"
   },
   "dependencies": {
     "@remotion/bundler": "^4.0.543",

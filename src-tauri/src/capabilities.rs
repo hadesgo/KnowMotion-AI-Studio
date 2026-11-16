@@ -299,56 +299,8 @@ pub async fn transcribe_project_audio(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("audio.wav");
-    let content_type = if audio.starts_with(b"RIFF") {
-        "audio/wav"
-    } else {
-        "audio/mpeg"
-    };
-    let boundary = format!("knowmotion-{}", Uuid::new_v4().simple());
-    let mut body = Vec::new();
-    append_multipart_field(&mut body, &boundary, "model", &request.provider.model);
-    if !uses_audio_cpp {
-        append_multipart_field(&mut body, &boundary, "response_format", "verbose_json");
-    }
-    append_multipart_file(&mut body, &boundary, "file", filename, content_type, &audio);
-    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     let started = Instant::now();
-    let endpoint = if uses_audio_cpp {
-        format!(
-            "{}/v1/audio/transcriptions/details",
-            request.provider.base_url.trim_end_matches('/')
-        )
-    } else {
-        format!(
-            "{}/audio/transcriptions",
-            request.provider.base_url.trim_end_matches('/')
-        )
-    };
-    let mut http_request = http_client()?
-        .post(endpoint)
-        .header(
-            reqwest::header::CONTENT_TYPE,
-            format!("multipart/form-data; boundary={boundary}"),
-        )
-        .body(body);
-    if let Some(secret) = secret {
-        http_request = http_request.bearer_auth(secret);
-    }
-    let response = http_request.send().await.map_err(provider_network_error)?;
-    let status = response.status();
-    let payload: Value = response
-        .json()
-        .await
-        .map_err(|_| format!("ASR provider returned non-JSON response ({status})"))?;
-    if !status.is_success() {
-        return Err(format!("ASR provider returned {status}"));
-    }
-    let text = payload
-        .get("text")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "ASR response has no text".to_string())?
-        .to_string();
-    let cues = parse_asr_cues(&payload);
+    let (text, cues) = transcribe_audio(&request.provider, secret.as_deref(), filename, &audio).await?;
     logging::log_event(
         LogLevel::Info,
         "provider.asr",
@@ -625,12 +577,6 @@ pub async fn generate_project_cloud_narration(
                 .ok_or_else(|| "No API key is stored for the TTS provider".to_string())?,
         )
     };
-    let endpoint = format!(
-        "{}{}/audio/speech",
-        request.provider.base_url.trim_end_matches('/'),
-        if uses_audio_cpp { "/v1" } else { "" }
-    );
-    let client = http_client()?;
     let started = Instant::now();
     let mut assets = Vec::new();
     let mut total_audio_ms = 0_i64;
@@ -638,33 +584,14 @@ pub async fn generate_project_cloud_narration(
         if scene.narration.trim().is_empty() {
             continue;
         }
-        let mut payload = json!({
-            "model": request.provider.model,
-            "input": scene.narration,
-            "voice": if request.voice.trim().is_empty() {
-                if uses_audio_cpp { "serena" } else { "alloy" }
-            } else {
-                request.voice.trim()
-            }
-        });
-        if !uses_audio_cpp {
-            payload["response_format"] = json!("wav");
-            payload["speed"] = json!(request.rate.clamp(0.5, 2.0));
-        }
-        let mut http_request = client.post(&endpoint).json(&payload);
-        if let Some(secret) = secret.as_ref() {
-            http_request = http_request.bearer_auth(secret);
-        }
-        let response = http_request.send().await.map_err(provider_network_error)?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(format!("TTS provider returned {status}"));
-        }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(provider_network_error)?
-            .to_vec();
+        let bytes = synthesize_speech(
+            &request.provider,
+            secret.as_deref(),
+            &scene.narration,
+            &request.voice,
+            request.rate,
+        )
+        .await?;
         let duration_ms = wav_duration_ms(&bytes)?;
         let asset_id = format!("asset_{}", Uuid::new_v4().simple());
         let (relative, mime_type, _sha256) = crate::storage::persist_generated_audio(
@@ -730,7 +657,52 @@ pub async fn generate_project_cloud_narration(
     })
 }
 
-fn wav_duration_ms(bytes: &[u8]) -> Result<i64, String> {
+/// TTS 传输核心：向音频服务请求一段旁白并返回 WAV 字节。
+///
+/// 命令层与真实服务验收共用这一实现，避免验收路径和生产路径分叉。
+pub(crate) async fn synthesize_speech(
+    provider: &ImageProviderConfig,
+    secret: Option<&str>,
+    text: &str,
+    voice: &str,
+    rate: f32,
+) -> Result<Vec<u8>, String> {
+    let uses_audio_cpp = provider.protocol == AUDIO_CPP_PROTOCOL;
+    let endpoint = format!(
+        "{}{}/audio/speech",
+        provider.base_url.trim_end_matches('/'),
+        if uses_audio_cpp { "/v1" } else { "" }
+    );
+    let mut payload = json!({
+        "model": provider.model,
+        "input": text,
+        "voice": if voice.trim().is_empty() {
+            if uses_audio_cpp { "serena" } else { "alloy" }
+        } else {
+            voice.trim()
+        }
+    });
+    if !uses_audio_cpp {
+        payload["response_format"] = json!("wav");
+        payload["speed"] = json!(rate.clamp(0.5, 2.0));
+    }
+    let mut http_request = http_client()?.post(&endpoint).json(&payload);
+    if let Some(secret) = secret {
+        http_request = http_request.bearer_auth(secret);
+    }
+    let response = http_request.send().await.map_err(provider_network_error)?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("TTS provider returned {status}"));
+    }
+    Ok(response
+        .bytes()
+        .await
+        .map_err(provider_network_error)?
+        .to_vec())
+}
+
+pub(crate) fn wav_duration_ms(bytes: &[u8]) -> Result<i64, String> {
     let reader = hound::WavReader::new(std::io::Cursor::new(bytes))
         .map_err(|error| format!("TTS response is not a valid WAV file: {error}"))?;
     let spec = reader.spec();
@@ -739,6 +711,67 @@ fn wav_duration_ms(bytes: &[u8]) -> Result<i64, String> {
         return Err("TTS response WAV has no audio samples".to_string());
     }
     Ok(duration_ms)
+}
+
+/// ASR 传输核心：multipart 上传音频并解析文本与时间片段。
+///
+/// 命令层与真实服务验收共用这一实现。
+pub(crate) async fn transcribe_audio(
+    provider: &ImageProviderConfig,
+    secret: Option<&str>,
+    filename: &str,
+    audio: &[u8],
+) -> Result<(String, Vec<AsrCue>), String> {
+    let uses_audio_cpp = provider.protocol == AUDIO_CPP_PROTOCOL;
+    let content_type = if audio.starts_with(b"RIFF") {
+        "audio/wav"
+    } else {
+        "audio/mpeg"
+    };
+    let boundary = format!("knowmotion-{}", Uuid::new_v4().simple());
+    let mut body = Vec::new();
+    append_multipart_field(&mut body, &boundary, "model", &provider.model);
+    if !uses_audio_cpp {
+        append_multipart_field(&mut body, &boundary, "response_format", "verbose_json");
+    }
+    append_multipart_file(&mut body, &boundary, "file", filename, content_type, audio);
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    let endpoint = if uses_audio_cpp {
+        format!(
+            "{}/v1/audio/transcriptions/details",
+            provider.base_url.trim_end_matches('/')
+        )
+    } else {
+        format!(
+            "{}/audio/transcriptions",
+            provider.base_url.trim_end_matches('/')
+        )
+    };
+    let mut http_request = http_client()?
+        .post(endpoint)
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body);
+    if let Some(secret) = secret {
+        http_request = http_request.bearer_auth(secret);
+    }
+    let response = http_request.send().await.map_err(provider_network_error)?;
+    let status = response.status();
+    let payload: Value = response
+        .json()
+        .await
+        .map_err(|_| format!("ASR provider returned non-JSON response ({status})"))?;
+    if !status.is_success() {
+        return Err(format!("ASR provider returned {status}"));
+    }
+    let text = payload
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "ASR response has no text".to_string())?
+        .to_string();
+    Ok((text, parse_asr_cues(&payload)))
 }
 
 fn parse_asr_cues(payload: &Value) -> Vec<AsrCue> {
@@ -928,21 +961,9 @@ pub(crate) async fn execute_image_generation(
         }
     }
 
-    let _local_lease = prepare_local_diffusion(&request.provider).await?;
     let started = Instant::now();
-    let (images, reference_mode) = match request.provider.protocol.as_str() {
-        "OpenAI Compatible" | STABLE_DIFFUSION_CPP_PROTOCOL => (
-            // OpenAI Images generations 没有 pixel-level reference 通道；
-            // 参考图已由前端写入锚点提示词，这里如实报告 prompt 模式。
-            generate_openai_images(&request.provider, &prompt, &request.size, count).await?,
-            "prompt",
-        ),
-        other => {
-            return Err(format!(
-                "Provider protocol {other} does not implement Image generation"
-            ))
-        }
-    };
+    let (images, reference_mode) =
+        generate_images_for_provider(&request.provider, &prompt, &request.size, count).await?;
 
     let reference_ids = reference_images
         .iter()
@@ -1347,6 +1368,30 @@ async fn generate_openai_inpaint(
     Err("Image edit provider returned neither b64_json nor url".to_string())
 }
 
+/// 图片生成的传输核心：只接受已实现的协议，并在调用本地扩散服务前
+/// 申请 GPU 租约、启动或复用 `sd-server`。
+///
+/// 命令层、批量队列与真实服务验收共用这一实现。
+pub(crate) async fn generate_images_for_provider(
+    provider: &ImageProviderConfig,
+    prompt: &str,
+    size: &str,
+    count: u8,
+) -> Result<(Vec<Vec<u8>>, &'static str), String> {
+    match provider.protocol.as_str() {
+        "OpenAI Compatible" | STABLE_DIFFUSION_CPP_PROTOCOL => {
+            // OpenAI Images generations 没有 pixel-level reference 通道；
+            // 参考图已由前端写入锚点提示词，这里如实报告 prompt 模式。
+            let _local_lease = prepare_local_diffusion(provider).await?;
+            let images = generate_openai_images(provider, prompt, size, count).await?;
+            Ok((images, "prompt"))
+        }
+        other => Err(format!(
+            "Provider protocol {other} does not implement Image generation"
+        )),
+    }
+}
+
 async fn generate_openai_images(
     provider: &ImageProviderConfig,
     prompt: &str,
@@ -1509,7 +1554,7 @@ fn chunk_knowledge(texts: &[String]) -> Vec<String> {
     chunks
 }
 
-async fn request_embeddings(
+pub(crate) async fn request_embeddings(
     provider: &ImageProviderConfig,
     texts: &[String],
 ) -> Result<Vec<Vec<f32>>, String> {
@@ -1536,7 +1581,14 @@ async fn request_embeddings(
     payload
         .get("data")
         .and_then(Value::as_array)
-        .ok_or_else(|| "Embedding response has no data".to_string())?
+        .ok_or_else(|| {
+            // 本地 llama.cpp 在缺少 `/v1` 前缀时会返回 legacy 数组形态，
+            // 这里把实际结构带回调用方，避免只看到一句「没有 data」。
+            format!(
+                "Embedding response has no data array; base URL must point at the versioned endpoint (got {})",
+                limit(&payload.to_string())
+            )
+        })?
         .iter()
         .map(|item| {
             item.get("embedding")
@@ -1554,7 +1606,7 @@ async fn request_embeddings(
         .collect()
 }
 
-fn cosine_similarity(left: &[f32], right: &[f32]) -> Option<f64> {
+pub(crate) fn cosine_similarity(left: &[f32], right: &[f32]) -> Option<f64> {
     if left.len() != right.len() || left.is_empty() {
         return None;
     }
