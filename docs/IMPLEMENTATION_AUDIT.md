@@ -313,7 +313,7 @@
 - 通用导入流程不接受任意跨项目 URL；跨项目复制仅允许出现在显式的“复制项目”流程。
 - 增加 `..`、绝对路径、UNC 路径和符号链接回归测试。
 
-### 4.3 P1：远程资源校验存在 DNS 与重定向绕过
+### 4.3 P1：远程资源校验存在 DNS 与重定向绕过（已修复）
 
 `src-tauri/src/capabilities.rs` 的 `validate_public_url` 和 `download_image` 只拒绝字面写的 `localhost` 或私有 IP，没有解析 DNS。因此 `foo.localhost`、`127.0.0.1.nip.io` 或解析到内网地址的域名仍可能通过校验。
 
@@ -326,6 +326,8 @@
 - 禁用自动重定向，逐跳校验协议、主机、DNS 和 IP。
 - 统一限制响应大小与 Content-Type。
 - 增加公网域名解析到回环、私网和链路本地地址的测试。
+
+修复状态：新增 `src-tauri/src/public_url.rs`，研究网页和图片下载共用安全抓取器。解析全部 A/AAAA 地址并拒绝任一非公网结果，使用 `resolve_to_addrs` 固定已验证地址，禁用代理和自动重定向。每个重定向跳重新执行 URL/DNS/IP 校验，限制 5 跳并检测循环；HTTPS→HTTP 降级被拒绝。响应按流读取并限制 5 MiB/25 MiB，研究正文限制可提取的 Content-Type。自动化测试覆盖 IPv4/IPv6 特殊网段、IPv4 映射/兼容形式、私网混合 DNS 结果、相对重定向、凭据 URL 和协议降级。
 
 ### 4.4 P2：本地运行时“已安装”不验证文件完整性
 
@@ -398,7 +400,6 @@ manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对�
 - Authenticode 签名、时间戳和 signed updater。
 - 真实外部 LLM/Image/TTS/ASR/Embedding 服务端到端验收。
 - 像素级角色身份验证（人脸/CLIP 相似度）与 ControlNet/IP-Adapter 角色锁。
-- 完整的公网 URL DNS/IP/重定向安全解析器。
 
 ## 7. 与架构文档不一致的关键项
 
@@ -453,10 +454,9 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 
 1. 修复局部重绘遮罩方向，并增加真实 Canvas alpha 像素测试及两条图片通道验收。
 2. 修复跨项目素材来源的路径校验，禁止导入包触发项目目录外文件复制。
-3. 统一实现 DNS/IP/重定向安全校验，覆盖网页抓取和 Provider 图片下载。
-4. 使用实际 LLM Provider 完成一次 Research → Quality 全流程验收。
-5. 使用真实 Image/TTS/ASR/Embedding 服务完成各能力 smoke test。
-6. 配置 Authenticode、签名 updater，并重新执行干净 Windows VM 安装/卸载/离线渲染验收。
+3. 使用实际 LLM Provider 完成一次 Research → Quality 全流程验收。
+4. 使用真实 Image/TTS/ASR/Embedding 服务完成各能力 smoke test。
+5. 配置 Authenticode、签名 updater，并重新执行干净 Windows VM 安装/卸载/离线渲染验收。
 
 ### P1：可靠性与本地模型闭环
 

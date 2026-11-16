@@ -25,6 +25,7 @@ AI-powered knowledge animation studio. 用户从一个知识主题开始，在�
 - 结构化 JSONL 日志、5 MiB 轮转、7 份历史、30 天保留和统一 API Key/Authorization 脱敏。
 - 构建时打包固定 Node sidecar、Chrome Headless Shell、FFmpeg/FFprobe，并校验 runtime manifest。
 - OpenAI Compatible / stable-diffusion.cpp 图片，audio.cpp 本地 TTS/ASR，OpenAI Compatible TTS/ASR，Embedding/RAG 和网页来源正文抓取。
+- 公网 URL 安全抓取：研究网页与远程图片统一执行 DNS/IP 分类、解析地址固定、逐跳重定向校验、HTTPS 降级阻断、响应大小与内容类型限制。
 - 项目文件锁、素材落盘、缺失扫描、可恢复归档删除及含素材的 ZIP 项目包导入导出。
 - 浏览器预览支持完整项目持久化、SVG 视觉草案、系统语音试听、字幕导出和真实 WebM 视频录制。
 - 桌面版 API Key 不写入 WebView、项目文件或 SQLite，而是保存在系统凭据库。

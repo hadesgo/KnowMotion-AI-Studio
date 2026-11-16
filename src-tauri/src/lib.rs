@@ -7,6 +7,7 @@ mod local_model_scheduler;
 mod local_runtime;
 mod logging;
 mod media;
+mod public_url;
 mod render;
 mod storage;
 mod video;

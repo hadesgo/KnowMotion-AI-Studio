@@ -4,6 +4,7 @@ use crate::{
         acquire_gpu, ensure_audio, ensure_diffusion, is_loopback_base_url, GpuLease,
         LocalRuntimeConfig, Workload,
     },
+    public_url::{fetch_public_http, PublicHttpPolicy},
     storage::persist_generated_image,
     AppState,
 };
@@ -13,7 +14,6 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    net::IpAddr,
     path::Path,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -23,8 +23,27 @@ use uuid::Uuid;
 
 const MAX_REFERENCE_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_REFERENCE_IMAGES: usize = 3;
+const MAX_RESEARCH_SOURCE_BYTES: usize = 5 * 1024 * 1024;
+const MAX_DOWNLOADED_IMAGE_BYTES: usize = 25 * 1024 * 1024;
 const AUDIO_CPP_PROTOCOL: &str = "audio.cpp";
 const STABLE_DIFFUSION_CPP_PROTOCOL: &str = "stable-diffusion.cpp";
+const RESEARCH_CONTENT_TYPES: &[&str] = &[
+    "text/html",
+    "application/xhtml+xml",
+    "text/plain",
+];
+const RESEARCH_HTTP_POLICY: PublicHttpPolicy = PublicHttpPolicy {
+    max_bytes: MAX_RESEARCH_SOURCE_BYTES,
+    max_redirects: 5,
+    timeout: Duration::from_secs(20),
+    allowed_content_types: RESEARCH_CONTENT_TYPES,
+};
+const IMAGE_HTTP_POLICY: PublicHttpPolicy = PublicHttpPolicy {
+    max_bytes: MAX_DOWNLOADED_IMAGE_BYTES,
+    max_redirects: 5,
+    timeout: Duration::from_secs(60),
+    allowed_content_types: &[],
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -513,37 +532,15 @@ pub async fn search_project_knowledge(
 pub async fn fetch_research_source(
     request: ResearchFetchRequest,
 ) -> Result<ResearchFetchResult, String> {
-    let url = reqwest::Url::parse(&request.url)
-        .map_err(|error| format!("Invalid research URL: {error}"))?;
-    validate_public_url(&url)?;
-    let client = Client::builder()
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(60))
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() >= 5 || validate_public_url(attempt.url()).is_err() {
-                attempt.stop()
-            } else {
-                attempt.follow()
-            }
-        }))
-        .user_agent("KnowMotion-AI-Studio/0.1")
-        .build()
-        .map_err(|error| error.to_string())?;
-    let response = client
-        .get(url.clone())
-        .send()
-        .await
-        .map_err(provider_network_error)?;
-    if !response.status().is_success() {
-        return Err(format!("Research source returned {}", response.status()));
-    }
-    if response.content_length().unwrap_or(0) > 5 * 1024 * 1024 {
-        return Err("Research source exceeds the 5 MB text limit".to_string());
-    }
-    let bytes = response.bytes().await.map_err(provider_network_error)?;
-    if bytes.len() > 5 * 1024 * 1024 {
-        return Err("Research source exceeds the 5 MB text limit".to_string());
-    }
+    let fetched = tokio::time::timeout(
+        Duration::from_secs(60),
+        fetch_public_http(&request.url, RESEARCH_HTTP_POLICY),
+    )
+    .await
+    .map_err(|_| "Research source request timed out".to_string())?
+    .map_err(|error| format!("Research source rejected: {error}"))?;
+    let url = fetched.final_url;
+    let bytes = fetched.bytes;
     let html = String::from_utf8_lossy(&bytes);
     let title = extract_tag_text(&html, "title")
         .filter(|value| !value.is_empty())
@@ -559,7 +556,8 @@ pub async fn fetch_research_source(
         Some(json!({
             "host": url.host_str(),
             "bytes": bytes.len(),
-            "extractedCharacters": text.chars().count()
+            "extractedCharacters": text.chars().count(),
+            "redirects": fetched.redirects
         })),
     );
     Ok(ResearchFetchResult {
@@ -1344,7 +1342,7 @@ async fn generate_openai_inpaint(
             .map_err(|error| format!("Invalid edited image base64: {error}"));
     }
     if let Some(url) = item.get("url").and_then(Value::as_str) {
-        return download_image(&client, url).await;
+        return download_image(url).await;
     }
     Err("Image edit provider returned neither b64_json nor url".to_string())
 }
@@ -1406,7 +1404,7 @@ async fn generate_openai_images(
                     .map_err(|error| format!("Invalid image base64: {error}"))?,
             );
         } else if let Some(url) = item.get("url").and_then(Value::as_str) {
-            images.push(download_image(&client, url).await?);
+            images.push(download_image(url).await?);
         }
     }
     if images.is_empty() {
@@ -1415,41 +1413,15 @@ async fn generate_openai_images(
     Ok(images)
 }
 
-async fn download_image(client: &Client, url: &str) -> Result<Vec<u8>, String> {
-    let parsed = reqwest::Url::parse(url).map_err(|error| format!("Invalid image URL: {error}"))?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "Image URL has no host".to_string())?;
-    if host.eq_ignore_ascii_case("localhost") || host.parse::<IpAddr>().is_ok_and(is_disallowed_ip)
-    {
-        return Err("Image URL resolves to a disallowed local/private host".to_string());
-    }
-    let response = client
-        .get(parsed)
-        .send()
-        .await
-        .map_err(provider_network_error)?;
-    if !response.status().is_success() {
-        return Err(format!("Image download failed with {}", response.status()));
-    }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(provider_network_error)?
-        .to_vec();
-    if bytes.len() > 25 * 1024 * 1024 {
-        return Err("Downloaded image exceeds 25 MB".to_string());
-    }
-    Ok(bytes)
-}
-
-fn is_disallowed_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ip) => {
-            ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified()
-        }
-        IpAddr::V6(ip) => ip.is_loopback() || ip.is_unspecified(),
-    }
+async fn download_image(url: &str) -> Result<Vec<u8>, String> {
+    let fetched = tokio::time::timeout(
+        Duration::from_secs(120),
+        fetch_public_http(url, IMAGE_HTTP_POLICY),
+    )
+    .await
+    .map_err(|_| "Image download timed out".to_string())?
+    .map_err(|error| format!("Image download rejected: {error}"))?;
+    Ok(fetched.bytes)
 }
 
 fn http_client() -> Result<Client, String> {
@@ -1596,20 +1568,6 @@ fn cosine_similarity(left: &[f32], right: &[f32]) -> Option<f64> {
     }
     let denominator = left_norm.sqrt() * right_norm.sqrt();
     (denominator > 0.0).then_some(dot / denominator)
-}
-
-fn validate_public_url(url: &reqwest::Url) -> Result<(), String> {
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err("Research sources must use HTTP or HTTPS".to_string());
-    }
-    let host = url
-        .host_str()
-        .ok_or_else(|| "Research URL has no host".to_string())?;
-    if host.eq_ignore_ascii_case("localhost") || host.parse::<IpAddr>().is_ok_and(is_disallowed_ip)
-    {
-        return Err("Research URL resolves to a local/private host".to_string());
-    }
-    Ok(())
 }
 
 fn extract_tag_text(html: &str, tag: &str) -> Option<String> {
