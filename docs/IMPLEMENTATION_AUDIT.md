@@ -1,13 +1,13 @@
 # KnowMotion AI Studio 实现审计
 
-> 审计更新：2026-11-13（第二轮实施后）
+> 审计更新：2026-11-16（第三轮重新审计，基线提交 `c327fd7`）
 >
-> 基线：原始《项目开发总提示词》、`docs/ARCHITECTURE.md`、`docs/AGENT_WORKFLOW.md`、`docs/REMOTION_ENGINE.md`、`docs/MVP_ACCEPTANCE.md`
+> 基线：原始《项目开发总提示词》、`docs/ARCHITECTURE.md`、`docs/AGENT_WORKFLOW.md`、`docs/REMOTION_ENGINE.md`、`docs/MVP_ACCEPTANCE.md`、`docs/LOCAL_MODEL_RUNTIMES.md` 及最新运行时代码。
 > 判定原则：代码、持久化数据、自动化测试或真实产物可证明的，才算已实现；只有 UI、提示词或设计文档的不算。
 
 ## 1. 总体结论
 
-当前应用已经具备一条可运行的知识动画制作主线：
+截至 `c327fd7`，应用已经具备一条可运行的知识动画制作主线：
 
 ```text
 创建项目
@@ -22,27 +22,31 @@
 → SQLite + 项目目录恢复
 ```
 
-第二轮实施已经补齐发布闭环的主要工程能力：
+第二轮实施和后续素材、设定集、视频、本地模型提交已经补齐大部分工程能力：
 
 - SQLite 迁移、`tasks`、`render_jobs`、`usage_records`、`artifact_refs`、`knowledge_chunks` 已接入。
 - 正式渲染改为持久 Job，支持真实 JSONL 进度、取消、重启中断恢复、FFprobe、SHA-256、原子提交和渲染元数据。
 - 构建阶段生成固定 Node sidecar、Chrome Headless Shell、FFmpeg/FFprobe、完整 Remotion 依赖和 `runtime-manifest.json`；Worker 已用随包资源完成真实 smoke render。
-- NSIS 安装包已实际生成；当前仍未做 Authenticode 签名、更新器签名和干净 Windows VM 验收。
+- NSIS 安装包和干净 Windows VM 安装/离线渲染 smoke 已实际执行；当前仍未做 Authenticode 签名、时间戳和 signed updater。
 - 图片生成已支持 OpenAI Compatible 与 stable-diffusion.cpp，TTS、ASR、Embedding/RAG、网页正文抓取已有 Rust 实现。
 - Data URL 素材会落入 `assets/images` 或 `assets/audio`，项目 JSON 成为恢复事实来源；复制、归档删除、缺失扫描和 ZIP 包导入导出已接通。
+- llama.cpp、audio.cpp、stable-diffusion.cpp 已接入按需运行时下载、SHA-256 归档校验及 CUDA/Vulkan 选择；llama.cpp 可由应用实际拉起，audio.cpp 和 stable-diffusion.cpp 仍依赖用户手动启动服务。
 
 仍不能宣称“所有外部服务均已在线验收”：当前没有可用 LLM/图片/TTS/ASR/Embedding 凭据，相关网络路径只有结构和单元测试，没有真实付费/私有服务端到端记录。
+
+**发布判断：不通过。** 基础工程可构建，原有主链路测试基本健康，但第三轮审计发现 3 个 P1 问题：局部重绘遮罩语义相反、跨项目素材复制存在本地文件路径穿越、远程 URL 私网/DNS/重定向校验不完整。修复并完成对应回归测试前，不应将当前版本判定为发布级完成。
 
 ## 2. 阶段完成度
 
 | 阶段 | 状态 | 说明 |
 |---|---|---|
 | Phase 1：Tauri 桌面框架 | 完成 | 窗口、React、Zustand、WebView、SQLite 迁移、项目锁、目录、Provider 配置和 NSIS 构建已接通 |
-| Phase 2：AI 内容创作 | 框架完成，真实调用待验收 | 九个 Agent 和 DAG 已实现；没有执行外部真实 LLM 端到端测试 |
-| Phase 3：素材生成 | 完成核心能力 | 本地 SVG、图片导入、OpenAI Images、stable-diffusion.cpp、文件落盘与清单已实现 |
+| Phase 2：AI 内容创作 | 框架完成，真实调用待验收 | 九个 Agent、DAG 和 GGUF 本地通道已实现；没有执行外部真实 LLM 端到端测试 |
+| Phase 3：素材生成 | 部分完成 | 本地 SVG、图片导入、OpenAI Images、stable-diffusion.cpp、文件落盘与清单已实现；局部重绘遮罩方向存在 P1 缺陷 |
 | Phase 4：Remotion 动画 | 主体完成 | Scene DSL、组件库、Player、单场景和整片预览可用 |
-| Phase 5：音频和渲染 | 完成工程闭环 | SAPI/云端 TTS、ASR、字幕、音乐、持久渲染 Job、离线 sidecar、进度、取消、验证和安装包已实现 |
+| Phase 5：音频和渲染 | 完成工程闭环 | SAPI/OpenAI Compatible/audio.cpp TTS、ASR、字幕、音乐、持久渲染 Job、离线 sidecar、进度、取消、验证和安装包已实现；audio.cpp 与 stable-diffusion.cpp 服务生命周期未托管 |
 | Phase 6：完整 AI 工作流 | 大部分完成 | 审批、局部重跑、自动重试、自然语言场景 Patch、图片/TTS/ASR/RAG/网页正文入口已实现；真实外部服务尚未在线验收 |
+| Phase 7：本地模型运行时 | 部分完成 | 三种 GGUF 类运行时支持按需下载、固定版本和归档校验；正式模型包、服务自动启动、显存租约和空闲卸载仍未闭环 |
 
 ## 3. 已实现
 
@@ -74,9 +78,10 @@
 
 ### 3.3 Provider
 
-- OpenAI Compatible、Anthropic、Gemini、Ollama 四类 LLM HTTP Adapter。
+- OpenAI Compatible、Anthropic、Gemini、Ollama 四类 LLM HTTP Adapter，以及 GGUF/llama.cpp 本地 LLM Adapter。
+- audio.cpp 提供 TTS/ASR，stable-diffusion.cpp 提供图片生成和编辑入口。
 - 网络超时、429/5xx 重试、错误响应脱敏。
-- Provider 连接检测执行真实请求，不是本地假检测。
+- LLM Provider 连接检测执行真实生成请求；audio.cpp/stable-diffusion.cpp 当前主要检测能力端点，不保证指定模型已经加载。
 - 不同 Agent 独立指定 Provider 和模型覆盖。
 - API Key 写入系统 keyring，不写入项目 JSON、SQLite 或日志。
 - 模型路由持久化到 Workflow Run。
@@ -251,14 +256,14 @@
 局部重绘：
 
 - 交互：在图片上直接涂抹遮罩，笔刷 10–140 px、撤销、清空、实时遮罩覆盖率；遮罩坐标按图片归一化，窗口缩放不漂移。
-- 前端生成一张透明底黑区 PNG 遮罩；后端只接受 data URL、PNG、1 B–8 MiB。
+- 前端当前生成透明底、笔迹不透明的 PNG 遮罩；后端只接受 data URL、PNG、1 B–8 MiB。该方向与 OpenAI Images edits 的“透明区域可编辑”约定相反，已列为 P1，参见第 4.1 节。
 - 源图只接受项目内登记的图片素材（project.json → src → 安全相对路径），不接受外部 URL。
 - OpenAI Compatible：复用现有手写 multipart 构造器调用 `/images/edits`（model/prompt/n/size/image/mask），解析 b64_json 或 url，返回 `mode=openai-edits`。
-- stable-diffusion.cpp 与外部 API 都使用 multipart `images/edits`，源图与透明遮罩在内存中构造后提交。
+- stable-diffusion.cpp 与外部 API 都使用 multipart `images/edits`，源图与遮罩在内存中构造后提交；两条通道都需要在遮罩语义修复后重新做真实服务验收。
 - 结果作为新素材写入 `assets/images`，带 `inpaint { sourceAssetId, mode, coverage, seed, anchorLabel, fingerprint }`；不覆盖原图，可继续采用到场景或收进设定集。
 - 浏览器预览无 Provider 时禁用提交；本地 SVG 草案会提示先转为位图，避免把 SVG 发给需要位图的 Provider。
 
-边界：没有遮罩羽化/软边、没有文本自动生成遮罩、没有局部重绘历史对比；队列并发固定为 2，未按 Provider 单独限流；OpenAI 局部重绘的实际可用性仍取决于服务端是否支持 `images/edits`，当前无在线验收记录。
+边界：当前遮罩语义错误；没有遮罩羽化/软边、没有文本自动生成遮罩、没有局部重绘历史对比；队列并发固定为 2，未按 Provider 单独限流；OpenAI 局部重绘的实际可用性仍取决于服务端是否支持 `images/edits`，当前无在线验收记录。
 
 ### 3.15 视频素材图层与视频剪辑
 
@@ -270,20 +275,114 @@
 - 动画编辑器：图层栏新增视频图层按钮与类型图标；检查器可修改素材、入出点、适配、速度、音量、静音；场景预览在入点处取首帧。
 - 边界：没有多轨 NLE、转场/蒙版/关键帧、代理转码和音频波形；视频图层只在场景内编辑，时间轴仍是场景级；mov 是否可解码取决于 Chrome/Remotion，导入时会提示；导入上限 128 MiB、渲染嵌入上限 24 MiB。
 
-## 4. 部分实现
+### 3.16 本地模型运行时
+
+- `ensure_local_runtime` 支持 llama.cpp `b12359`、audio.cpp `v0.9.5` 和 stable-diffusion.cpp `master-1106-532d2c1`。
+- 运行时按需下载到应用数据目录 `runtimes/`，不随 NSIS 安装包分发。
+- 使用 `nvidia-smi` 的驱动版本和计算能力选择 CUDA 12.4 或 Vulkan 归档；CUDA 通道同时下载对应运行库。
+- 每个归档在解压前校验固定 SHA-256，单个归档设置 1 GiB 下载上限；安装使用 staging 目录后重命名。
+- GGUF Provider 通过应用拉起的 `llama-server` 执行推理，使用随机回环端口、临时 API Key、Windows Job Object 和结构化日志。
+- audio.cpp 与 stable-diffusion.cpp 已接入其配置和请求协议，但当前没有自动启动进程、模型自动安装、健康状态机、GPU 互斥、空闲卸载或显存预算执行器。
+- `docs/LOCAL_MODEL_RUNTIMES.md` 明确将跨运行时调度器列为未来工作；当前 UI 的“运行时已就绪”仅表示二进制安装，不代表对应模型或 localhost 服务已就绪。
+
+## 4. 第三轮重新审计发现
+
+### 4.1 P1：局部重绘遮罩语义相反
+
+`src/utils/mask.ts` 中 `buildMaskCanvases` 先清空画布，再把用户笔迹绘制为不透明像素。OpenAI Images edits 约定透明像素表示允许修改区域、不透明像素表示保持不变；当前生成结果会让笔迹区域保持不变，并可能重绘未涂抹区域。
+
+`src-tauri/src/capabilities.rs` 将同一遮罩直接发送给 OpenAI Compatible 和 stable-diffusion.cpp 的 `images/edits` 入口，因此两条通道都可能受影响。现有测试只覆盖覆盖率和包围盒，没有验证 RGBA 语义。
+
+修复要求：
+
+- 先生成不透明背景，再使用 `globalCompositeOperation = "destination-out"` 擦除笔迹；若本地服务采用不同约定，应增加独立 Adapter。
+- 对涂抹点和未涂抹点断言 alpha 值。
+- 修复后分别使用真实 OpenAI Compatible 和 stable-diffusion.cpp 服务验收。
+
+### 4.2 P1：项目素材来源存在路径穿越
+
+`src-tauri/src/storage.rs` 的 `materialize_asset` 从 `kmasset` URL 中取出 `source_project_id` 后，只校验了相对素材路径，没有对项目 ID 做相同白名单校验。`projects_root.join(source_project_id).join(relative)` 可能接受 `..`、盘符绝对路径或 UNC 路径。
+
+攻击路径是导入经过构造的 `.knowmotion.zip`：其 `project.json` 可将素材来源指向项目目录外的已知文件；导入后触发自动保存时，文件可能被复制到新项目并随后包含在导出包中。
+
+修复要求：
+
+- 对 `source_project_id` 使用项目 ID 白名单校验。
+- 规范化源文件与目标文件路径，并确认二者位于允许根目录内。
+- 通用导入流程不接受任意跨项目 URL；跨项目复制仅允许出现在显式的“复制项目”流程。
+- 增加 `..`、绝对路径、UNC 路径和符号链接回归测试。
+
+### 4.3 P1：远程资源校验存在 DNS 与重定向绕过
+
+`src-tauri/src/capabilities.rs` 的 `validate_public_url` 和 `download_image` 只拒绝字面写的 `localhost` 或私有 IP，没有解析 DNS。因此 `foo.localhost`、`127.0.0.1.nip.io` 或解析到内网地址的域名仍可能通过校验。
+
+图片下载使用默认重定向策略，初始 URL 通过校验后可能跳转到私有地址。研究网页抓取虽然对重定向目标再次执行校验，但也只校验字面主机，无法防止 DNS 解析到内网或 DNS rebinding。
+
+修复要求：
+
+- 解析所有 A/AAAA 记录并拒绝非公网地址。
+- 连接时固定已验证的解析结果，避免校验后 DNS rebinding。
+- 禁用自动重定向，逐跳校验协议、主机、DNS 和 IP。
+- 统一限制响应大小与 Content-Type。
+- 增加公网域名解析到回环、私网和链路本地地址的测试。
+
+### 4.4 P2：本地运行时“已安装”不验证文件完整性
+
+`src-tauri/src/local_runtime.rs` 的 `installed_manifest` 只核对 manifest 元数据和 `is_file()`，没有校验可执行文件或周边 DLL。二进制损坏、截断或被替换后，安装入口仍可能返回 `alreadyInstalled=true`，直到实际启动模型时才失败。
+
+manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对应 runtime 根目录内。应在安装时记录关键文件树或关键二进制哈希，并在每次启动前复验；失败时自动进入可恢复重装，而不是继续报告就绪。
+
+### 4.5 P2：视频资源服务缺少 Range 和完整 MIME
+
+视频导入允许 MP4/M4V/WebM/MOV/OGV，但 `kmasset` 协议处理器会一次性读取整个文件，且只映射 MP4 的 MIME。WebM/MOV/OGV 会返回 `application/octet-stream`，同时缺少 `Range`、`206 Partial Content` 和 `Accept-Ranges`。
+
+该实现可能造成 128 MiB 文件的内存峰值，并使视频播放、拖动和重复加载行为不稳定。应增加流式 Range 响应、完整的视频 MIME 映射和缺失文件缓存策略。
+
+### 4.6 P2：修订快照与项目导出持续膨胀
+
+每次项目保存都会在 `revisions/` 下创建毫秒时间戳快照，没有内容去重或清理策略。ZIP 导出会包含全部修订，长期编辑后本地磁盘占用和项目包体积会持续增长。
+
+建议按内容哈希去重，并增加按数量、时间或总容量的保留策略；项目包可以选择只携带最近若干修订。
+
+### 4.7 P2：ZIP 导入缺少资源预算
+
+`import_project_zip` 一次性读取整个包，再把每个条目的数据复制到内存；当前没有压缩包总大小、解压总大小、单文件大小或总条目预算。路径穿越和 CRC 校验已经存在，但异常包仍可能造成高内存占用。
+
+建议在读取前检查元数据，在解压过程中累计限制压缩大小、解压大小和条目数，并在失败时清理 staging 目录。
+
+### 4.8 P3：Rust 质量门禁尚未闭合
+
+本轮执行 `cargo fmt --all -- --check` 失败，`cargo clippy --all-targets -- -D warnings` 报告 6 个错误。当前 CI 主要运行 `cargo test`，没有把格式和严格 Clippy 作为合并门禁。
+
+### 4.9 本轮自动化验证
+
+| 检查 | 结果 | 说明 |
+|---|---|---|
+| `npm run build` | 通过 | 主包约 650 KB，存在大于 500 KB 的分块警告 |
+| `npm run lint` | 通过 | `--max-warnings=0` |
+| 前端单元测试 | 通过 | 23 项通过 |
+| 组件测试 | 通过 | 13 项通过 |
+| `cargo test` | 通过 | 50 项通过，3 项因缺少真实模型或沙箱外 Windows SAPI 环境跳过 |
+| `cargo fmt --check` | 失败 | 存在多处格式差异 |
+| `cargo clippy -- -D warnings` | 失败 | 6 个严格 lint 错误 |
+| 桌面 E2E | 未在本轮执行 | 需要完整 release 构建与 WebDriver 环境 |
+| 真实本地模型服务 | 未在本轮执行 | 需要模型文件、运行时和手动启动的 audio.cpp/stable-diffusion.cpp 服务 |
+
+## 5. 部分实现
 
 | 功能 | 当前状态 | 缺口 |
 |---|---|---|
-| 真实 AI 内容生成 | Agent 和 HTTP Adapter 已完成 | 当前无外部 Key/Ollama，未完成真实模型端到端验收 |
+| 真实 AI 内容生成 | Agent、HTTP Adapter 和 GGUF 本地 Adapter 已完成 | 当前无外部服务凭据，未完成真实外部模型端到端验收；本地 GGUF 实机测试默认忽略 |
 | Research Agent | 来源候选、正文抓取、Embedding 与项目内检索 | 尚无搜索引擎 API、自动引用核验和跨项目知识库；抓取正文仍需人工核验 |
-| 图片生成 | OpenAI Images、stable-diffusion.cpp、上传与 SVG 均可用；设定集锚点和参考图已接入 | 本地与外部生成通道目前都只有 prompt 级参考，没有像素级身份锁 |
+| 图片生成 | OpenAI Images、stable-diffusion.cpp、上传与 SVG 均可用；设定集锚点和参考图已接入 | 局部重绘遮罩语义待修复；本地与外部生成通道目前都只有 prompt 级参考，没有像素级身份锁 |
 | 素材保存 | Data URL 与生成结果会落盘并记录哈希 | 外部远程 URL 尚未下载成本地资产 |
-| TTS | SAPI 与 OpenAI Compatible TTS 可用 | 情绪/角色模板、独立云端 Adapter 和真实服务验收仍缺 |
+| TTS | SAPI、OpenAI Compatible 与 audio.cpp TTS 已接入 | audio.cpp 服务需手动启动；情绪/角色模板和真实服务验收仍缺 |
 | 字幕 | 已知旁白与云端 ASR 听写 | ASR 依赖服务返回 segment；无时间片段时回退按场景均分 |
-| 项目保存 | debounce、项目锁、文档和修订目录已接通 | 仍是项目级状态合并；文档级 revision/expectedRevision 冲突协议未启用 |
+| 项目保存 | debounce、项目锁、文档和修订目录已接通 | 仍是项目级状态合并；修订无去重/保留策略；文档级 revision/expectedRevision 冲突协议未启用 |
 | 项目版本 | Agent 修订与保存快照 | 手动 UI 编辑没有同等全局 undo/redo 栈 |
 | 项目复制 | 本地素材与项目数据可复制 | 数据库工作流/渲染历史不复制到新项目 |
-| 项目导出 | 含素材、渲染和修订的 ZIP 包 | 无独立迁移工具和跨设备自动升级 |
+| 项目导入导出 | 含素材、渲染和修订的 ZIP 包 | 跨项目素材来源边界待加固；ZIP 导入缺少资源预算；无独立迁移工具和跨设备自动升级 |
+| 本地模型运行时 | llama.cpp 可按需安装并启动；三种运行时均支持固定版本下载；CUDA/Vulkan 自动选择已接通 | 安装后完整性复验偏弱；audio.cpp/stable-diffusion.cpp 服务、模型和显存生命周期未托管 |
 | 渲染 | 持久 Job、进度、取消、Windows Job Object、离线 runtime、验证和原子提交 | 尚无跨平台进程树容器；当前发行目标是 Windows |
 | 4K/60 FPS | Composition 与 Renderer 支持参数 | UI 只验证了 1080P；没有 4K/60 实测和资源限制 |
 | 动画组件 | 文本、SVG、图片、图表、视频、Canvas 2D 与确定性 GSAP 已实现 | 视频仅场景内图层，无多轨剪辑、转场、蒙版；渲染嵌入上限 24 MB |
@@ -293,37 +392,43 @@
 | IPC 契约 | Rust/TS 手工定义对应类型 | 没有使用 Specta/Tauri Specta 自动生成 |
 | JSON Schema | 有设计用 Schema 文件 | 与运行时 TS/Rust 模型没有自动生成关系，存在重复定义 |
 
-## 5. 未实现
+## 6. 未实现
 
 - Authenticode 签名、时间戳和 signed updater。
 - 真实外部 LLM/Image/TTS/ASR/Embedding 服务端到端验收。
 - 像素级角色身份验证（人脸/CLIP 相似度）与 ControlNet/IP-Adapter 角色锁。
+- 统一的本地模型调度器、GPU 显存租约、audio.cpp/stable-diffusion.cpp 自动启动和空闲卸载。
+- 完整的公网 URL DNS/IP/重定向安全解析器。
 
-## 6. 与架构文档不一致的关键项
+## 7. 与架构文档不一致的关键项
 
-### 6.1 项目事实来源
+### 7.1 项目事实来源
 
 `load_studio_state` 在读取 SQLite 状态后，会逐个用磁盘 `project.json` 覆盖内存项目并为本地素材生成受限 `kmasset` URL。因此正常重启可以导入外部修改。仍未实现文件监听；应用运行期间的外部修改需要重新加载窗口。
 
-### 6.2 Remotion 运行方式
+### 7.2 Remotion 运行方式
 
 Rust 优先启动应用目录中的固定 `node.exe`，加载打包后的 `resources/renderer`，通过 `scripts/render-worker.ts` 输出 JSONL。开发环境才回退到仓库依赖和系统 Node。安装包已经实际包含该运行目录。
 
-### 6.3 浏览器与 FFmpeg
+### 7.3 浏览器与 FFmpeg
 
 构建阶段复制固定 Chrome Headless Shell、FFmpeg、FFprobe，并写入 runtime manifest 与 SHA-256。渲染服务启动时校验 bundle 内文件；缺少或不匹配会拒绝渲染。Remotion 仍可能在开发机首次准备资源时联网，正式安装包不会在渲染时下载。
 
-### 6.4 SQLite
+### 7.4 SQLite
 
 已实现 `schema_migrations`、`app_state`、`projects`、`providers`、`workflow_runs`、`workflow_steps`、`project_revisions`、`workflow_events`、`provider_calls`、`tasks`、`render_jobs`、`usage_records`、`artifact_refs`、`knowledge_chunks`。
 
 迁移当前使用幂等 schema 事务和版本记录；对外仍是单用户本地应用，没有 schema downgrade。
 
-### 6.5 Schema
+### 7.5 Schema
 
 Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验和 TS 类型共同约束。`docs/schemas/*.json` 仍然只作为设计契约，尚未从 TS/Rust 模型自动生成或直接参与运行时校验。
 
-## 7. 端到端验收对照
+### 7.6 本地模型运行时
+
+架构与 README 已明确本地运行时按需下载，不以安装包分发；`docs/LOCAL_MODEL_RUNTIMES.md` 也已说明 audio.cpp 和 stable-diffusion.cpp 目前需要用户手动启动。代码与这些边界基本一致，但 Models 页面的“运行时已就绪”容易被理解为“模型与服务均已就绪”，需要更精确的状态文案。
+
+## 8. 端到端验收对照
 
 | 验收项 | 状态 | 说明 |
 |---|---|---|
@@ -331,6 +436,9 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 | 创建和保存项目 | 通过 | SQLite、项目目录和 JSON 已验证 |
 | 配置实际 AI Provider | 实现，未在线验收 | 真实 HTTP 路径已完成，缺实际 Key |
 | AI 生成结构化脚本和分镜 | 实现，未在线验收 | Agent 与 Schema 已完成 |
+| 本地 GGUF 模型推理 | 实现，未完成第三轮实机验收 | llama.cpp 启停和缓存已有测试入口，真实模型测试默认忽略 |
+| audio.cpp TTS/ASR | 实现，未完成实机验收 | 协议适配已接通，服务需手动启动 |
+| stable-diffusion.cpp 图片生成/编辑 | 实现，有阻断缺陷 | 请求链路已接通，但局部重绘遮罩语义错误 |
 | 至少三个动画场景预览 | 通过 | 蓝天项目 6 个场景五风格 |
 | 生成真实视频 | 通过 | 60.011 秒 H.264/AAC |
 | 离线 Worker smoke render | 通过 | 随包 Node/Chrome/FFmpeg 输出 966,517 字节 MP4 |
@@ -339,26 +447,31 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 | 重新打开继续编辑 | 通过 | SQLite 与磁盘目录均有数据 |
 | 非模拟渲染进度 | 通过 | Remotion `onProgress` → Worker JSONL → Rust → Tauri event → UI |
 
-## 8. 建议优先级
+## 9. 建议优先级
 
-### P0：形成可发布闭环
+### P0：发布阻断
 
-1. 使用实际 LLM Provider 完成一次 Research → Quality 全流程验收。
-2. 使用真实 Image/TTS/ASR/Embedding 服务完成各能力 smoke test。
-3. 完成 Windows Job Object，替换当前 stdin 取消 + 超时 kill 的近似进程树回收。
-4. 配置 Authenticode、签名 updater 并在干净 Windows VM 执行安装/卸载/离线渲染验收。
+1. 修复局部重绘遮罩方向，并增加真实 Canvas alpha 像素测试及两条图片通道验收。
+2. 修复跨项目素材来源的路径校验，禁止导入包触发项目目录外文件复制。
+3. 统一实现 DNS/IP/重定向安全校验，覆盖网页抓取和 Provider 图片下载。
+4. 使用实际 LLM Provider 完成一次 Research → Quality 全流程验收。
+5. 使用真实 Image/TTS/ASR/Embedding 服务完成各能力 smoke test。
+6. 配置 Authenticode、签名 updater，并重新执行干净 Windows VM 安装/卸载/离线渲染验收。
 
-### P1：完整素材能力
+### P1：可靠性与本地模型闭环
 
-1. 为素材缺失增加“重新生成当前资产”操作。
-2. 在现有设定集之上补 stable-diffusion.cpp 参考图编辑与像素级一致性通道。
-3. 增加遮罩羽化、文本自动选区与重绘历史对比。
-4. 增加 FFmpeg 视频代理转码与多轨时间轴剪辑（转场、蒙版、关键帧）。
-4. 增加云端 TTS 情绪/角色模板。
+1. 为本地运行时建立关键文件哈希、损坏检测和自动修复。
+2. 实现 audio.cpp/stable-diffusion.cpp 的启动、健康状态、模型加载与卸载管理。
+3. 实现 GPU 显存租约、运行时互斥、空闲卸载和 768–1024 MiB 安全余量。
+4. 为素材缺失增加“重新生成当前资产”操作。
+5. 增加遮罩羽化、文本自动选区与重绘历史对比。
+6. 为 `kmasset` 增加视频 Range 和完整 MIME 支持。
 
 ### P2：平台完整性
 
-1. 生成 IPC TypeScript 类型与 JSON Schema，消除手工重复模型。
-2. 扩展桌面 E2E 到审批流、真实媒体任务和取消/重启恢复场景。
-3. 增加发布 CI 日志聚合与远程诊断导出。
-4. 增加发布签名、signed updater 和 SBOM；干净 Windows VM smoke 已实现。
+1. 为修订快照增加内容去重和容量/时间保留策略。
+2. 为 ZIP 导入增加压缩、解压、单文件和条目数预算。
+3. 生成 IPC TypeScript 类型与 JSON Schema，消除手工重复模型。
+4. 扩展桌面 E2E 到审批流、真实媒体任务、本地模型安装失败恢复和取消/重启场景。
+5. 将 `cargo fmt --check`、严格 Clippy 和依赖审计纳入 CI。
+6. 增加发布 CI 日志聚合、远程诊断导出、SBOM 与 signed updater。
