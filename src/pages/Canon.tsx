@@ -18,6 +18,7 @@ import {
 import { useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageHeading, useCurrentProject } from "../components/AppShell";
+import { IdentityPanel } from "../components/IdentityPanel";
 import {
   Button,
   EmptyState,
@@ -362,7 +363,8 @@ export default function Canon() {
           <strong>{report.score}%</strong>
           <p>
             结构一致性评分：{report.consistent}/{report.scenes} 个镜头与当前指纹一致，
-            {report.stale} 个过期、{report.unanchored} 个未绑定锚点。这是锚点覆盖率判定，不是图像相似度。
+            {report.stale} 个过期、{report.unanchored} 个未绑定锚点。这一栏是锚点覆盖率判定；
+            像素级相似度请看角色卡里的身份验证面板与镜头上的 ID 胶囊。
           </p>
           <Progress value={report.score} />
         </div>
@@ -873,6 +875,10 @@ export default function Canon() {
             )}
           </div>
 
+          {selected.kind === "character" && character && (
+            <IdentityPanel project={project} character={character} />
+          )}
+
           <details className="canon-preview">
             <summary>
               <span className="eyebrow">PROMPT PREVIEW</span>
@@ -907,12 +913,29 @@ export default function Canon() {
             </Pill>
           </header>
           <div className="canon-scene-list">
-            {report.entries.map(({ scene, index, anchors, evaluation }) => (
+            {report.entries.map(({ scene, index, anchors, evaluation }) => {
+              const verification = project.assets.find(
+                (asset) => asset.id === scene.assetId,
+              )?.identity;
+              return (
               <article key={scene.id} className="canon-scene">
                 <header>
                   <span>{String(index + 1).padStart(2, "0")}</span>
                   <strong>{scene.title}</strong>
                   <Pill tone={toneFor(evaluation)}>{shortStatus(evaluation)}</Pill>
+                  {verification ? (
+                    <Pill
+                      tone={
+                        verification.verdict === "pass"
+                          ? "success"
+                          : verification.verdict === "warn"
+                            ? "warning"
+                            : "danger"
+                      }
+                    >
+                      ID {Math.round(verification.score * 100)}%
+                    </Pill>
+                  ) : null}
                 </header>
                 <p>{evaluation.detail}</p>
                 <div className="canon-scene__chips">
@@ -969,7 +992,8 @@ export default function Canon() {
                   </button>
                 </footer>
               </article>
-            ))}
+              );
+            })}
           </div>
         </aside>
       </div>

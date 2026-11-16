@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Asset, ProviderProfile, ReferenceRole } from "../types";
+import type { ImageConditioningInput } from "./characterLock";
 import { isTauriDesktop } from "./desktop";
 
 export interface ImageReferenceInput {
@@ -16,10 +17,15 @@ export interface ImageGenerationResult {
   providerId: string;
   model: string;
   elapsedMs: number;
-  referenceMode: "prompt" | "prompt+img2img";
+  referenceMode: "prompt" | "prompt+img2img" | "prompt+ip-adapter" | "prompt+controlnet";
   referenceCount: number;
   seed: number;
   anchorLabel: string;
+  /** 后端实际生效的像素条件通道。 */
+  conditioning: string;
+  /** 前端请求的条件通道，用于对照是否发生降级。 */
+  requestedConditioning: string;
+  degradations: string[];
 }
 
 export interface ImageGenerationRequestInput {
@@ -35,6 +41,8 @@ export interface ImageGenerationRequestInput {
   references?: ImageReferenceInput[];
   anchorLabel?: string;
   consistencyFingerprint?: string;
+  /** 角色锁：参考图进入生成管的像素条件。 */
+  conditioning?: ImageConditioningInput;
 }
 
 export async function generateProjectImages(

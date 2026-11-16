@@ -40,13 +40,18 @@ import {
 } from "../components/ui";
 import { useStudioStore } from "../store/studio";
 import { useImageJobs } from "../hooks/useImageJobs";
-import type { Asset, ReferenceRole } from "../types";
+import type { Asset, ConsistencyStamp, ReferenceRole } from "../types";
 import { createVisualDraftSvg, formatBytes, makeId, nowIso } from "../utils";
 import { isTauriDesktop } from "../services/desktop";
 import {
   generateProjectImages,
   type ImageReferenceInput,
 } from "../services/capabilities";
+import {
+  conditioningPayload,
+  planConditioning,
+} from "../services/characterLock";
+import { describeConditioning } from "../services/imageRequests";
 import {
   composeAnchoredPrompt,
   createConsistencyStamp,
@@ -58,6 +63,13 @@ import {
 import "./ImageAssets.css";
 
 const styles = ["编辑部极简", "电影感纪录片", "复古科学杂志", "未来主义数据"];
+
+const CONDITIONING_LABEL: Record<string, string> = {
+  prompt: "文字锚点",
+  "prompt+img2img": "参考图参与 img2img",
+  "prompt+ip-adapter": "IP-Adapter 参考注入",
+  "prompt+controlnet": "ControlNet 结构条件",
+};
 
 export default function ImageAssets() {
   const project = useCurrentProject();
@@ -153,7 +165,7 @@ export default function ImageAssets() {
       : [];
     const withStamp = (
       asset: Asset,
-      conditioning: "prompt" | "prompt+img2img",
+      conditioning: ConsistencyStamp["conditioning"],
     ): Asset =>
       anchorContext
         ? {
@@ -169,6 +181,9 @@ export default function ImageAssets() {
     setGenerating(true);
     setProgress(8);
     if (imageProvider && isTauriDesktop) {
+      const conditioningPlan = useAnchors
+        ? planConditioning(project, scene, imageProvider)
+        : null;
       try {
         setProgress(18);
         const result = await generateProjectImages({
@@ -189,6 +204,9 @@ export default function ImageAssets() {
           references,
           anchorLabel: anchorContext?.label ?? "",
           consistencyFingerprint: anchorContext?.fingerprint ?? "",
+          conditioning: conditioningPlan
+            ? conditioningPayload(conditioningPlan)
+            : undefined,
         });
         result.assets.forEach((asset) =>
           addAsset(project.id, withStamp(asset, result.referenceMode)),
@@ -196,9 +214,13 @@ export default function ImageAssets() {
         setSelectedAssetId(result.assets[0]?.id ?? "");
         setProgress(100);
         const conditioningNote = anchorContext
-          ? result.referenceMode === "prompt+img2img"
-            ? `锚点「${result.anchorLabel || anchorContext.label}」· ${result.referenceCount} 张参考图参与 img2img · 种子 ${result.seed}`
-            : `锚点「${result.anchorLabel || anchorContext.label}」· 参考图仅以文字锚点传递 · 种子 ${result.seed}`
+          ? `${
+              conditioningPlan
+                ? describeConditioning(conditioningPlan)
+                : result.conditioning
+            } · 锚点「${result.anchorLabel || anchorContext.label}」· 种子 ${result.seed}${
+              result.degradations.length ? ` · ${result.degradations[0]}` : ""
+            }`
           : "未启用一致性锚点";
         pushToast({
           type: "success",
@@ -749,13 +771,20 @@ export default function ImageAssets() {
                     <strong>{selectedAsset.consistency.seed}</strong>
                   </div>
                 )}
+                {selectedAsset.identity && (
+                  <div>
+                    <span>身份相似度</span>
+                    <strong>
+                      {Math.round(selectedAsset.identity.score * 100)}% ·{" "}
+                      {selectedAsset.identity.characterName ?? "角色"}
+                    </strong>
+                  </div>
+                )}
               </div>
               {selectedAsset.consistency && (
                 <p className="asset-inspector__fingerprint">
                   指纹 <code>{selectedAsset.consistency.fingerprint}</code>
-                  {selectedAsset.consistency.conditioning === "prompt+img2img"
-                    ? " · 参考图参与 img2img"
-                    : " · 文字锚点"}
+                  {` · ${CONDITIONING_LABEL[selectedAsset.consistency.conditioning] ?? "文字锚点"}`}
                 </p>
               )}
               <Button

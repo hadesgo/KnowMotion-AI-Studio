@@ -633,6 +633,8 @@ fn serve_project_asset(
     tauri::http::Response::builder()
         .status(tauri::http::StatusCode::OK)
         .header(tauri::http::header::CONTENT_TYPE, mime)
+        // 身份验证需要在 canvas 里读取像素：显式允许跨源读取，避免画布被标记为 tainted。
+        .header(tauri::http::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .header(
             tauri::http::header::CACHE_CONTROL,
             "private, max-age=31536000, immutable",

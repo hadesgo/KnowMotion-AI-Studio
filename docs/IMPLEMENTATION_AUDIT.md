@@ -1,6 +1,6 @@
 # KnowMotion AI Studio 实现审计
 
-> 审计更新：2026-11-16（第三轮重新审计 + 第四轮真实服务验收，基线提交 `c327fd7`）
+> 审计更新：2026-11-16（第三轮重新审计 + 第四轮真实服务验收，基线提交 `c327fd7`；第五轮补充像素级身份验证与角色锁，基线提交 `9df7669`）
 >
 > 基线：原始《项目开发总提示词》、`docs/ARCHITECTURE.md`、`docs/AGENT_WORKFLOW.md`、`docs/REMOTION_ENGINE.md`、`docs/MVP_ACCEPTANCE.md`、`docs/LOCAL_MODEL_RUNTIMES.md` 及最新运行时代码。
 > 判定原则：代码、持久化数据、自动化测试或真实产物可证明的，才算已实现；只有 UI、提示词或设计文档的不算。
@@ -238,10 +238,10 @@
 - 图片素材页接入：按当前镜头锚点组装提示词、负向词和种子后生成；结果带指纹入库；已有图片可通过“收进设定集”转为角色/场景/风格参考图；锚点变化时在画廊顶部显示“素材已过期”。
 - 后端 `generate_project_images` 扩展 `negativePrompt / seed / references / anchorLabel / consistencyFingerprint`：
   - 参考图只接受项目内素材或 data URL，单张 ≤8 MiB、最多 3 张，读取后做文件头 MIME 校验。
-  - 本地图片通过 stable-diffusion.cpp 的 OpenAI 风格生成接口执行；参考图信息通过锚点提示词和一致性指纹传递，并如实返回 `referenceMode=prompt`。
+  - 本地图片通过 stable-diffusion.cpp 生成；自第 3.18 节起，参考图可经 ControlNet/IP-Adapter/img2img 进入采样，`referenceMode` 记录实际生效的通道。
   - OpenAI Compatible 通道没有像素级参考入口，参考图只通过锚点提示词传递，如实返回 `referenceMode=prompt`。
   - 参考图上传失败会降级为纯提示词条件并写警告日志，`referenceMode` 反映实际执行的路径。
-- 明确的边界：没有接入人脸识别、CLIP 或任何图像相似度打分；stable-diffusion.cpp 当前只使用生成接口，参考图一致性由提示词、种子和结构指纹共同保证，而不是像素级身份验证。
+- 明确的边界：`consistencyReport` 是结构判定；像素级身份验证由 3.18 的独立引擎承担，两者不要混为一谈。
 
 ### 3.14 批量图片队列与局部重绘
 
@@ -296,6 +296,30 @@
 - `scripts/acceptance/install-local-runtimes.mjs` 按 `local_runtime.rs` 的固定版本与 SHA-256 安装三个运行时，避免验收依赖手工解压。`npm run acceptance:runtimes` 与 `npm run acceptance:services` 是对外入口。
 - 本轮同时修掉一个真实缺陷：固定版本 CUDA 12.4 归档无法为 Blackwell（计算能力 10.x/12.x）生成 kernel，原 `cuda_available()` 只校验下限会在 RTX 50 系上选中不可用后端；现在按计算能力上限选择 Vulkan，并补了 `cuda_asset_selection_excludes_blackwell` 测试。
 - 明确的边界：本地 Embedding 服务仍由验收脚本拉起，调度器没有托管这一类工作负载；ASR 无时间片段（模型只返回文本与推理耗时）；局部重绘两条通道和九 Agent 全流程不在本轮范围内。
+
+### 3.18 像素级身份验证与角色锁
+
+- 像素引擎 `src/services/identity.ts`（纯函数，不依赖 DOM、模型或网络）：
+  - 任意尺寸 RGBA 缓冲先按面积平均重采样到 64×64 工作网格。
+  - 四组独立签名：8×8 单元 × 8 方向的梯度方向直方图（逐单元 L2 + 截断）、8×8 单元平均亮度（零均值单位方差）、4×4×4 RGB 直方图、256 位感知哈希（16×16 块均值中位数阈值）。
+  - 人脸区域：肤色 RGB 规则与 YCbCr 规则同时成立才算皮肤，按行/列投影取外接框并校验面积与长宽比；框内取 4×4 单元 × 8 方向梯度描述子 + 皮肤平均 RGB。没有检出人脸时退回画面中心 60% 区域的同构描述子。
+  - 相似度：`0.34 结构 + 0.26 人脸（或中心）+ 0.22 颜色 + 0.18 感知哈希`，各项先做线性校准再截断；判定阈值 `pass ≥ 0.70`、`warn ≥ 0.50`。
+  - 多参考图合并：向量平均后重新归一化，感知哈希按位多数表决，得到角色质心；`signatureConsensus` 用两两比较暴露“参考图互相都不像”。
+- 取像素与流水线 `src/services/identityPipeline.ts`：`kmasset` 素材以 `crossOrigin=anonymous` 载入 canvas，边长按 256 上限等比缩放后 `getImageData`；按 src 缓存签名。`buildCharacterIdentity` 生成质心，`verifyProjectIdentities` 逐镜头把素材签名与出场角色质心比较、取最高分，结果写入 `asset.identity`（分数、分项、是否检出人脸、角色、参考样本数、检查时间）。
+- 角色锁协商 `src/services/characterLock.ts`：`controlnet / ip-adapter / img2img-reference / prompt` 四档，按协议能力协商；权重 `w` 反推强度 `clamp(0.9 - 0.6w, 0.3, 0.85)`（权重越高越贴近参考图）；多角色镜头只把权重最高的角色交给后端并给出警告；降级原因进入请求与界面。
+- Rust 侧：
+  - `ImageGenerationRequest` 新增 `conditioning { mode, strength, referenceAssetId, controlType, startAt, endAt, lockCount }`，由 `plan_conditioning` 再按协议校验一次，主参考图按“指定 assetId → 权重/强制参考”挑选，单张 ≤8 MiB 且通过文件头校验。
+  - ControlNet / IP-Adapter 走 stable-diffusion.cpp 原生异步接口 `POST /sdcpp/v1/img_gen`（`control_image + control_strength + control_type` 或 `ip_adapter_image + ip_adapter_strength`），随后轮询 `GET /sdcpp/v1/jobs/{id}`（700 ms 间隔、900 s 上限），结果取 `result.images[].b64_json`。
+  - 运行时缺少原生接口（404/405）时降级到 `POST /sdapi/v1/img2img`（`init_images` + `denoising_strength`），再降级到纯提示词；每一级降级都写入 `degradations` 并进入素材锚点快照与结构化日志。
+  - `kmasset` 协议响应补充 `Access-Control-Allow-Origin: *`，让 canvas 能读取项目素材像素（仍只服务 `assets/` 下的项目内文件）。
+- 界面：设定集角色卡新增「像素级身份验证与角色锁」面板（建立/重建指纹、验证全部镜头、参考一致度、逐镜头分数与分项、锁模式/控制图类型/主参考图/权重/启停、降级与警告），镜头列表直接显示 `ID xx%` 胶囊。
+- 验证：`tests/identity.test.ts` 9 项（同一图 1.0、轻微位移仍通过、不同构图/纯色/条纹判不一致、人脸框居中、质心与参考一致度、阈值、版本不兼容、退化输入）；`tests/character-lock.test.ts` 8 项；`tests/image-requests.test.ts` 新增 2 项请求级断言；Rust 新增 7 项（参考图缺失降级、协议降级、控制图载荷、IP-Adapter 载荷、尺寸解析、任务图像解码、强度截断）。
+- 明确的边界：
+  - 这是手工设计的视觉描述子，不是训练过的人脸识别网络，也不是 CLIP 语义嵌入；它擅长发现换人/换发型/换配色/换构图这类明显漂移，阈值是经验值而非生物识别置信度。
+  - ControlNet / IP-Adapter 需要运行时预先加载对应模型（control-net / ip-adapter 权重）；未加载时服务会返回错误，应用如实上报，不会静默改档。
+  - 旧版 stable-diffusion.cpp 运行时没有 `/sdcpp/v1/img_gen` 时自动降级为 img2img 参考重绘。
+  - 一个镜头目前只锁一个角色（权重最高者）；多人同框的多角色锁定尚未实现。
+  - 本轮没有在真实 GPU 上实跑 ControlNet/IP-Adapter 采样验收，只做了载荷、协商、降级路径的自动化验证；下一次真实服务验收需要补充该项。
 
 ## 4. 第三轮重新审计发现
 
@@ -388,7 +412,7 @@ manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对�
 |---|---|---|
 | 真实 AI 内容生成 | Agent、HTTP Adapter 和 GGUF 本地 Adapter 已完成 | 当前无外部服务凭据，未完成真实外部模型端到端验收；本地 GGUF 实机测试默认忽略 |
 | Research Agent | 来源候选、正文抓取、Embedding 与项目内检索 | 尚无搜索引擎 API、自动引用核验和跨项目知识库；抓取正文仍需人工核验 |
-| 图片生成 | OpenAI Images、stable-diffusion.cpp、上传与 SVG 均可用；设定集锚点和参考图已接入 | 局部重绘遮罩语义待修复；本地与外部生成通道目前都只有 prompt 级参考，没有像素级身份锁 |
+| 图片生成 | OpenAI Images、stable-diffusion.cpp、上传与 SVG 均可用；设定集锚点和参考图已接入；stable-diffusion.cpp 已接入 ControlNet/IP-Adapter 原生像素条件与 img2img 参考锁定 | 局部重绘遮罩语义待修复；OpenAI Compatible 仍只有 prompt 级参考；ControlNet/IP-Adapter 尚无真实 GPU 采样验收 |
 | 素材保存 | Data URL 与生成结果会落盘并记录哈希 | 外部远程 URL 尚未下载成本地资产 |
 | TTS | SAPI、OpenAI Compatible 与 audio.cpp TTS 已接入 | audio.cpp 支持自动启动和空闲卸载；情绪/角色模板和真实服务验收仍缺 |
 | 字幕 | 已知旁白与云端 ASR 听写 | ASR 依赖服务返回 segment；无时间片段时回退按场景均分 |
@@ -410,7 +434,7 @@ manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对�
 
 - Authenticode 签名、时间戳和 signed updater。
 - 第三方云端 LLM/Image/TTS/ASR/Embedding 服务（OpenAI/Anthropic/Gemini）凭据验收：本地真实服务已完成，云端仍无 Key 记录。
-- 像素级角色身份验证（人脸/CLIP 相似度）与 ControlNet/IP-Adapter 角色锁。
+- CLIP 语义嵌入通道（需要具备图像嵌入能力的 Provider，当前只有手工视觉描述子）、多人同框的多角色同时锁定，以及 ControlNet/IP-Adapter 在真实 GPU 上的采样验收。
 
 ## 7. 与架构文档不一致的关键项
 

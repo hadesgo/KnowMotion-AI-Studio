@@ -1,4 +1,5 @@
 import type { GsapMotionConfig } from "./gsap/gsapMotion";
+import type { IdentitySignature, IdentityVerdict } from "./services/identity";
 
 export type AspectRatio = "16:9" | "9:16" | "1:1";
 export type ProjectStage =
@@ -42,6 +43,62 @@ export interface ResearchSource {
 /** 参考图归属：角色、场景（环境）或全局风格。 */
 export type ReferenceRole = "character" | "location" | "style" | "prop";
 
+/**
+ * 角色锁：把角色参考图真正送进生成管的像素条件。
+ * - ip-adapter：语义参考注入，需要后端声明支持；
+ * - controlnet：结构条件（姿势/深度/线稿），需要后端声明支持；
+ * - img2img-reference：以参考图为初始图重绘，sd.cpp 可直接执行；
+ * - prompt：只用提示词锚点。
+ */
+export type CharacterLockMode =
+  | "ip-adapter"
+  | "controlnet"
+  | "img2img-reference"
+  | "prompt";
+
+export type ControlNetType = "pose" | "depth" | "canny" | "lineart" | "reference";
+
+export interface CharacterLockConfig {
+  enabled: boolean;
+  mode: CharacterLockMode;
+  /** 0–1；同时决定 img2img 去噪强度与参考影响权重。 */
+  weight: number;
+  /** 指定主参考图；留空则取设定卡第一张参考图。 */
+  sourceAssetId?: string;
+  controlType: ControlNetType;
+  /** 条件生效区间（占采样步数比例）。 */
+  startAt: number;
+  endAt: number;
+}
+
+/** 角色参考图合成出的身份质心。 */
+export interface CharacterIdentityProfile {
+  version: "identity-v1";
+  signature: IdentitySignature;
+  sampleAssetIds: string[];
+  /** 参考图两两之间的一致度；低值说明参考图本身互相不像。 */
+  consensus: number;
+  builtAt: string;
+}
+
+export interface IdentityVerification {
+  version: "identity-v1";
+  score: number;
+  verdict: IdentityVerdict;
+  components: {
+    pixel: number;
+    structure: number;
+    color: number;
+    face: number;
+  };
+  faceDetected: boolean;
+  characterId?: string;
+  characterName?: string;
+  refSamples: number;
+  checkedAt: string;
+  method: "pixel";
+}
+
 export interface CharacterProfile {
   id: string;
   name: string;
@@ -54,6 +111,10 @@ export interface CharacterProfile {
   seed?: number;
   referenceAssetIds: string[];
   locked: boolean;
+  /** 像素级身份质心；由参考图建立。 */
+  identity?: CharacterIdentityProfile;
+  /** 角色锁：参考图进入生成管的方式。 */
+  lock?: CharacterLockConfig;
   createdAt: string;
   updatedAt: string;
 }
@@ -169,7 +230,11 @@ export interface ConsistencyStamp {
   prompt: string;
   negativePrompt: string;
   referenceAssetIds: string[];
-  conditioning: "prompt" | "prompt+img2img";
+  conditioning:
+    | "prompt"
+    | "prompt+img2img"
+    | "prompt+ip-adapter"
+    | "prompt+controlnet";
   generatedAt: string;
 }
 
@@ -194,6 +259,8 @@ export interface Asset {
   consistency?: ConsistencyStamp;
   /** 局部重绘来源与遮罩覆盖率。 */
   inpaint?: InpaintMeta;
+  /** 与该镜头绑定角色的像素级身份验证结果。 */
+  identity?: IdentityVerification;
 }
 
 export type ImageJobStatus =

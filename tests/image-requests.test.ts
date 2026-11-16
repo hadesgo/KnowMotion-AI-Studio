@@ -104,3 +104,38 @@ test("scene without anchors still produces a valid request", () => {
   assert.equal(request.consistencyFingerprint, "");
   assert.equal(request.anchorLabel, "");
 });
+
+test("capable providers receive a pixel conditioning payload", () => {
+  const project = anchoredProject();
+  const request = buildAnchoredImageRequest({
+    project,
+    scene: project.scenes[0],
+    provider,
+    style: "",
+    size: "1024x1024",
+    count: 1,
+    useAnchors: true,
+  });
+
+  assert.equal(request.conditioning?.mode, "img2img-reference");
+  assert.equal(request.conditioning?.referenceAssetId, "asset_ref_lin");
+  assert.equal(request.conditioning?.lockCount, 1);
+  assert.ok((request.conditioning?.strength ?? 0) > 0);
+});
+
+test("prompt-only providers omit the conditioning payload", () => {
+  const project = anchoredProject();
+  const request = buildAnchoredImageRequest({
+    project,
+    scene: project.scenes[0],
+    provider: { ...provider, protocol: "OpenAI Compatible" },
+    style: "",
+    size: "1024x1024",
+    count: 1,
+    useAnchors: true,
+  });
+
+  assert.equal(request.conditioning, undefined);
+  // 参考图仍然随请求发出，只是不再作为像素条件。
+  assert.equal(request.references?.length, 1);
+});

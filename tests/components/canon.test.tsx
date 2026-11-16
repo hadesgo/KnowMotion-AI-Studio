@@ -62,6 +62,15 @@ describe("Canon setting workspace", () => {
     expect((await screen.findAllByText("角色 2")).length).toBeGreaterThan(0);
   });
 
+
+  it("shows the identity panel and blocks fingerprints without references", async () => {
+    const project = useStudioStore.getState().projects[0];
+    renderCanon(project.id);
+
+    expect(await screen.findByText("像素级身份验证与角色锁")).toBeVisible();
+    expect(screen.getByRole("button", { name: "建立身份指纹" })).toBeDisabled();
+  });
+
   it("adds a generated reference draft to the selected character", async () => {
     const user = userEvent.setup();
     const project = useStudioStore.getState().projects[0];

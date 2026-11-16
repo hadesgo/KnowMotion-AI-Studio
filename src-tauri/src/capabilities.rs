@@ -23,6 +23,9 @@ use uuid::Uuid;
 
 const MAX_REFERENCE_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_REFERENCE_IMAGES: usize = 3;
+/// stable-diffusion.cpp 原生任务是异步的；轮询上限按大模型在消费级 GPU 上的耗时留足余量。
+const SD_CPP_JOB_TIMEOUT: Duration = Duration::from_secs(900);
+const SD_CPP_JOB_POLL_INTERVAL: Duration = Duration::from_millis(700);
 const MAX_RESEARCH_SOURCE_BYTES: usize = 5 * 1024 * 1024;
 const MAX_DOWNLOADED_IMAGE_BYTES: usize = 25 * 1024 * 1024;
 const AUDIO_CPP_PROTOCOL: &str = "audio.cpp";
@@ -79,6 +82,27 @@ pub struct ImageReferenceInput {
     pub source: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageConditioningInput {
+    /// prompt | img2img-reference | ip-adapter | controlnet
+    #[serde(default)]
+    pub mode: String,
+    /// 0–1：img2img 去噪强度 / ControlNet 与 IP-Adapter 强度。
+    #[serde(default)]
+    pub strength: f32,
+    #[serde(default)]
+    pub reference_asset_id: String,
+    #[serde(default)]
+    pub control_type: String,
+    #[serde(default)]
+    pub start_at: f32,
+    #[serde(default)]
+    pub end_at: f32,
+    #[serde(default)]
+    pub lock_count: usize,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageGenerationRequest {
@@ -99,6 +123,8 @@ pub struct ImageGenerationRequest {
     pub anchor_label: String,
     #[serde(default)]
     pub consistency_fingerprint: String,
+    #[serde(default)]
+    pub conditioning: Option<ImageConditioningInput>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,6 +138,12 @@ pub struct ImageGenerationResult {
     pub reference_count: usize,
     pub seed: i64,
     pub anchor_label: String,
+    /// 实际生效的像素条件通道。
+    pub conditioning: String,
+    /// 前端请求的条件通道。
+    pub requested_conditioning: String,
+    /// 降级或其他需要注意的原因。
+    pub degradations: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -961,9 +993,25 @@ pub(crate) async fn execute_image_generation(
         }
     }
 
+    let plan = plan_conditioning(
+        &request.provider.protocol,
+        request.conditioning.as_ref(),
+        &reference_images,
+    );
+
     let started = Instant::now();
-    let (images, reference_mode) =
-        generate_images_for_provider(&request.provider, &prompt, &request.size, count).await?;
+    let (images, reference_mode, transport_degradations) = generate_images_with_conditioning(
+        &request.provider,
+        &prompt,
+        &request.negative_prompt,
+        &request.size,
+        count,
+        seed,
+        &plan,
+    )
+    .await?;
+    let mut degradations = plan.degradations.clone();
+    degradations.extend(transport_degradations);
 
     let reference_ids = reference_images
         .iter()
@@ -981,6 +1029,9 @@ pub(crate) async fn execute_image_generation(
             "negativePrompt": request.negative_prompt,
             "referenceAssetIds": reference_ids,
             "conditioning": reference_mode,
+            "requestedConditioning": plan.requested.clone(),
+            "degradations": degradations.clone(),
+            "lockCount": plan.lock_count,
             "generatedAt": Utc::now().to_rfc3339()
         })
     };
@@ -1053,6 +1104,9 @@ pub(crate) async fn execute_image_generation(
                 }))
                 .collect::<Vec<_>>(),
             "referenceMode": reference_mode,
+            "requestedConditioning": plan.requested,
+            "degradations": degradations,
+            "lockCount": plan.lock_count,
             "anchorLabel": request.anchor_label,
             "fingerprint": request.consistency_fingerprint
         })),
@@ -1066,6 +1120,9 @@ pub(crate) async fn execute_image_generation(
         reference_count: reference_images.len(),
         seed,
         anchor_label: request.anchor_label,
+        conditioning: reference_mode.to_string(),
+        requested_conditioning: plan.requested,
+        degradations,
     })
 }
 
@@ -1368,6 +1425,148 @@ async fn generate_openai_inpaint(
     Err("Image edit provider returned neither b64_json nor url".to_string())
 }
 
+/// 角色锁条件计划：前端协商后的结果在 Rust 侧再校验一次协议能力，
+/// 并挑出真正要送进扩散模型的参考图字节。
+#[derive(Debug, Clone)]
+pub(crate) struct ConditionPlan {
+    pub requested: String,
+    pub effective: &'static str,
+    pub strength: f32,
+    pub control_type: String,
+    pub start_at: f32,
+    pub end_at: f32,
+    pub primary_image: Option<Vec<u8>>,
+    pub primary_asset_id: String,
+    pub lock_count: usize,
+    pub degradations: Vec<String>,
+}
+
+impl ConditionPlan {
+    fn prompt_only() -> Self {
+        Self {
+            requested: "prompt".to_string(),
+            effective: "prompt",
+            strength: 0.55,
+            control_type: "reference".to_string(),
+            start_at: 0.0,
+            end_at: 1.0,
+            primary_image: None,
+            primary_asset_id: String::new(),
+            lock_count: 0,
+            degradations: Vec::new(),
+        }
+    }
+}
+
+/// 把前端请求的条件通道对齐到协议真实能力，并挑选主参考图。
+fn plan_conditioning(
+    protocol: &str,
+    input: Option<&ImageConditioningInput>,
+    references: &[(&ImageReferenceInput, Vec<u8>)],
+) -> ConditionPlan {
+    let mut plan = ConditionPlan::prompt_only();
+    let Some(input) = input else {
+        return plan;
+    };
+    plan.requested = normalize_conditioning_mode(&input.mode).to_string();
+    plan.strength = clamp_conditioning_strength(input.strength);
+    plan.control_type = input.control_type.trim().to_ascii_lowercase();
+    plan.start_at = input.start_at.clamp(0.0, 1.0);
+    plan.end_at = input.end_at.clamp(0.0, 1.0);
+    if plan.control_type.is_empty() {
+        plan.control_type = "reference".to_string();
+    }
+    plan.lock_count = input.lock_count;
+
+    let primary = if input.reference_asset_id.trim().is_empty() {
+        references
+            .iter()
+            .max_by(|left, right| {
+                reference_priority(left.0)
+                    .partial_cmp(&reference_priority(right.0))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    } else {
+        references
+            .iter()
+            .find(|(reference, _)| reference.asset_id == input.reference_asset_id)
+            .or_else(|| {
+                references
+                    .iter()
+                    .max_by(|left, right| {
+                        reference_priority(left.0)
+                            .partial_cmp(&reference_priority(right.0))
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+            })
+    };
+    if let Some((reference, bytes)) = primary {
+        plan.primary_asset_id = reference.asset_id.clone();
+        plan.primary_image = Some(bytes.clone());
+    }
+
+    if plan.requested == "prompt" {
+        return plan;
+    }
+    if protocol != STABLE_DIFFUSION_CPP_PROTOCOL {
+        plan.effective = "prompt";
+        plan.degradations.push(format!(
+            "{} 协议没有像素条件通道，{} 已降级为提示词锚点",
+            protocol, plan.requested
+        ));
+        return plan;
+    }
+    if plan.primary_image.is_none() {
+        plan.effective = "prompt";
+        plan.degradations
+            .push("该镜头没有可用的角色参考图，像素条件已降级为提示词锚点".to_string());
+        return plan;
+    }
+    plan.effective = match plan.requested.as_str() {
+        "controlnet" => "prompt+controlnet",
+        "ip-adapter" => "prompt+ip-adapter",
+        _ => "prompt+img2img",
+    };
+    plan
+}
+
+fn normalize_conditioning_mode(mode: &str) -> &str {
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "controlnet" => "controlnet",
+        "ip-adapter" | "ipadapter" | "ip_adapter" => "ip-adapter",
+        "img2img" | "img2img-reference" | "reference" => "img2img-reference",
+        _ => "prompt",
+    }
+}
+
+fn clamp_conditioning_strength(strength: f32) -> f32 {
+    if !strength.is_finite() || strength <= 0.0 {
+        return 0.55;
+    }
+    strength.clamp(0.05, 0.95)
+}
+
+fn reference_priority(reference: &ImageReferenceInput) -> f32 {
+    let role_bonus = if reference.role == "character" { 1.0 } else { 0.0 };
+    role_bonus + reference.weight.clamp(0.0, 1.0)
+}
+
+fn parse_image_size(size: &str) -> (u32, u32) {
+    let parsed = size
+        .split_once(['x', 'X', '*'])
+        .and_then(|(width, height)| {
+            let width = width.trim().parse::<u32>().ok()?;
+            let height = height.trim().parse::<u32>().ok()?;
+            Some((width, height))
+        });
+    match parsed {
+        Some((width, height)) if width >= 64 && height >= 64 && width <= 4096 && height <= 4096 => {
+            (width, height)
+        }
+        _ => (1024, 1024),
+    }
+}
+
 /// 图片生成的传输核心：只接受已实现的协议，并在调用本地扩散服务前
 /// 申请 GPU 租约、启动或复用 `sd-server`。
 ///
@@ -1377,19 +1576,327 @@ pub(crate) async fn generate_images_for_provider(
     prompt: &str,
     size: &str,
     count: u8,
-) -> Result<(Vec<Vec<u8>>, &'static str), String> {
+) -> Result<(Vec<Vec<u8>>, String), String> {
+    let plan = ConditionPlan::prompt_only();
+    let (images, mode, _) =
+        generate_images_with_conditioning(provider, prompt, "", size, count, 0, &plan).await?;
+    Ok((images, mode))
+}
+
+enum NativeFailure {
+    /// 运行时没有原生接口（旧版本），可以安全降级。
+    Unsupported(String),
+    /// 真实生成失败，不能静默降级。
+    Failed(String),
+}
+
+async fn generate_images_with_conditioning(
+    provider: &ImageProviderConfig,
+    prompt: &str,
+    negative_prompt: &str,
+    size: &str,
+    count: u8,
+    seed: i64,
+    plan: &ConditionPlan,
+) -> Result<(Vec<Vec<u8>>, String, Vec<String>), String> {
     match provider.protocol.as_str() {
-        "OpenAI Compatible" | STABLE_DIFFUSION_CPP_PROTOCOL => {
+        "OpenAI Compatible" => {
             // OpenAI Images generations 没有 pixel-level reference 通道；
             // 参考图已由前端写入锚点提示词，这里如实报告 prompt 模式。
-            let _local_lease = prepare_local_diffusion(provider).await?;
             let images = generate_openai_images(provider, prompt, size, count).await?;
-            Ok((images, "prompt"))
+            Ok((images, "prompt".to_string(), Vec::new()))
+        }
+        STABLE_DIFFUSION_CPP_PROTOCOL => {
+            let _local_lease = prepare_local_diffusion(provider).await?;
+            let mut degradations = Vec::new();
+            let mut effective = plan.effective;
+            if matches!(effective, "prompt+controlnet" | "prompt+ip-adapter") {
+                match generate_sd_cpp_native(provider, prompt, negative_prompt, size, count, seed, plan)
+                    .await
+                {
+                    Ok(images) => return Ok((images, effective.to_string(), degradations)),
+                    Err(NativeFailure::Unsupported(reason)) => {
+                        degradations.push(reason);
+                        effective = if plan.primary_image.is_some() {
+                            "prompt+img2img"
+                        } else {
+                            "prompt"
+                        };
+                    }
+                    Err(NativeFailure::Failed(message)) => return Err(message),
+                }
+            }
+            if effective == "prompt+img2img" {
+                let init_image = plan.primary_image.as_deref().ok_or_else(|| {
+                    "Character lock requires a reference image, but none survived validation"
+                        .to_string()
+                })?;
+                let images = generate_sd_cpp_img2img(
+                    provider,
+                    prompt,
+                    negative_prompt,
+                    size,
+                    count,
+                    seed,
+                    plan.strength,
+                    init_image,
+                )
+                .await?;
+                return Ok((images, "prompt+img2img".to_string(), degradations));
+            }
+            let images = generate_openai_images(provider, prompt, size, count).await?;
+            Ok((images, "prompt".to_string(), degradations))
         }
         other => Err(format!(
             "Provider protocol {other} does not implement Image generation"
         )),
     }
+}
+
+/// stable-diffusion.cpp 原生接口：ControlNet / IP-Adapter 条件通道。
+/// 该接口是异步任务制，提交后需要轮询 `/sdcpp/v1/jobs/{id}`。
+async fn generate_sd_cpp_native(
+    provider: &ImageProviderConfig,
+    prompt: &str,
+    negative_prompt: &str,
+    size: &str,
+    count: u8,
+    seed: i64,
+    plan: &ConditionPlan,
+) -> Result<Vec<Vec<u8>>, NativeFailure> {
+    let payload = native_conditioning_payload(plan, prompt, negative_prompt, size, count, seed);
+    let secret = optional_provider_secret(provider).map_err(NativeFailure::Failed)?;
+    let base = provider.base_url.trim_end_matches('/').to_string();
+    let client = http_client().map_err(NativeFailure::Failed)?;
+    let mut request = client
+        .post(format!("{base}/sdcpp/v1/img_gen"))
+        .json(&payload);
+    if let Some(secret) = secret {
+        request = request.bearer_auth(secret);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| NativeFailure::Failed(provider_network_error(error)))?;
+    let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND
+        || status == reqwest::StatusCode::METHOD_NOT_ALLOWED
+    {
+        return Err(NativeFailure::Unsupported(format!(
+            "当前 stable-diffusion.cpp 运行时没有 /sdcpp/v1/img_gen 原生接口，{} 通道不可用",
+            plan.requested
+        )));
+    }
+    let body: Value = response.json().await.map_err(|_| {
+        NativeFailure::Failed(format!(
+            "stable-diffusion.cpp 原生接口返回了非 JSON 响应（{status}）"
+        ))
+    })?;
+    if !status.is_success() {
+        let message = body
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .unwrap_or("原生图像生成失败");
+        return Err(NativeFailure::Failed(format!(
+            "stable-diffusion.cpp 原生接口返回 {status}: {}",
+            limit(message)
+        )));
+    }
+    if let Some(images) = job_images(&body) {
+        return images.map_err(NativeFailure::Failed);
+    }
+    await_sd_cpp_job(&client, &base, &body)
+        .await
+        .map_err(NativeFailure::Failed)
+}
+
+fn native_conditioning_payload(
+    plan: &ConditionPlan,
+    prompt: &str,
+    negative_prompt: &str,
+    size: &str,
+    count: u8,
+    seed: i64,
+) -> Value {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    let (width, height) = parse_image_size(size);
+    let reference = plan
+        .primary_image
+        .as_deref()
+        .map(|bytes| {
+            let mime = detect_image_mime(bytes).unwrap_or("image/png");
+            format!("data:{mime};base64,{}", BASE64.encode(bytes))
+        })
+        .unwrap_or_default();
+    let mut payload = json!({
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "width": width,
+        "height": height,
+        "batch_count": count,
+        "seed": seed,
+        "output_format": "png",
+    });
+    if plan.effective == "prompt+controlnet" {
+        payload["control_image"] = json!(reference);
+        payload["control_strength"] = json!(plan.strength);
+        if matches!(plan.control_type.as_str(), "pose" | "depth" | "canny" | "lineart") {
+            payload["control_type"] = json!(plan.control_type);
+        }
+    } else if plan.effective == "prompt+ip-adapter" {
+        payload["ip_adapter_image"] = json!(reference);
+        payload["ip_adapter_strength"] = json!(plan.strength);
+    }
+    payload
+}
+
+/// 从任务 JSON 里取出结果图像；任务尚未完成时返回 `None`。
+fn job_images(body: &Value) -> Option<Result<Vec<Vec<u8>>, String>> {
+    let images = body.pointer("/result/images")?.as_array()?;
+    if images.is_empty() {
+        return Some(Err("图像任务完成但没有返回任何图像".to_string()));
+    }
+    let mut decoded = Vec::with_capacity(images.len());
+    for item in images {
+        let Some(encoded) = item.get("b64_json").and_then(Value::as_str) else {
+            return Some(Err("图像任务返回的条目缺少 b64_json".to_string()));
+        };
+        match decode_base64_image(encoded) {
+            Ok(bytes) => decoded.push(bytes),
+            Err(error) => return Some(Err(error)),
+        }
+    }
+    Some(Ok(decoded))
+}
+
+fn decode_base64_image(value: &str) -> Result<Vec<u8>, String> {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    let encoded = match value.split_once(',') {
+        Some((header, payload)) if header.starts_with("data:") => payload,
+        _ => value,
+    };
+    BASE64
+        .decode(encoded.trim())
+        .map_err(|error| format!("图像任务返回了非法 base64：{error}"))
+}
+
+async fn await_sd_cpp_job(
+    client: &Client,
+    base: &str,
+    job: &Value,
+) -> Result<Vec<Vec<u8>>, String> {
+    let id = job.get("id").and_then(Value::as_str).unwrap_or_default();
+    let poll_url = match job.get("poll_url").and_then(Value::as_str) {
+        Some(path) if path.starts_with("http") => path.to_string(),
+        Some(path) => format!("{base}{path}"),
+        None if !id.is_empty() => format!("{base}/sdcpp/v1/jobs/{id}"),
+        None => return Err("stable-diffusion.cpp 没有返回任务 ID".to_string()),
+    };
+    let deadline = Instant::now() + SD_CPP_JOB_TIMEOUT;
+    loop {
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "stable-diffusion.cpp 图像任务超过 {} 秒仍未完成",
+                SD_CPP_JOB_TIMEOUT.as_secs()
+            ));
+        }
+        tokio::time::sleep(SD_CPP_JOB_POLL_INTERVAL).await;
+        let response = client
+            .get(&poll_url)
+            .send()
+            .await
+            .map_err(provider_network_error)?;
+        let status = response.status();
+        let state: Value = response
+            .json()
+            .await
+            .map_err(|_| format!("stable-diffusion.cpp 任务状态返回了非 JSON 响应（{status}）"))?;
+        if !status.is_success() {
+            return Err(format!("stable-diffusion.cpp 任务查询失败：{status}"));
+        }
+        match state.get("status").and_then(Value::as_str).unwrap_or_default() {
+            "completed" => {
+                return job_images(&state)
+                    .unwrap_or_else(|| Err("图像任务完成但没有返回图像".to_string()));
+            }
+            "failed" | "cancelled" | "canceled" => {
+                let message = state
+                    .pointer("/error/message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("图像任务失败");
+                return Err(format!("stable-diffusion.cpp 图像任务失败：{}", limit(message)));
+            }
+            _ => continue,
+        }
+    }
+}
+
+/// img2img 参考锁定：以角色参考图为初始图重绘，`denoising_strength` 由锁定权重决定。
+async fn generate_sd_cpp_img2img(
+    provider: &ImageProviderConfig,
+    prompt: &str,
+    negative_prompt: &str,
+    size: &str,
+    count: u8,
+    seed: i64,
+    strength: f32,
+    init_image: &[u8],
+) -> Result<Vec<Vec<u8>>, String> {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    let (width, height) = parse_image_size(size);
+    let mime = detect_image_mime(init_image)?;
+    let secret = optional_provider_secret(provider)?;
+    let client = http_client()?;
+    let payload = json!({
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "width": width,
+        "height": height,
+        "batch_size": count,
+        "seed": seed,
+        "denoising_strength": clamp_conditioning_strength(strength),
+        "init_images": [format!("data:{mime};base64,{}", BASE64.encode(init_image))],
+    });
+    let mut request = client
+        .post(format!(
+            "{}/sdapi/v1/img2img",
+            provider.base_url.trim_end_matches('/')
+        ))
+        .json(&payload);
+    if let Some(secret) = secret {
+        request = request.bearer_auth(secret);
+    }
+    let response = request.send().await.map_err(provider_network_error)?;
+    let status = response.status();
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|_| format!("stable-diffusion.cpp 返回了非 JSON 响应（{status}）"))?;
+    if !status.is_success() {
+        let message = body
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .unwrap_or("img2img 参考锁定失败");
+        return Err(format!(
+            "stable-diffusion.cpp img2img 返回 {status}: {}",
+            limit(message)
+        ));
+    }
+    let images = body
+        .get("images")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "stable-diffusion.cpp img2img 没有返回图像".to_string())?;
+    let mut decoded = Vec::with_capacity(images.len());
+    for item in images {
+        let encoded = item
+            .as_str()
+            .ok_or_else(|| "stable-diffusion.cpp img2img 返回了非字符串图像".to_string())?;
+        decoded.push(decode_base64_image(encoded)?);
+    }
+    if decoded.is_empty() {
+        return Err("stable-diffusion.cpp img2img 返回了空图像列表".to_string());
+    }
+    Ok(decoded)
 }
 
 async fn generate_openai_images(
@@ -1788,5 +2295,158 @@ mod tests {
         assert!(
             read_reference_bytes(temp.path(), "project-1", "assets/images/missing.png").is_err()
         );
+    }
+
+    fn character_reference(asset_id: &str, weight: f32) -> ImageReferenceInput {
+        ImageReferenceInput {
+            asset_id: asset_id.to_string(),
+            role: "character".to_string(),
+            label: "林博士".to_string(),
+            weight,
+            source: format!("data:image/png;base64,{asset_id}"),
+        }
+    }
+
+    #[test]
+    fn conditioning_plan_requires_a_reference_image() {
+        let input = ImageConditioningInput {
+            mode: "controlnet".to_string(),
+            strength: 0.6,
+            reference_asset_id: String::new(),
+            control_type: "pose".to_string(),
+            start_at: 0.0,
+            end_at: 1.0,
+            lock_count: 1,
+        };
+        let plan = plan_conditioning(STABLE_DIFFUSION_CPP_PROTOCOL, Some(&input), &[]);
+        assert_eq!(plan.effective, "prompt");
+        assert_eq!(plan.degradations.len(), 1);
+        assert!(plan.degradations[0].contains("参考图"));
+    }
+
+    #[test]
+    fn conditioning_plan_honours_declared_controlnet_on_sd_cpp() {
+        let input = ImageConditioningInput {
+            mode: "controlnet".to_string(),
+            strength: 1.7,
+            reference_asset_id: "asset_ref".to_string(),
+            control_type: "Pose".to_string(),
+            start_at: 0.2,
+            end_at: 1.0,
+            lock_count: 1,
+        };
+        let reference = character_reference("asset_ref", 0.8);
+        let bytes = b"\x89PNG\r\n\x1a\npayload".to_vec();
+        let plan = plan_conditioning(
+            STABLE_DIFFUSION_CPP_PROTOCOL,
+            Some(&input),
+            &[(&reference, bytes.clone())],
+        );
+        assert_eq!(plan.effective, "prompt+controlnet");
+        assert_eq!(plan.strength, 0.95);
+        assert_eq!(plan.control_type, "pose");
+        assert_eq!(plan.primary_asset_id, "asset_ref");
+        assert_eq!(plan.primary_image.expect("primary image"), bytes);
+    }
+
+    #[test]
+    fn conditioning_plan_degrades_for_prompt_only_providers() {
+        let input = ImageConditioningInput {
+            mode: "ip-adapter".to_string(),
+            ..Default::default()
+        };
+        let reference = character_reference("asset_ref", 0.9);
+        let plan = plan_conditioning(
+            "OpenAI Compatible",
+            Some(&input),
+            &[(&reference, b"\x89PNG\r\n\x1a\npayload".to_vec())],
+        );
+        assert_eq!(plan.effective, "prompt");
+        assert_eq!(plan.degradations.len(), 1);
+        assert!(plan.degradations[0].contains("OpenAI Compatible"));
+    }
+
+    #[test]
+    fn native_payload_carries_the_control_image() {
+        let input = ImageConditioningInput {
+            mode: "controlnet".to_string(),
+            strength: 0.4,
+            reference_asset_id: "asset_ref".to_string(),
+            control_type: "depth".to_string(),
+            start_at: 0.0,
+            end_at: 1.0,
+            lock_count: 1,
+        };
+        let reference = character_reference("asset_ref", 0.7);
+        let plan = plan_conditioning(
+            STABLE_DIFFUSION_CPP_PROTOCOL,
+            Some(&input),
+            &[(&reference, b"\x89PNG\r\n\x1a\npayload".to_vec())],
+        );
+        let payload = native_conditioning_payload(&plan, "a scientist", "blurry", "1536x1024", 2, 42);
+        assert_eq!(payload["width"], 1536);
+        assert_eq!(payload["height"], 1024);
+        assert_eq!(payload["batch_count"], 2);
+        assert!((payload["control_strength"].as_f64().expect("strength") - 0.4).abs() < 0.001);
+        assert_eq!(payload["control_type"], "depth");
+        assert!(payload["control_image"]
+            .as_str()
+            .expect("control image")
+            .starts_with("data:image/png;base64,"));
+        assert!(payload.get("ip_adapter_image").is_none());
+    }
+
+    #[test]
+    fn native_payload_uses_ip_adapter_for_adapter_locks() {
+        let input = ImageConditioningInput {
+            mode: "ip-adapter".to_string(),
+            strength: 0.7,
+            ..Default::default()
+        };
+        let reference = character_reference("asset_ref", 0.9);
+        let plan = plan_conditioning(
+            STABLE_DIFFUSION_CPP_PROTOCOL,
+            Some(&input),
+            &[(&reference, b"\x89PNG\r\n\x1a\npayload".to_vec())],
+        );
+        let payload = native_conditioning_payload(&plan, "p", "", "1024x1024", 1, 7);
+        assert!(payload["ip_adapter_image"].is_string());
+        assert!((payload["ip_adapter_strength"].as_f64().expect("strength") - 0.7).abs() < 0.001);
+        assert!(payload.get("control_image").is_none());
+    }
+
+    #[test]
+    fn image_size_parsing_falls_back_to_one_megapixel() {
+        assert_eq!(parse_image_size("1536x1024"), (1536, 1024));
+        assert_eq!(parse_image_size("1024 x 1024"), (1024, 1024));
+        assert_eq!(parse_image_size("garbage"), (1024, 1024));
+        assert_eq!(parse_image_size("10x10"), (1024, 1024));
+    }
+
+    #[test]
+    fn job_images_decode_base64_and_data_urls() {
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+        let encoded = BASE64.encode(b"\x89PNG\r\n\x1a\njob");
+        let job = json!({
+            "status": "completed",
+            "result": { "images": [
+                { "index": 0, "b64_json": encoded },
+                { "index": 1, "b64_json": format!("data:image/png;base64,{encoded}") }
+            ] }
+        });
+        let images = job_images(&job).expect("images").expect("decoded");
+        assert_eq!(images.len(), 2);
+        assert_eq!(images[0], b"\x89PNG\r\n\x1a\njob");
+        assert_eq!(images[1], b"\x89PNG\r\n\x1a\njob");
+        assert!(job_images(&json!({ "status": "queued" })).is_none());
+    }
+
+    #[test]
+    fn conditioning_strength_is_clamped_into_a_safe_range() {
+        assert_eq!(clamp_conditioning_strength(0.0), 0.55);
+        assert_eq!(clamp_conditioning_strength(f32::NAN), 0.55);
+        assert_eq!(clamp_conditioning_strength(-1.0), 0.55);
+        assert_eq!(clamp_conditioning_strength(0.01), 0.05);
+        assert_eq!(clamp_conditioning_strength(4.0), 0.95);
     }
 }

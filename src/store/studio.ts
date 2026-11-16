@@ -23,6 +23,7 @@ import {
 } from "../data/demo";
 import { makeId, nowIso } from "../utils";
 import { studioStorage } from "../services/desktop";
+import { resolveCharacterLock } from "../services/characterLock";
 
 interface StudioState {
   projects: VideoProject[];
@@ -53,6 +54,24 @@ interface StudioState {
     patch: Partial<Asset>,
   ) => void;
   removeReferenceAsset: (projectId: string, assetId: string) => void;
+  /** 写入/清除角色身份质心。 */
+  setCharacterIdentity: (
+    projectId: string,
+    characterId: string,
+    identity: CharacterProfile["identity"],
+  ) => void;
+  /** 修改角色锁配置（模式、权重、控制图类型）。 */
+  updateCharacterLock: (
+    projectId: string,
+    characterId: string,
+    patch: Partial<NonNullable<CharacterProfile["lock"]>>,
+  ) => void;
+  /** 写入/清除单个素材的像素级身份验证结果。 */
+  setAssetIdentity: (
+    projectId: string,
+    assetId: string,
+    verification: Asset["identity"],
+  ) => void;
   setSceneAnchors: (
     projectId: string,
     sceneId: string,
@@ -444,8 +463,61 @@ export const useStudioStore = create<StudioState>()(
           }),
         }));
       },
-      setSceneAnchors: (projectId, sceneId, patch) => {
+      setCharacterIdentity: (projectId, characterId, identity) => {
         set((state) => ({
+          projects: state.projects.map((project) =>
+            project.id === projectId
+              ? {
+                  ...project,
+                  characters: project.characters.map((character) =>
+                    character.id === characterId
+                      ? { ...character, identity, updatedAt: nowIso() }
+                      : character,
+                  ),
+                  updatedAt: nowIso(),
+                }
+              : project,
+          ),
+        }));
+      },
+      updateCharacterLock: (projectId, characterId, patch) => {
+        set((state) => ({
+          projects: state.projects.map((project) =>
+            project.id === projectId
+              ? {
+                  ...project,
+                  characters: project.characters.map((character) =>
+                    character.id === characterId
+                      ? {
+                          ...character,
+                          lock: { ...resolveCharacterLock(character), ...patch },
+                          updatedAt: nowIso(),
+                        }
+                      : character,
+                  ),
+                  updatedAt: nowIso(),
+                }
+              : project,
+          ),
+        }));
+      },
+      setAssetIdentity: (projectId, assetId, verification) => {
+        set((state) => ({
+          projects: state.projects.map((project) =>
+            project.id === projectId
+              ? {
+                  ...project,
+                  assets: project.assets.map((asset) =>
+                    asset.id === assetId
+                      ? { ...asset, identity: verification }
+                      : asset,
+                  ),
+                }
+              : project,
+          ),
+        }));
+      },
+      setSceneAnchors: (projectId, sceneId, patch) => {        set((state) => ({
           projects: state.projects.map((project) =>
             project.id === projectId
               ? {

@@ -1,6 +1,11 @@
 import type { Asset, ProviderProfile, Scene, VideoProject } from "../types";
 import type { ImageGenerationRequestInput, ImageReferenceInput } from "./capabilities";
 import {
+  conditioningPayload,
+  planConditioning,
+  type ConditioningPlan,
+} from "./characterLock";
+import {
   composeAnchoredPrompt,
   hasSceneAnchors,
   resolveSceneAnchors,
@@ -37,6 +42,9 @@ export function buildAnchoredImageRequest(input: {
   const basePrompt = input.prompt?.trim() || input.scene.visualPrompt;
   const active =
     input.useAnchors && hasSceneAnchors(anchors) ? anchors : null;
+  const plan = input.useAnchors
+    ? planConditioning(input.project, input.scene, input.provider)
+    : null;
   return {
     projectId: input.project.id,
     sceneId: input.scene.id,
@@ -50,5 +58,20 @@ export function buildAnchoredImageRequest(input: {
     references: active ? referencesFromAnchors(input.project, active) : [],
     anchorLabel: active?.label ?? "",
     consistencyFingerprint: active?.fingerprint ?? "",
+    ...(plan ? { conditioning: conditioningPayload(plan) } : {}),
   };
+}
+
+/** 条件摘要：让界面能说明这一批到底用了哪一档，而不是只写「参考图」。 */
+export function describeConditioning(plan: ConditioningPlan): string {
+  if (plan.channel === "prompt") return "仅提示词锚点";
+  const primary = plan.locks.find(
+    (lock) => lock.referenceAssetId === plan.referenceAssetId,
+  );
+  const who = primary?.characterName ?? "角色";
+  const detail =
+    plan.channel === "prompt+img2img"
+      ? `img2img 参考重绘 · 强度 ${plan.strength.toFixed(2)}`
+      : `${plan.channel.replace("prompt+", "").toUpperCase()} · 强度 ${plan.strength.toFixed(2)}`;
+  return `${who} · ${detail}`;
 }
