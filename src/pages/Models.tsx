@@ -39,6 +39,10 @@ import {
   saveProviderSecret,
   testProviderConnection,
 } from "../services/agentWorkflow";
+import {
+  ensureLocalRuntime,
+  type LocalRuntimeId,
+} from "../services/localRuntime";
 import "./Models.css";
 
 const capabilities: ProviderCapability[] = [
@@ -49,18 +53,40 @@ const capabilities: ProviderCapability[] = [
   "Embedding",
 ];
 
-const protocols: ProviderProfile["protocol"][] = [
-  "OpenAI Compatible",
-  "Anthropic",
-  "Gemini",
+type ConnectionType = "external" | "local";
+
+const localProtocols: ProviderProfile["protocol"][] = [
   "GGUF",
-  "Ollama",
-  "ComfyUI",
+  "audio.cpp",
+  "stable-diffusion.cpp",
 ];
+
+function runtimeForProtocol(
+  protocol: ProviderProfile["protocol"],
+): LocalRuntimeId | null {
+  if (protocol === "GGUF") return "llama.cpp";
+  if (protocol === "audio.cpp") return "audio.cpp";
+  if (protocol === "stable-diffusion.cpp") return "stable-diffusion.cpp";
+  return null;
+}
+
+const localProtocolDefaults: Partial<
+  Record<ProviderProfile["protocol"], { baseUrl: string; model: string }>
+> = {
+  "audio.cpp": {
+    baseUrl: "http://127.0.0.1:8080",
+    model: "qwen3-tts",
+  },
+  "stable-diffusion.cpp": {
+    baseUrl: "http://127.0.0.1:1234",
+    model: "sd-cpp-local",
+  },
+};
 
 interface ProviderDraft {
   id?: string;
   name: string;
+  connectionType: ConnectionType;
   protocol: ProviderProfile["protocol"];
   baseUrl: string;
   model: string;
@@ -74,6 +100,7 @@ interface ProviderDraft {
 
 const emptyDraft: ProviderDraft = {
   name: "",
+  connectionType: "external",
   protocol: "OpenAI Compatible",
   baseUrl: "https://api.openai.com/v1",
   model: "gpt-5.1",
@@ -98,21 +125,80 @@ export default function Models() {
   const [formError, setFormError] = useState("");
   const [testingId, setTestingId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [runtimeInstall, setRuntimeInstall] = useState<{
+    runtime: LocalRuntimeId;
+    status: "downloading" | "ready" | "error" | "unsupported";
+    message: string;
+  } | null>(null);
+
+  const installRuntimeForProtocol = async (
+    protocol: ProviderProfile["protocol"],
+  ) => {
+    const runtime = runtimeForProtocol(protocol);
+    if (!runtime) return;
+    if (!isTauriDesktop) {
+      setRuntimeInstall({
+        runtime,
+        status: "unsupported",
+        message: "浏览器预览不能安装本地运行时，请运行桌面版。",
+      });
+      return;
+    }
+    setRuntimeInstall({
+      runtime,
+      status: "downloading",
+      message: `正在检测 CUDA 并获取 ${runtime}，首次使用需要下载。`,
+    });
+    try {
+      const result = await ensureLocalRuntime(runtime);
+      setRuntimeInstall({
+        runtime,
+        status: "ready",
+        message: result.alreadyInstalled
+          ? `${runtime} · ${result.acceleration} 已安装`
+          : `${runtime} · ${result.acceleration} 已下载并校验`,
+      });
+      if (!result.alreadyInstalled) {
+        pushToast({
+          type: "success",
+          title: "本地运行时已就绪",
+          message: `${runtime} · ${result.acceleration} · ${result.version}`,
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeInstall({
+        runtime,
+        status: "error",
+        message,
+      });
+      pushToast({
+        type: "error",
+        title: "本地运行时下载失败",
+        message,
+      });
+    }
+  };
 
   const openCreate = () => {
     setDraft({ ...emptyDraft, id: undefined });
     setFormError("");
+    setRuntimeInstall(null);
     setModalOpen(true);
   };
 
   const openEdit = (provider: ProviderProfile) => {
     setDraft({
       ...provider,
+      connectionType: localProtocols.includes(provider.protocol)
+        ? "local"
+        : "external",
       contextSize: provider.contextSize ?? 8192,
       inferenceBackend: provider.inferenceBackend ?? "auto",
       apiKey: "",
     });
     setFormError("");
+    setRuntimeInstall(null);
     setModalOpen(true);
   };
 
@@ -141,6 +227,30 @@ export default function Models() {
     }
     if (!draft.capabilities.length) {
       setFormError("至少选择一种模型能力。");
+      return;
+    }
+    if (
+      draft.protocol === "audio.cpp" &&
+      (draft.capabilities.length !== 1 ||
+        !draft.capabilities.some((item) => item === "TTS" || item === "ASR"))
+    ) {
+      setFormError("audio.cpp 的一个 Provider 只能配置一个 TTS 或 ASR 模型。");
+      return;
+    }
+    if (
+      draft.protocol === "stable-diffusion.cpp" &&
+      (draft.capabilities.length !== 1 ||
+        draft.capabilities[0] !== "Image")
+    ) {
+      setFormError("stable-diffusion.cpp 只支持 Image 能力。");
+      return;
+    }
+    if (
+      draft.protocol === "GGUF" &&
+      (draft.capabilities.length !== 1 ||
+        draft.capabilities[0] !== "LLM")
+    ) {
+      setFormError("GGUF 本地模型当前只配置 LLM 能力。");
       return;
     }
     const providerId = draft.id ?? makeId("provider");
@@ -227,7 +337,6 @@ export default function Models() {
       provider.capabilities.length > 0,
       provider.protocol === "Ollama" ||
         provider.protocol === "GGUF" ||
-        provider.protocol === "ComfyUI" ||
         provider.hasSecret ||
         provider.baseUrl,
     ];
@@ -447,7 +556,7 @@ export default function Models() {
           <button type="button" className="provider-add-card" onClick={openCreate}>
             <span><Plus size={22} /></span>
             <strong>接入另一个模型服务</strong>
-            <small>OpenAI 兼容、Anthropic、Gemini、GGUF、Ollama、ComfyUI</small>
+            <small>外部 API 链接 / 本地模型</small>
           </button>
         </div>
       </section>
@@ -534,31 +643,107 @@ export default function Models() {
                 placeholder="例如：Studio OpenAI"
               />
             </Field>
-            <Field label="协议">
+            <Field label="接入方式">
               <Select
-                value={draft.protocol}
-                onChange={(event) =>
+                value={draft.connectionType}
+                onChange={(event) => {
+                  const connectionType = event.target
+                    .value as ConnectionType;
+                  if (connectionType === "local") {
+                    void installRuntimeForProtocol("GGUF");
+                  } else {
+                    setRuntimeInstall(null);
+                  }
                   setDraft((current) => {
-                    const protocol = event.target
-                      .value as ProviderDraft["protocol"];
+                    if (connectionType === "external") {
+                      return {
+                        ...current,
+                        connectionType,
+                        protocol: "OpenAI Compatible",
+                        baseUrl: "https://api.openai.com/v1",
+                        model: "gpt-5.1",
+                        apiKey: "",
+                        hasSecret: false,
+                        capabilities: current.capabilities.length
+                          ? current.capabilities
+                          : ["LLM"],
+                      };
+                    }
                     return {
                       ...current,
-                      protocol,
-                      baseUrl:
-                        protocol === "GGUF" &&
-                        !current.baseUrl.toLowerCase().endsWith(".gguf")
-                          ? ""
-                          : current.baseUrl,
+                      connectionType,
+                      protocol: "GGUF",
+                      baseUrl: "",
+                      model: "",
+                      capabilities: ["LLM"],
                     };
-                  })
-                }
+                  });
+                }}
               >
-                {protocols.map((protocol) => (
-                  <option key={protocol}>{protocol}</option>
-                ))}
+                <option value="external">外部 API 链接</option>
+                <option value="local">本地模型</option>
               </Select>
             </Field>
           </div>
+          {draft.connectionType === "local" && (
+            <Field
+              label="本地运行时"
+              hint="按任务选择对应的原生推理进程。"
+            >
+              <Select
+                value={
+                  localProtocols.includes(draft.protocol)
+                    ? draft.protocol
+                    : "GGUF"
+                }
+                onChange={(event) => {
+                  const protocol = event.target
+                    .value as ProviderProfile["protocol"];
+                  void installRuntimeForProtocol(protocol);
+                  setDraft((current) => {
+                    const defaults = localProtocolDefaults[protocol];
+                    const capabilities: ProviderCapability[] =
+                      protocol === "audio.cpp"
+                        ? [
+                            current.capabilities.find(
+                              (item) => item === "TTS" || item === "ASR",
+                            ) ?? "TTS",
+                          ]
+                        : protocol === "stable-diffusion.cpp"
+                          ? ["Image"]
+                          : ["LLM"];
+                    return {
+                      ...current,
+                      connectionType: "local",
+                      protocol,
+                      baseUrl:
+                        defaults?.baseUrl ??
+                        (protocol === "GGUF" ? "" : current.baseUrl),
+                      model: defaults?.model ?? "",
+                      capabilities,
+                    };
+                  });
+                }}
+              >
+                <option value="GGUF">GGUF · llama.cpp</option>
+                <option value="audio.cpp">audio.cpp · TTS / ASR</option>
+                <option value="stable-diffusion.cpp">
+                  stable-diffusion.cpp · 图片
+                </option>
+              </Select>
+              {runtimeInstall && (
+                <span
+                  className={`text-[11px] leading-[1.5] ${
+                    runtimeInstall.status === "error"
+                      ? "text-[var(--danger)]"
+                      : "text-[var(--faint)]"
+                  }`}
+                >
+                  {runtimeInstall.message}
+                </span>
+              )}
+            </Field>
+          )}
           <div className="field flex flex-col gap-[7px]">
             <span className="text-[12px] font-medium text-[var(--subtext)]">
               {draft.protocol === "GGUF" ? "GGUF 模型文件" : "API Base URL"}
@@ -640,7 +825,9 @@ export default function Models() {
               </Select>
             </Field>
           )}
-          {draft.protocol !== "GGUF" && (
+          {!["GGUF", "audio.cpp", "stable-diffusion.cpp"].includes(
+            draft.protocol,
+          ) && (
             <Field
               label="API Key"
               hint="仅用于本次页面会话；关闭页面后不会保留。"
@@ -660,27 +847,69 @@ export default function Models() {
           )}
           <Field label="支持能力">
             <div className="capability-picker">
-              {capabilities.map((capability) => {
-                const selected = draft.capabilities.includes(capability);
-                return (
-                  <button
-                    type="button"
-                    key={capability}
-                    className={selected ? "is-selected" : ""}
-                    onClick={() =>
-                      setDraft({
-                        ...draft,
-                        capabilities: selected
-                          ? draft.capabilities.filter((item) => item !== capability)
-                          : [...draft.capabilities, capability],
-                      })
-                    }
-                  >
-                    {selected && <Check size={13} />}
-                    {capability}
-                  </button>
-                );
-              })}
+              {capabilities
+                .filter((capability) => {
+                  if (draft.protocol === "audio.cpp") {
+                    return capability === "TTS" || capability === "ASR";
+                  }
+                  if (draft.protocol === "stable-diffusion.cpp") {
+                    return capability === "Image";
+                  }
+                  if (draft.protocol === "GGUF") {
+                    return capability === "LLM";
+                  }
+                  return true;
+                })
+                .map((capability) => {
+                  const selected = draft.capabilities.includes(capability);
+                  return (
+                    <button
+                      type="button"
+                      key={capability}
+                      className={selected ? "is-selected" : ""}
+                      onClick={() => {
+                        if (draft.protocol === "audio.cpp") {
+                          setDraft({
+                            ...draft,
+                            capabilities: [capability],
+                            model:
+                              capability === "ASR"
+                                ? "qwen3-asr"
+                                : capability === "TTS"
+                                  ? "qwen3-tts"
+                                  : draft.model,
+                          });
+                          return;
+                        }
+                        if (draft.protocol === "stable-diffusion.cpp") {
+                          setDraft({
+                            ...draft,
+                            capabilities: ["Image"],
+                          });
+                          return;
+                        }
+                        if (draft.protocol === "GGUF") {
+                          setDraft({
+                            ...draft,
+                            capabilities: ["LLM"],
+                          });
+                          return;
+                        }
+                        setDraft({
+                          ...draft,
+                          capabilities: selected
+                            ? draft.capabilities.filter(
+                                (item) => item !== capability,
+                              )
+                            : [...draft.capabilities, capability],
+                        });
+                      }}
+                    >
+                      {selected && <Check size={13} />}
+                      {capability}
+                    </button>
+                  );
+                })}
             </div>
           </Field>
           {formError && (

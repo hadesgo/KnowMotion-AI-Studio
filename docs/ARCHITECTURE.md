@@ -71,7 +71,7 @@ flowchart LR
 
     subgraph External["外部或本地模型服务"]
         Cloud["OpenAI / Anthropic / Gemini<br/>兼容 API"]
-        LocalAI["Ollama / ComfyUI<br/>本地服务"]
+        LocalAI["audio.cpp / stable-diffusion.cpp<br/>本地服务"]
     end
 
     Supervisor <-->|"stdio JSONL<br/>jobId / progress / cancel"| Worker
@@ -503,7 +503,7 @@ interface ProviderProfile {
     | "anthropic"
     | "gemini"
     | "ollama"
-    | "comfyui"
+    | "stable-diffusion.cpp"
     | "custom";
   baseUrl: string;
   credentialRef?: string;          // 系统凭据库中的引用，不是密钥本身
@@ -575,7 +575,7 @@ type ProviderErrorCode =
 - `GeminiLlm`。
 - `OllamaLlm`。
 - `GgufLocalLlm`：按需启动随包分发的官方 llama.cpp `llama-server`，缓存模型进程，并按配置选择 Vulkan GPU 或 CPU 进行推理。
-- `OpenAiCompatibleImage` / `ComfyUiImage`。
+- `OpenAiCompatibleImage` / `StableDiffusionCppImage`。
 - `OpenAiCompatibleTts` / 可插拔本地 TTS。
 - `WhisperCompatibleAsr`。
 - `OpenAiCompatibleEmbedding`。
@@ -1027,7 +1027,7 @@ interface JobEnvelope<T> {
 4. Provider 返回 URL 或二进制流；Rust 下载到临时文件。
 5. 校验 HTTP 状态、MIME、大小、图片解码、尺寸和哈希。
 6. 原子提交到 `assets/images/`，更新 `assets/manifest.json`，并把锚点快照写入素材记录。
-7. ComfyUI 通道有参考图时走 img2img，denoise 由参考权重派生；OpenAI 兼容通道只传文字锚点，响应如实标注 `referenceMode`。
+7. stable-diffusion.cpp 与 OpenAI 兼容通道通过文字锚点和一致性指纹传递参考信息，响应如实标注 `referenceMode`。
 8. 图片生成记录关联 sceneId、providerId、jobId、promptHash、seed 与 fingerprint。
 9. 失败只重试当前素材，不重跑整个分镜。
 
@@ -1036,7 +1036,7 @@ interface JobEnvelope<T> {
 - 批量任务写入 `image_jobs`，同时生成 `tasks(kind='image')` 记录；worker 在应用启动时运行，按 600 ms 轮询、最多 2 并发，用事务原子领取 pending 任务。
 - 状态为 `pending / running / completed / failed / canceled / interrupted`；网络、429 和 5xx 自动重试一次，运行中的取消会在 Provider 返回后丢弃结果，重启时 running 转为 interrupted。
 - 每个任务通过 `image.job.changed` 推送完整视图，WebView 合并素材时按 assetId 去重，不覆盖项目里已有的素材。
-- 局部重绘在前端生成两张 PNG 遮罩（白底黑区 + 透明底黑区），后端只接受项目内源图与 PNG data URL：ComfyUI 走 `LoadImageMask → VAEEncodeForInpaint`，OpenAI 兼容通道走 multipart `images/edits`；结果另存为新素材并记录 `inpaint` 元数据。
+- 局部重绘在前端生成透明底黑区 PNG 遮罩，后端只接受项目内源图与 PNG data URL；stable-diffusion.cpp 与 OpenAI 兼容通道都使用 multipart `images/edits`，结果另存为新素材并记录 `inpaint` 元数据。
 
 ### 13.2.1 视频素材与视频图层
 

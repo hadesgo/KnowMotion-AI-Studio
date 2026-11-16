@@ -48,6 +48,14 @@ import {
 } from "../utils";
 import "./AudioSubtitles.css";
 
+const audioCppVoices = [
+  ["serena", "Serena · 温柔青年女声"],
+  ["uncle_fu", "Uncle Fu · 沉稳男声"],
+  ["vivian", "Vivian · 明亮女声"],
+  ["dylan", "Dylan · 北京青年男声"],
+  ["eric", "Eric · 成都男声"],
+] as const;
+
 export default function AudioSubtitles() {
   const project = useCurrentProject();
   const navigate = useNavigate();
@@ -73,7 +81,7 @@ export default function AudioSubtitles() {
   const cloudTtsProvider = providers.find(
     (provider) =>
       provider.enabled &&
-      provider.protocol === "OpenAI Compatible" &&
+      ["OpenAI Compatible", "audio.cpp"].includes(provider.protocol) &&
       provider.capabilities.includes("TTS") &&
       provider.id ===
         (taskRoutes.TTS ??
@@ -82,12 +90,18 @@ export default function AudioSubtitles() {
   const asrProvider = providers.find(
     (provider) =>
       provider.enabled &&
-      provider.protocol === "OpenAI Compatible" &&
+      ["OpenAI Compatible", "audio.cpp"].includes(provider.protocol) &&
       provider.capabilities.includes("ASR") &&
       provider.id ===
         (taskRoutes.ASR ??
           providers.find((item) => item.capabilities.includes("ASR"))?.id),
   );
+  const usesAudioCpp = cloudTtsProvider?.protocol === "audio.cpp";
+  const effectiveVoice =
+    cloudTtsProvider?.protocol === "audio.cpp" &&
+    !audioCppVoices.some(([id]) => id === project?.audio.voice)
+      ? "serena"
+      : (project?.audio.voice ?? "");
   const sceneNarrationAsset = project?.assets.find(
     (item) => item.kind === "audio" && item.sceneId === scene?.id,
   );
@@ -201,7 +215,7 @@ export default function AudioSubtitles() {
                 title: scene.title,
                 narration: scene.narration,
               })),
-              voice: project.audio.voice,
+              voice: effectiveVoice,
               rate: project.audio.rate,
             })
           ).assets
@@ -607,16 +621,28 @@ export default function AudioSubtitles() {
           </div>
           <section className="voice-controls">
             <span className="eyebrow">VOICE</span>
-            <Field label="系统语音">
+            <Field
+              label={
+                cloudTtsProvider?.protocol === "audio.cpp"
+                  ? "Qwen3-TTS 音色"
+                  : "系统语音"
+              }
+            >
               <Select
-                value={project.audio.voice}
+                value={effectiveVoice}
                 onChange={(event) =>
                   updateProject(project.id, {
                     audio: { ...project.audio, voice: event.target.value },
                   })
                 }
               >
-                {voices.length ? (
+                {cloudTtsProvider?.protocol === "audio.cpp" ? (
+                  audioCppVoices.map(([id, label]) => (
+                    <option key={id} value={id}>
+                      {label}
+                    </option>
+                  ))
+                ) : voices.length ? (
                   voices.map((voice) => (
                     <option key={voice.name} value={voice.name}>
                       {voice.name} · {voice.lang}
@@ -635,6 +661,7 @@ export default function AudioSubtitles() {
                 max={1.4}
                 step={0.02}
                 value={project.audio.rate}
+                disabled={usesAudioCpp}
                 onChange={(event) =>
                   updateProject(project.id, {
                     audio: {

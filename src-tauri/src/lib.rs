@@ -3,6 +3,7 @@ mod capabilities;
 mod database;
 mod image_queue;
 mod job_object;
+mod local_runtime;
 mod logging;
 mod media;
 mod render;
@@ -717,6 +718,7 @@ pub fn run() {
             let projects_root = app_data.join("projects");
             fs::create_dir_all(&projects_root).map_err(|error| error.to_string())?;
             let database_path = app_data.join("studio.sqlite3");
+            local_runtime::configure(app_data.join("runtimes"));
             agent::configure_llama_runtime(
                 app.path()
                     .resource_dir()
@@ -766,6 +768,7 @@ pub fn run() {
             scan_project_missing_assets,
             desktop_status,
             write_webview_log,
+            local_runtime::ensure_local_runtime,
             capabilities::generate_project_images,
             capabilities::inpaint_project_image,
             image_queue::enqueue_image_jobs,

@@ -37,7 +37,6 @@
     "externalBin": ["binaries/node"],
     "resources": [
       "resources/runtime-manifest.json",
-      "resources/llama/**/*",
       "resources/renderer/**/*",
       "resources/browser/**/*",
       "resources/ffmpeg/**/*"

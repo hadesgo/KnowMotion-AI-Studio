@@ -146,6 +146,12 @@ struct LlamaServer {
     log: Arc<Mutex<String>>,
 }
 
+#[derive(Debug, Clone)]
+struct GpuDevice {
+    backend: &'static str,
+    name: String,
+}
+
 impl LlamaServer {
     fn stop(&self) {
         let _ = self.job_object.terminate();
@@ -228,7 +234,7 @@ fn load_cached_server(config: &ProviderConfig) -> Result<Arc<LlamaServer>, Strin
     };
     if preference == BackendPreference::Gpu && gpu_devices.is_empty() {
         return Err(
-            "Vulkan GPU inference was requested, but llama.cpp detected no compatible GPU"
+            "GPU inference was requested, but llama.cpp detected no compatible CUDA or Vulkan GPU"
                 .to_string(),
         );
     }
@@ -241,7 +247,7 @@ fn load_cached_server(config: &ProviderConfig) -> Result<Arc<LlamaServer>, Strin
         context_size,
         preference,
         use_gpu,
-        gpu_devices.first().map(String::as_str),
+        gpu_devices.first(),
     ) {
         Ok(server) => server,
         Err(gpu_error) if preference == BackendPreference::Auto && use_gpu => start_server(
@@ -254,7 +260,7 @@ fn load_cached_server(config: &ProviderConfig) -> Result<Arc<LlamaServer>, Strin
             None,
         )
         .map_err(|cpu_error| {
-            format!("Unable to start llama.cpp with Vulkan GPU ({gpu_error}) or CPU ({cpu_error})")
+            format!("Unable to start llama.cpp with GPU ({gpu_error}) or CPU ({cpu_error})")
         })?,
         Err(error) => return Err(error),
     };
@@ -271,7 +277,7 @@ fn start_server(
     context_size: u32,
     preference: BackendPreference,
     use_gpu: bool,
-    gpu_name: Option<&str>,
+    gpu_device: Option<&GpuDevice>,
 ) -> Result<LlamaServer, String> {
     let port = reserve_loopback_port()?;
     let api_key = Uuid::new_v4().to_string();
@@ -325,8 +331,11 @@ fn start_server(
     drain_process_output(child.stderr.take(), Arc::clone(&log));
     let backend_label = if use_gpu {
         format!(
-            "llama.cpp Vulkan GPU · {}",
-            gpu_name.unwrap_or("auto-selected device")
+            "llama.cpp {} GPU · {}",
+            gpu_device.map(|device| device.backend).unwrap_or("auto"),
+            gpu_device
+                .map(|device| device.name.as_str())
+                .unwrap_or("auto-selected device")
         )
     } else if preference == BackendPreference::Auto {
         "llama.cpp CPU (no compatible Vulkan GPU)".to_string()
@@ -447,6 +456,11 @@ fn find_server_executable() -> Result<PathBuf, String> {
             path.display()
         ));
     }
+    if let Some(installed) = crate::local_runtime::installed_executable("llama.cpp") {
+        return installed
+            .canonicalize()
+            .map_err(|error| format!("Unable to resolve llama.cpp server: {error}"));
+    }
 
     let mut candidates = Vec::new();
     if let Some(resource_dir) = RUNTIME_RESOURCE_DIR.get() {
@@ -468,12 +482,12 @@ fn find_server_executable() -> Result<PathBuf, String> {
         }
     }
     Err(
-        "llama.cpp server runtime is missing. Run `npm run llama:prepare` before building."
+        "llama.cpp runtime is not installed. Select a local GGUF model in Models to download it."
             .to_string(),
     )
 }
 
-fn list_gpu_devices(executable: &Path) -> Vec<String> {
+fn list_gpu_devices(executable: &Path) -> Vec<GpuDevice> {
     let mut command = Command::new(executable);
     command
         .arg("--list-devices")
@@ -492,9 +506,18 @@ fn list_gpu_devices(executable: &Path) -> Vec<String> {
         .chain(stderr.lines())
         .filter_map(|line| {
             let (device, name) = line.trim().split_once(':')?;
-            let device = device.trim();
-            (device.to_ascii_lowercase().starts_with("vulkan") && !name.trim().is_empty())
-                .then(|| name.trim().to_string())
+            let device = device.trim().to_ascii_lowercase();
+            let backend = if device.starts_with("cuda") {
+                "CUDA"
+            } else if device.starts_with("vulkan") {
+                "Vulkan"
+            } else {
+                return None;
+            };
+            (!name.trim().is_empty()).then(|| GpuDevice {
+                backend,
+                name: name.trim().to_string(),
+            })
         })
         .collect()
 }

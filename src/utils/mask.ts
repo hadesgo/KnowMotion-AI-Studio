@@ -11,7 +11,6 @@ export interface MaskStroke {
 }
 
 export interface MaskCanvasPair {
-  maskDataUrl: string;
   alphaMaskDataUrl: string;
   coverage: number;
 }
@@ -151,11 +150,7 @@ function drawStrokes(
   }
 }
 
-/**
- * 生成两张遮罩：
- * - mask：黑底白区，供 ComfyUI LoadImageMask 使用；
- * - alphaMask：透明底黑区，供 OpenAI images/edits 使用。
- */
+/** 生成透明底黑色涂抹区域，供图片编辑接口使用。 */
 export function buildMaskCanvases(
   strokes: MaskStroke[],
   width: number,
@@ -163,15 +158,6 @@ export function buildMaskCanvases(
 ): MaskCanvasPair {
   const safeWidth = Math.max(16, Math.round(width));
   const safeHeight = Math.max(16, Math.round(height));
-  const mask = document.createElement("canvas");
-  mask.width = safeWidth;
-  mask.height = safeHeight;
-  const maskContext = mask.getContext("2d");
-  if (!maskContext) throw new Error("Canvas 2D context is unavailable");
-  maskContext.fillStyle = "#000000";
-  maskContext.fillRect(0, 0, safeWidth, safeHeight);
-  drawStrokes(maskContext, strokes, safeWidth, safeHeight, "#ffffff");
-
   const alpha = document.createElement("canvas");
   alpha.width = safeWidth;
   alpha.height = safeHeight;
@@ -181,7 +167,6 @@ export function buildMaskCanvases(
   drawStrokes(alphaContext, strokes, safeWidth, safeHeight, "#000000");
 
   return {
-    maskDataUrl: mask.toDataURL("image/png"),
     alphaMaskDataUrl: alpha.toDataURL("image/png"),
     coverage: maskCoverage(strokes),
   };

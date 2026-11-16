@@ -28,7 +28,7 @@
 - 正式渲染改为持久 Job，支持真实 JSONL 进度、取消、重启中断恢复、FFprobe、SHA-256、原子提交和渲染元数据。
 - 构建阶段生成固定 Node sidecar、Chrome Headless Shell、FFmpeg/FFprobe、完整 Remotion 依赖和 `runtime-manifest.json`；Worker 已用随包资源完成真实 smoke render。
 - NSIS 安装包已实际生成；当前仍未做 Authenticode 签名、更新器签名和干净 Windows VM 验收。
-- 图片生成已支持 OpenAI Compatible 与 ComfyUI，TTS、ASR、Embedding/RAG、网页正文抓取已有 Rust 实现。
+- 图片生成已支持 OpenAI Compatible 与 stable-diffusion.cpp，TTS、ASR、Embedding/RAG、网页正文抓取已有 Rust 实现。
 - Data URL 素材会落入 `assets/images` 或 `assets/audio`，项目 JSON 成为恢复事实来源；复制、归档删除、缺失扫描和 ZIP 包导入导出已接通。
 
 仍不能宣称“所有外部服务均已在线验收”：当前没有可用 LLM/图片/TTS/ASR/Embedding 凭据，相关网络路径只有结构和单元测试，没有真实付费/私有服务端到端记录。
@@ -39,7 +39,7 @@
 |---|---|---|
 | Phase 1：Tauri 桌面框架 | 完成 | 窗口、React、Zustand、WebView、SQLite 迁移、项目锁、目录、Provider 配置和 NSIS 构建已接通 |
 | Phase 2：AI 内容创作 | 框架完成，真实调用待验收 | 九个 Agent 和 DAG 已实现；没有执行外部真实 LLM 端到端测试 |
-| Phase 3：素材生成 | 完成核心能力 | 本地 SVG、图片导入、OpenAI Images、ComfyUI、文件落盘与清单已实现 |
+| Phase 3：素材生成 | 完成核心能力 | 本地 SVG、图片导入、OpenAI Images、stable-diffusion.cpp、文件落盘与清单已实现 |
 | Phase 4：Remotion 动画 | 主体完成 | Scene DSL、组件库、Player、单场景和整片预览可用 |
 | Phase 5：音频和渲染 | 完成工程闭环 | SAPI/云端 TTS、ASR、字幕、音乐、持久渲染 Job、离线 sidecar、进度、取消、验证和安装包已实现 |
 | Phase 6：完整 AI 工作流 | 大部分完成 | 审批、局部重跑、自动重试、自然语言场景 Patch、图片/TTS/ASR/RAG/网页正文入口已实现；真实外部服务尚未在线验收 |
@@ -174,7 +174,7 @@
 
 ### 3.9 多能力 Provider
 
-- OpenAI Compatible Images、ComfyUI 标准 Checkpoint 工作流图片生成。
+- OpenAI Compatible Images 与 stable-diffusion.cpp 图片生成。
 - OpenAI Compatible TTS 与 Windows SAPI 双路径。
 - OpenAI Compatible ASR，使用 multipart 上传项目内音频，并保存时间片段。
 - OpenAI Compatible Embedding；知识片段按字符窗口切块并写入 `knowledge_chunks`。
@@ -231,10 +231,10 @@
 - 图片素材页接入：按当前镜头锚点组装提示词、负向词和种子后生成；结果带指纹入库；已有图片可通过“收进设定集”转为角色/场景/风格参考图；锚点变化时在画廊顶部显示“素材已过期”。
 - 后端 `generate_project_images` 扩展 `negativePrompt / seed / references / anchorLabel / consistencyFingerprint`：
   - 参考图只接受项目内素材或 data URL，单张 ≤8 MiB、最多 3 张，读取后做文件头 MIME 校验。
-  - ComfyUI 使用请求中的固定种子；有参考图时先上传到 ComfyUI `input`，再以 `LoadImage → ImageScale（对齐请求画幅）→ VAEEncode → KSampler` 走 img2img，denoise 由参考权重派生（0.1→0.67，1.0→0.40，默认 0.85 约 0.445），并返回 `referenceMode=prompt+img2img`。
+  - 本地图片通过 stable-diffusion.cpp 的 OpenAI 风格生成接口执行；参考图信息通过锚点提示词和一致性指纹传递，并如实返回 `referenceMode=prompt`。
   - OpenAI Compatible 通道没有像素级参考入口，参考图只通过锚点提示词传递，如实返回 `referenceMode=prompt`。
   - 参考图上传失败会降级为纯提示词条件并写警告日志，`referenceMode` 反映实际执行的路径。
-- 明确的边界：没有接入人脸识别、CLIP 或任何图像相似度打分；ComfyUI 仅覆盖 Checkpoint + img2img，不含 ControlNet/IP-Adapter/LoRA 角色锁；OpenAI `images/edits` 通道未接入；参考图一致性目前由提示词、种子和结构指纹共同保证，而不是像素级身份验证。
+- 明确的边界：没有接入人脸识别、CLIP 或任何图像相似度打分；stable-diffusion.cpp 当前只使用生成接口，参考图一致性由提示词、种子和结构指纹共同保证，而不是像素级身份验证。
 
 ### 3.14 批量图片队列与局部重绘
 
@@ -251,10 +251,10 @@
 局部重绘：
 
 - 交互：在图片上直接涂抹遮罩，笔刷 10–140 px、撤销、清空、实时遮罩覆盖率；遮罩坐标按图片归一化，窗口缩放不漂移。
-- 前端生成两张 PNG：黑底白区（ComfyUI `LoadImageMask` 取红通道）与透明底黑区（OpenAI 遮罩语义）；后端只接受 data URL、PNG、1 B–8 MiB。
+- 前端生成一张透明底黑区 PNG 遮罩；后端只接受 data URL、PNG、1 B–8 MiB。
 - 源图只接受项目内登记的图片素材（project.json → src → 安全相对路径），不接受外部 URL。
 - OpenAI Compatible：复用现有手写 multipart 构造器调用 `/images/edits`（model/prompt/n/size/image/mask），解析 b64_json 或 url，返回 `mode=openai-edits`。
-- ComfyUI：源图与遮罩分别上传到 input；工作流 `LoadImage → LoadImageMask(red) → VAEEncodeForInpaint(grow_mask_by=6) → KSampler(denoise 1.0)`，固定种子，返回 `mode=comfyui-inpaint`。
+- stable-diffusion.cpp 与外部 API 都使用 multipart `images/edits`，源图与透明遮罩在内存中构造后提交。
 - 结果作为新素材写入 `assets/images`，带 `inpaint { sourceAssetId, mode, coverage, seed, anchorLabel, fingerprint }`；不覆盖原图，可继续采用到场景或收进设定集。
 - 浏览器预览无 Provider 时禁用提交；本地 SVG 草案会提示先转为位图，避免把 SVG 发给需要位图的 Provider。
 
@@ -276,7 +276,7 @@
 |---|---|---|
 | 真实 AI 内容生成 | Agent 和 HTTP Adapter 已完成 | 当前无外部 Key/Ollama，未完成真实模型端到端验收 |
 | Research Agent | 来源候选、正文抓取、Embedding 与项目内检索 | 尚无搜索引擎 API、自动引用核验和跨项目知识库；抓取正文仍需人工核验 |
-| 图片生成 | OpenAI Images、ComfyUI、上传与 SVG 均可用；设定集锚点和参考图已接入 | ComfyUI 参考图只到 img2img 0.55，未配置 ControlNet/IP-Adapter；OpenAI 通道只有 prompt 级参考 |
+| 图片生成 | OpenAI Images、stable-diffusion.cpp、上传与 SVG 均可用；设定集锚点和参考图已接入 | 本地与外部生成通道目前都只有 prompt 级参考，没有像素级身份锁 |
 | 素材保存 | Data URL 与生成结果会落盘并记录哈希 | 外部远程 URL 尚未下载成本地资产 |
 | TTS | SAPI 与 OpenAI Compatible TTS 可用 | 情绪/角色模板、独立云端 Adapter 和真实服务验收仍缺 |
 | 字幕 | 已知旁白与云端 ASR 听写 | ASR 依赖服务返回 segment；无时间片段时回退按场景均分 |
@@ -351,7 +351,7 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 ### P1：完整素材能力
 
 1. 为素材缺失增加“重新生成当前资产”操作。
-2. 在现有设定集之上补 ComfyUI ControlNet/IP-Adapter 像素级参考通道。
+2. 在现有设定集之上补 stable-diffusion.cpp 参考图编辑与像素级一致性通道。
 3. 增加遮罩羽化、文本自动选区与重绘历史对比。
 4. 增加 FFmpeg 视频代理转码与多轨时间轴剪辑（转场、蒙版、关键帧）。
 4. 增加云端 TTS 情绪/角色模板。

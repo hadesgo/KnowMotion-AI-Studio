@@ -53,7 +53,7 @@ export interface InpaintResult {
   providerId: string;
   model: string;
   elapsedMs: number;
-  mode: "openai-edits" | "comfyui-inpaint";
+  mode: "openai-edits";
   seed: number;
 }
 
@@ -63,9 +63,7 @@ export async function inpaintProjectImage(input: {
   sourceAssetId: string;
   provider: ProviderProfile;
   prompt: string;
-  negativePrompt?: string;
   size: string;
-  maskDataUrl: string;
   maskAlphaDataUrl: string;
   maskCoverage?: number;
   seed?: number;

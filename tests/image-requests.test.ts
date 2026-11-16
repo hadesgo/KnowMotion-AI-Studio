@@ -6,11 +6,11 @@ import { resolveSceneAnchors } from "../src/services/consistency";
 import type { Asset, ProviderProfile, VideoProject } from "../src/types";
 
 const provider: ProviderProfile = {
-  id: "provider-comfy",
-  name: "Local ComfyUI",
-  protocol: "ComfyUI",
-  baseUrl: "http://127.0.0.1:8188",
-  model: "sdxl.safetensors",
+  id: "provider-stable-diffusion",
+  name: "Local stable-diffusion.cpp",
+  protocol: "stable-diffusion.cpp",
+  baseUrl: "http://127.0.0.1:1234",
+  model: "sd-cpp-local",
   capabilities: ["Image"],
   enabled: true,
   health: "healthy",

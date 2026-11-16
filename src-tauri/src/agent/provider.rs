@@ -394,15 +394,15 @@ pub async fn test_provider(config: ProviderConfig) -> Result<ProviderTestResult,
             .user_agent("KnowMotion-AI-Studio/0.1")
             .build()
             .map_err(|error| error.to_string())?;
-        let mut endpoint = if config.protocol == "ComfyUI" {
-            format!("{}/system_stats", config.base_url.trim_end_matches('/'))
-        } else {
-            format!("{}/models", config.base_url.trim_end_matches('/'))
+        let base = config.base_url.trim_end_matches('/');
+        let mut endpoint = match config.protocol.as_str() {
+            "audio.cpp" => format!("{base}/v1/models"),
+            "stable-diffusion.cpp" => format!("{base}/sdcpp/v1/models/status"),
+            _ => format!("{base}/models"),
         };
         if config.protocol == "Gemini" {
-            let secret = get_provider_secret(&config.id).ok_or_else(|| {
-                format!("No API key is stored for provider {}", config.name)
-            })?;
+            let secret = get_provider_secret(&config.id)
+                .ok_or_else(|| format!("No API key is stored for provider {}", config.name))?;
             endpoint = format!(
                 "{}?key={}",
                 endpoint,
@@ -411,14 +411,12 @@ pub async fn test_provider(config: ProviderConfig) -> Result<ProviderTestResult,
         }
         let mut request = client.get(endpoint);
         if config.protocol == "OpenAI Compatible" {
-            let secret = get_provider_secret(&config.id).ok_or_else(|| {
-                format!("No API key is stored for provider {}", config.name)
-            })?;
+            let secret = get_provider_secret(&config.id)
+                .ok_or_else(|| format!("No API key is stored for provider {}", config.name))?;
             request = request.bearer_auth(secret);
         } else if config.protocol == "Anthropic" {
-            let secret = get_provider_secret(&config.id).ok_or_else(|| {
-                format!("No API key is stored for provider {}", config.name)
-            })?;
+            let secret = get_provider_secret(&config.id)
+                .ok_or_else(|| format!("No API key is stored for provider {}", config.name))?;
             request = request
                 .header("x-api-key", secret)
                 .header("anthropic-version", "2023-06-01");
@@ -486,7 +484,7 @@ pub async fn resolve_provider(
             .map_err(|error| format!("GGUF model loading task failed: {error}"))??;
         return Ok(Box::new(local));
     }
-    let secret = if provider.protocol == "Ollama" || provider.protocol == "ComfyUI" {
+    let secret = if provider.protocol == "Ollama" {
         None
     } else {
         Some(

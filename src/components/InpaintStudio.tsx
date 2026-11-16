@@ -223,9 +223,7 @@ export function InpaintStudio({
         sourceAssetId: asset.id,
         provider,
         prompt: finalPrompt,
-        negativePrompt: active?.negativePrompt ?? "",
         size: sizeForImage(size.width, size.height),
-        maskDataUrl: masks.maskDataUrl,
         maskAlphaDataUrl: masks.alphaMaskDataUrl,
         maskCoverage: masks.coverage,
         seed: active?.seed,
@@ -246,7 +244,7 @@ export function InpaintStudio({
       pushToast({
         type: "success",
         title: "局部重绘完成",
-        message: `${provider.name} · ${result.mode === "openai-edits" ? "images/edits" : "ComfyUI inpaint"} · 遮罩 ${(masks.coverage * 100).toFixed(1)}% · ${Math.round(result.elapsedMs / 1000)} 秒`,
+        message: `${provider.name} · images/edits · 遮罩 ${(masks.coverage * 100).toFixed(1)}% · ${Math.round(result.elapsedMs / 1000)} 秒`,
       });
       onClose();
     } catch (submitError) {
@@ -415,8 +413,8 @@ export function InpaintStudio({
 
           <p className="inpaint-note">
             <Wand2 size={13} />
-            ComfyUI 走 LoadImageMask + VAEEncodeForInpaint；OpenAI 兼容走
-            images/edits。结果会作为新素材写入当前镜头，不覆盖原图。
+            外部 API 与 stable-diffusion.cpp 均通过 images/edits
+            提交原图与透明遮罩。结果会作为新素材写入当前镜头，不覆盖原图。
           </p>
         </aside>
       </div>

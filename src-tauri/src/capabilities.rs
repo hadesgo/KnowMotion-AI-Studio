@@ -3,11 +3,10 @@ use crate::{
     storage::persist_generated_image, AppState,
 };
 use chrono::Utc;
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use reqwest::Client;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use rusqlite::Connection;
 use std::{
     net::IpAddr,
     path::Path,
@@ -19,6 +18,8 @@ use uuid::Uuid;
 
 const MAX_REFERENCE_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_REFERENCE_IMAGES: usize = 3;
+const AUDIO_CPP_PROTOCOL: &str = "audio.cpp";
+const STABLE_DIFFUSION_CPP_PROTOCOL: &str = "stable-diffusion.cpp";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -197,17 +198,26 @@ pub async fn transcribe_project_audio(
     if !safe_identifier(&request.project_id) || !safe_identifier(&request.asset_id) {
         return Err("Invalid ASR request identifiers".to_string());
     }
-    if request.provider.protocol != "OpenAI Compatible"
-        || !request
-            .provider
-            .capabilities
-            .iter()
-            .any(|capability| capability == "ASR")
+    if !matches!(
+        request.provider.protocol.as_str(),
+        "OpenAI Compatible" | AUDIO_CPP_PROTOCOL
+    ) || !request
+        .provider
+        .capabilities
+        .iter()
+        .any(|capability| capability == "ASR")
     {
-        return Err("ASR requires an enabled OpenAI-compatible provider".to_string());
+        return Err("ASR requires an OpenAI Compatible or audio.cpp provider".to_string());
     }
-    let secret = get_provider_secret(&request.provider.id)
-        .ok_or_else(|| "No API key is stored for the ASR provider".to_string())?;
+    let uses_audio_cpp = request.provider.protocol == AUDIO_CPP_PROTOCOL;
+    let secret = if uses_audio_cpp {
+        None
+    } else {
+        Some(
+            get_provider_secret(&request.provider.id)
+                .ok_or_else(|| "No API key is stored for the ASR provider".to_string())?,
+        )
+    };
     let project_root = state.projects_root.join(&request.project_id);
     let project: Value = serde_json::from_str(
         &std::fs::read_to_string(project_root.join("project.json"))
@@ -218,9 +228,9 @@ pub async fn transcribe_project_audio(
         .get("assets")
         .and_then(Value::as_array)
         .and_then(|assets| {
-            assets.iter().find(|asset| {
-                asset.get("id").and_then(Value::as_str) == Some(&request.asset_id)
-            })
+            assets
+                .iter()
+                .find(|asset| asset.get("id").and_then(Value::as_str) == Some(&request.asset_id))
         })
         .and_then(|asset| asset.get("src"))
         .and_then(Value::as_str)
@@ -230,8 +240,8 @@ pub async fn transcribe_project_audio(
     let relative = crate::storage::safe_relative_path(&relative)
         .ok_or_else(|| "ASR source path is unsafe".to_string())?;
     let audio_path = project_root.join(&relative);
-    let audio = std::fs::read(&audio_path)
-        .map_err(|error| format!("Unable to read ASR audio: {error}"))?;
+    let audio =
+        std::fs::read(&audio_path).map_err(|error| format!("Unable to read ASR audio: {error}"))?;
     if audio.is_empty() || audio.len() > 25 * 1024 * 1024 {
         return Err("ASR audio must be between 1 byte and 25 MB".to_string());
     }
@@ -247,31 +257,34 @@ pub async fn transcribe_project_audio(
     let boundary = format!("knowmotion-{}", Uuid::new_v4().simple());
     let mut body = Vec::new();
     append_multipart_field(&mut body, &boundary, "model", &request.provider.model);
-    append_multipart_field(&mut body, &boundary, "response_format", "verbose_json");
-    append_multipart_file(
-        &mut body,
-        &boundary,
-        "file",
-        filename,
-        content_type,
-        &audio,
-    );
+    if !uses_audio_cpp {
+        append_multipart_field(&mut body, &boundary, "response_format", "verbose_json");
+    }
+    append_multipart_file(&mut body, &boundary, "file", filename, content_type, &audio);
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     let started = Instant::now();
-    let response = http_client()?
-        .post(format!(
+    let endpoint = if uses_audio_cpp {
+        format!(
+            "{}/v1/audio/transcriptions/details",
+            request.provider.base_url.trim_end_matches('/')
+        )
+    } else {
+        format!(
             "{}/audio/transcriptions",
             request.provider.base_url.trim_end_matches('/')
-        ))
-        .bearer_auth(secret)
+        )
+    };
+    let mut http_request = http_client()?
+        .post(endpoint)
         .header(
             reqwest::header::CONTENT_TYPE,
             format!("multipart/form-data; boundary={boundary}"),
         )
-        .body(body)
-        .send()
-        .await
-        .map_err(provider_network_error)?;
+        .body(body);
+    if let Some(secret) = secret {
+        http_request = http_request.bearer_auth(secret);
+    }
+    let response = http_request.send().await.map_err(provider_network_error)?;
     let status = response.status();
     let payload: Value = response
         .json()
@@ -285,22 +298,7 @@ pub async fn transcribe_project_audio(
         .and_then(Value::as_str)
         .ok_or_else(|| "ASR response has no text".to_string())?
         .to_string();
-    let cues = payload
-        .get("segments")
-        .and_then(Value::as_array)
-        .map(|segments| {
-            segments
-                .iter()
-                .filter_map(|segment| {
-                    Some(AsrCue {
-                        start: segment.get("start")?.as_f64()?,
-                        end: segment.get("end")?.as_f64()?,
-                        text: segment.get("text")?.as_str()?.trim().to_string(),
-                    })
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    let cues = parse_asr_cues(&payload);
     logging::log_event(
         LogLevel::Info,
         "provider.asr",
@@ -310,6 +308,7 @@ pub async fn transcribe_project_audio(
             "assetId": request.asset_id,
             "providerId": request.provider.id,
             "model": request.provider.model,
+            "protocol": request.provider.protocol,
             "segments": cues.len(),
             "elapsedMs": started.elapsed().as_millis()
         })),
@@ -346,7 +345,11 @@ pub async fn embed_project_knowledge(
     }
     let embeddings = request_embeddings(&request.provider, &chunks).await?;
     let dimensions = embeddings.first().map(Vec::len).unwrap_or(0);
-    if dimensions == 0 || embeddings.iter().any(|embedding| embedding.len() != dimensions) {
+    if dimensions == 0
+        || embeddings
+            .iter()
+            .any(|embedding| embedding.len() != dimensions)
+    {
         return Err("Embedding provider returned inconsistent vector dimensions".to_string());
     }
     let now = Utc::now().to_rfc3339();
@@ -506,10 +509,7 @@ pub async fn fetch_research_source(
     if response.content_length().unwrap_or(0) > 5 * 1024 * 1024 {
         return Err("Research source exceeds the 5 MB text limit".to_string());
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(provider_network_error)?;
+    let bytes = response.bytes().await.map_err(provider_network_error)?;
     if bytes.len() > 5 * 1024 * 1024 {
         return Err("Research source exceeds the 5 MB text limit".to_string());
     }
@@ -556,19 +556,28 @@ pub async fn generate_project_cloud_narration(
     {
         return Err("The selected provider is not an enabled TTS provider".to_string());
     }
-    if request.provider.protocol != "OpenAI Compatible" {
-        return Err(
-            "Cloud TTS currently requires an OpenAI-compatible speech endpoint".to_string(),
-        );
+    if !matches!(
+        request.provider.protocol.as_str(),
+        "OpenAI Compatible" | AUDIO_CPP_PROTOCOL
+    ) {
+        return Err("TTS requires an OpenAI Compatible or audio.cpp speech endpoint".to_string());
     }
     if request.scenes.is_empty() || request.scenes.len() > 100 {
         return Err("TTS request must contain between 1 and 100 scenes".to_string());
     }
-    let secret = get_provider_secret(&request.provider.id)
-        .ok_or_else(|| "No API key is stored for the TTS provider".to_string())?;
+    let uses_audio_cpp = request.provider.protocol == AUDIO_CPP_PROTOCOL;
+    let secret = if uses_audio_cpp {
+        None
+    } else {
+        Some(
+            get_provider_secret(&request.provider.id)
+                .ok_or_else(|| "No API key is stored for the TTS provider".to_string())?,
+        )
+    };
     let endpoint = format!(
-        "{}/audio/speech",
-        request.provider.base_url.trim_end_matches('/')
+        "{}{}/audio/speech",
+        request.provider.base_url.trim_end_matches('/'),
+        if uses_audio_cpp { "/v1" } else { "" }
     );
     let client = http_client()?;
     let started = Instant::now();
@@ -578,19 +587,24 @@ pub async fn generate_project_cloud_narration(
         if scene.narration.trim().is_empty() {
             continue;
         }
-        let response = client
-            .post(&endpoint)
-            .bearer_auth(&secret)
-            .json(&json!({
-                "model": request.provider.model,
-                "input": scene.narration,
-                "voice": if request.voice.trim().is_empty() { "alloy" } else { request.voice.trim() },
-                "response_format": "wav",
-                "speed": request.rate.clamp(0.5, 2.0)
-            }))
-            .send()
-            .await
-            .map_err(provider_network_error)?;
+        let mut payload = json!({
+            "model": request.provider.model,
+            "input": scene.narration,
+            "voice": if request.voice.trim().is_empty() {
+                if uses_audio_cpp { "serena" } else { "alloy" }
+            } else {
+                request.voice.trim()
+            }
+        });
+        if !uses_audio_cpp {
+            payload["response_format"] = json!("wav");
+            payload["speed"] = json!(request.rate.clamp(0.5, 2.0));
+        }
+        let mut http_request = client.post(&endpoint).json(&payload);
+        if let Some(secret) = secret.as_ref() {
+            http_request = http_request.bearer_auth(secret);
+        }
+        let response = http_request.send().await.map_err(provider_network_error)?;
         let status = response.status();
         if !status.is_success() {
             return Err(format!("TTS provider returned {status}"));
@@ -651,6 +665,7 @@ pub async fn generate_project_cloud_narration(
             "projectId": request.project_id,
             "providerId": request.provider.id,
             "model": request.provider.model,
+            "protocol": request.provider.protocol,
             "scenes": assets.len(),
             "audioMs": total_audio_ms,
             "elapsedMs": started.elapsed().as_millis()
@@ -675,6 +690,60 @@ fn wav_duration_ms(bytes: &[u8]) -> Result<i64, String> {
     Ok(duration_ms)
 }
 
+fn parse_asr_cues(payload: &Value) -> Vec<AsrCue> {
+    let direct = payload
+        .get("segments")
+        .and_then(Value::as_array)
+        .map(|segments| {
+            segments
+                .iter()
+                .filter_map(|segment| {
+                    Some(AsrCue {
+                        start: segment.get("start")?.as_f64()?,
+                        end: segment.get("end")?.as_f64()?,
+                        text: segment.get("text")?.as_str()?.trim().to_string(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !direct.is_empty() {
+        return direct;
+    }
+
+    let Some(sample_rate) = payload
+        .get("sample_rate")
+        .and_then(Value::as_f64)
+        .filter(|rate| *rate > 0.0)
+    else {
+        return Vec::new();
+    };
+    payload
+        .get("segments")
+        .and_then(Value::as_array)
+        .map(|segments| {
+            segments
+                .iter()
+                .filter_map(|segment| {
+                    Some(AsrCue {
+                        start: segment.get("start_sample")?.as_f64()? / sample_rate,
+                        end: segment.get("end_sample")?.as_f64()? / sample_rate,
+                        text: segment.get("text")?.as_str()?.trim().to_string(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn optional_provider_secret(provider: &ImageProviderConfig) -> Result<Option<String>, String> {
+    if provider.protocol == "OpenAI Compatible" {
+        return get_provider_secret(&provider.id)
+            .map(Some)
+            .ok_or_else(|| "No API key is stored for the image provider".to_string());
+    }
+    Ok(None)
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -684,11 +753,7 @@ pub struct InpaintRequest {
     pub source_asset_id: String,
     pub provider: ImageProviderConfig,
     pub prompt: String,
-    #[serde(default)]
-    pub negative_prompt: String,
     pub size: String,
-    /// 白底黑区（白=重绘）遮罩，供 ComfyUI LoadImageMask 使用。
-    pub mask_data_url: String,
     /// 透明=重绘的遮罩，供 OpenAI images/edits 使用。
     pub mask_alpha_data_url: String,
     #[serde(default)]
@@ -754,16 +819,12 @@ pub(crate) async fn execute_image_generation(
             request.style.trim()
         )
     };
-    let seed = request.seed.unwrap_or_else(|| {
-        (Utc::now().timestamp_millis() as i64).rem_euclid(2_000_000_000)
-    });
+    let seed = request
+        .seed
+        .unwrap_or_else(|| (Utc::now().timestamp_millis() as i64).rem_euclid(2_000_000_000));
     let mut reference_images: Vec<(&ImageReferenceInput, Vec<u8>)> = Vec::new();
     for reference in request.references.iter().take(MAX_REFERENCE_IMAGES) {
-        match read_reference_bytes(
-            projects_root,
-            &request.project_id,
-            &reference.source,
-        ) {
+        match read_reference_bytes(projects_root, &request.project_id, &reference.source) {
             Ok(bytes) => match detect_image_mime(&bytes) {
                 Ok(_) => reference_images.push((reference, bytes)),
                 Err(error) => logging::log_event(
@@ -792,30 +853,12 @@ pub(crate) async fn execute_image_generation(
 
     let started = Instant::now();
     let (images, reference_mode) = match request.provider.protocol.as_str() {
-        "OpenAI Compatible" => (
+        "OpenAI Compatible" | STABLE_DIFFUSION_CPP_PROTOCOL => (
             // OpenAI Images generations 没有 pixel-level reference 通道；
             // 参考图已由前端写入锚点提示词，这里如实报告 prompt 模式。
             generate_openai_images(&request.provider, &prompt, &request.size, count).await?,
             "prompt",
         ),
-        "ComfyUI" => {
-            let reference = reference_images
-                .first()
-                .map(|(input, bytes)| (bytes.as_slice(), input.weight));
-            let (images, conditioned) = generate_comfyui_images(
-                &request.provider,
-                &prompt,
-                &request.size,
-                &request.negative_prompt,
-                seed,
-                reference,
-            )
-            .await?;
-            (
-                images,
-                if conditioned { "prompt+img2img" } else { "prompt" },
-            )
-        }
         other => {
             return Err(format!(
                 "Provider protocol {other} does not implement Image generation"
@@ -992,13 +1035,12 @@ pub async fn inpaint_project_image(
         &request.project_id,
         &request.source_asset_id,
     )?;
-    let mask = decode_png_data_url(&request.mask_data_url, "inpaint mask")?;
-    let seed = request.seed.unwrap_or_else(|| {
-        (Utc::now().timestamp_millis() as i64).rem_euclid(2_000_000_000)
-    });
+    let seed = request
+        .seed
+        .unwrap_or_else(|| (Utc::now().timestamp_millis() as i64).rem_euclid(2_000_000_000));
     let started = Instant::now();
     let (bytes, mode) = match request.provider.protocol.as_str() {
-        "OpenAI Compatible" => {
+        "OpenAI Compatible" | STABLE_DIFFUSION_CPP_PROTOCOL => {
             let alpha_mask = decode_png_data_url(&request.mask_alpha_data_url, "alpha mask")?;
             (
                 generate_openai_inpaint(
@@ -1013,18 +1055,6 @@ pub async fn inpaint_project_image(
                 "openai-edits",
             )
         }
-        "ComfyUI" => (
-            generate_comfyui_inpaint(
-                &request.provider,
-                request.prompt.trim(),
-                &request.negative_prompt,
-                seed,
-                &source_bytes,
-                &mask,
-            )
-            .await?,
-            "comfyui-inpaint",
-        ),
         other => {
             return Err(format!(
                 "Provider protocol {other} does not implement image inpainting"
@@ -1100,7 +1130,6 @@ pub async fn inpaint_project_image(
     })
 }
 
-
 /// 读取项目内某张图片素材的本地字节。只接受项目目录内登记的素材，
 /// 保证重绘不会变成任意外部读取入口。
 fn read_project_asset_image(
@@ -1118,9 +1147,9 @@ fn read_project_asset_image(
         .get("assets")
         .and_then(Value::as_array)
         .and_then(|assets| {
-            assets.iter().find(|asset| {
-                asset.get("id").and_then(Value::as_str) == Some(asset_id)
-            })
+            assets
+                .iter()
+                .find(|asset| asset.get("id").and_then(Value::as_str) == Some(asset_id))
         })
         .and_then(|asset| asset.get("src"))
         .and_then(Value::as_str)
@@ -1170,32 +1199,43 @@ async fn generate_openai_inpaint(
     image_mime: &str,
     mask: &[u8],
 ) -> Result<Vec<u8>, String> {
-    let secret = get_provider_secret(&provider.id)
-        .ok_or_else(|| "No API key is stored for the image provider".to_string())?;
+    let secret = optional_provider_secret(provider)?;
     let boundary = format!("knowmotion-{}", Uuid::new_v4().simple());
     let mut body = Vec::new();
     append_multipart_field(&mut body, &boundary, "model", &provider.model);
     append_multipart_field(&mut body, &boundary, "prompt", prompt);
     append_multipart_field(&mut body, &boundary, "n", "1");
     append_multipart_field(&mut body, &boundary, "size", size);
-    append_multipart_file(&mut body, &boundary, "image", "source.png", image_mime, image);
+    append_multipart_file(
+        &mut body,
+        &boundary,
+        "image",
+        "source.png",
+        image_mime,
+        image,
+    );
     append_multipart_file(&mut body, &boundary, "mask", "mask.png", "image/png", mask);
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     let client = http_client()?;
-    let response = client
+    let api_prefix = if provider.protocol == STABLE_DIFFUSION_CPP_PROTOCOL {
+        "/v1"
+    } else {
+        ""
+    };
+    let mut request = client
         .post(format!(
-            "{}/images/edits",
+            "{}{api_prefix}/images/edits",
             provider.base_url.trim_end_matches('/')
         ))
-        .bearer_auth(secret)
         .header(
             reqwest::header::CONTENT_TYPE,
             format!("multipart/form-data; boundary={boundary}"),
         )
-        .body(body)
-        .send()
-        .await
-        .map_err(provider_network_error)?;
+        .body(body);
+    if let Some(secret) = secret {
+        request = request.bearer_auth(secret);
+    }
+    let response = request.send().await.map_err(provider_network_error)?;
     let status = response.status();
     let payload: Value = response
         .json()
@@ -1228,126 +1268,34 @@ async fn generate_openai_inpaint(
     Err("Image edit provider returned neither b64_json nor url".to_string())
 }
 
-async fn generate_comfyui_inpaint(
-    provider: &ImageProviderConfig,
-    prompt: &str,
-    negative: &str,
-    seed: i64,
-    image: &[u8],
-    mask: &[u8],
-) -> Result<Vec<u8>, String> {
-    let base = provider.base_url.trim_end_matches('/');
-    let client = http_client()?;
-    let image_name = upload_comfyui_image(&client, base, image).await?;
-    let mask_name = upload_comfyui_image(&client, base, mask).await?;
-    let workflow = comfy_inpaint_workflow(
-        prompt,
-        negative,
-        &provider.model,
-        seed,
-        &image_name,
-        &mask_name,
-    );
-    submit_comfyui_workflow(&client, base, workflow).await
-}
-
-/// ComfyUI 局部重绘：源图与遮罩分别上传，LoadImageMask 取红通道，
-/// VAEEncodeForInpaint 生成 latent，KSampler 使用 denoise 1.0 完全重绘遮罩区。
-fn comfy_inpaint_workflow(
-    prompt: &str,
-    negative: &str,
-    model: &str,
-    seed: i64,
-    image_name: &str,
-    mask_name: &str,
-) -> Value {
-    let negative_text = if negative.trim().is_empty() {
-        "blurry, low quality, text artifacts, watermark"
-    } else {
-        negative.trim()
-    };
-    json!({
-        "3": {
-            "class_type": "KSampler",
-            "inputs": {
-                "seed": seed,
-                "steps": 24,
-                "cfg": 7.0,
-                "sampler_name": "euler",
-                "scheduler": "normal",
-                "denoise": 1.0,
-                "model": ["4", 0],
-                "positive": ["6", 0],
-                "negative": ["7", 0],
-                "latent_image": ["11", 0]
-            }
-        },
-        "4": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": { "ckpt_name": model }
-        },
-        "6": {
-            "class_type": "CLIPTextEncode",
-            "inputs": { "text": prompt, "clip": ["4", 1] }
-        },
-        "7": {
-            "class_type": "CLIPTextEncode",
-            "inputs": { "text": negative_text, "clip": ["4", 1] }
-        },
-        "8": {
-            "class_type": "VAEDecode",
-            "inputs": { "samples": ["3", 0], "vae": ["4", 2] }
-        },
-        "9": {
-            "class_type": "SaveImage",
-            "inputs": { "filename_prefix": "knowmotion-inpaint", "images": ["8", 0] }
-        },
-        "10": {
-            "class_type": "LoadImage",
-            "inputs": { "image": image_name }
-        },
-        "13": {
-            "class_type": "LoadImageMask",
-            "inputs": { "image": mask_name, "channel": "red" }
-        },
-        "11": {
-            "class_type": "VAEEncodeForInpaint",
-            "inputs": {
-                "pixels": ["10", 0],
-                "vae": ["4", 2],
-                "mask": ["13", 0],
-                "grow_mask_by": 6
-            }
-        }
-    })
-}
-
 async fn generate_openai_images(
     provider: &ImageProviderConfig,
     prompt: &str,
     size: &str,
     count: u8,
 ) -> Result<Vec<Vec<u8>>, String> {
-    let secret = get_provider_secret(&provider.id)
-        .ok_or_else(|| "No API key is stored for the image provider".to_string())?;
+    let secret = optional_provider_secret(provider)?;
     let endpoint = format!(
-        "{}/images/generations",
-        provider.base_url.trim_end_matches('/')
+        "{}{}/images/generations",
+        provider.base_url.trim_end_matches('/'),
+        if provider.protocol == STABLE_DIFFUSION_CPP_PROTOCOL {
+            "/v1"
+        } else {
+            ""
+        }
     );
     let client = http_client()?;
-    let response = client
-        .post(endpoint)
-        .bearer_auth(secret)
-        .json(&json!({
-            "model": provider.model,
-            "prompt": prompt,
-            "n": count,
-            "size": size,
-            "response_format": "b64_json"
-        }))
-        .send()
-        .await
-        .map_err(provider_network_error)?;
+    let mut request = client.post(endpoint).json(&json!({
+        "model": provider.model,
+        "prompt": prompt,
+        "n": count,
+        "size": size,
+        "response_format": "b64_json"
+    }));
+    if let Some(secret) = secret {
+        request = request.bearer_auth(secret);
+    }
+    let response = request.send().await.map_err(provider_network_error)?;
     let status = response.status();
     let body: Value = response
         .json()
@@ -1358,7 +1306,10 @@ async fn generate_openai_images(
             .pointer("/error/message")
             .and_then(Value::as_str)
             .unwrap_or("Image generation failed");
-        return Err(format!("Image provider returned {status}: {}", limit(message)));
+        return Err(format!(
+            "Image provider returned {status}: {}",
+            limit(message)
+        ));
     }
     let data = body
         .get("data")
@@ -1383,287 +1334,12 @@ async fn generate_openai_images(
     Ok(images)
 }
 
-async fn generate_comfyui_images(
-    provider: &ImageProviderConfig,
-    prompt: &str,
-    size: &str,
-    negative: &str,
-    seed: i64,
-    reference: Option<(&[u8], f32)>,
-) -> Result<(Vec<Vec<u8>>, bool), String> {
-    let (width, height) = parse_image_size(size)?;
-    let base = provider.base_url.trim_end_matches('/');
-    let client = http_client()?;
-    let reference_name = match reference {
-        Some((bytes, _)) => match upload_comfyui_image(&client, base, bytes).await {
-            Ok(name) => Some(name),
-            Err(error) => {
-                logging::log_event(
-                    LogLevel::Warn,
-                    "provider.image.reference",
-                    "ComfyUI reference upload failed; continuing with prompt-only conditioning",
-                    Some(json!({ "error": limit(&error) })),
-                );
-                None
-            }
-        },
-        None => None,
-    };
-    let conditioned = reference_name.is_some();
-    let denoise = reference
-        .map(|(_, weight)| reference_denoise(weight))
-        .unwrap_or(1.0);
-    let workflow = comfy_image_workflow(
-        prompt,
-        negative,
-        &provider.model,
-        width,
-        height,
-        seed,
-        reference_name.as_deref(),
-        denoise,
-    );
-    let bytes = submit_comfyui_workflow(&client, base, workflow).await?;
-    Ok((vec![bytes], conditioned))
-}
-
-/// 提交 ComfyUI 工作流并下载第 9 号 SaveImage 节点的输出。
-async fn submit_comfyui_workflow(
-    client: &Client,
-    base: &str,
-    workflow: Value,
-) -> Result<Vec<u8>, String> {
-    let response = client
-        .post(format!("{base}/prompt"))
-        .json(&json!({
-            "prompt": workflow,
-            "client_id": Uuid::new_v4().to_string()
-        }))
-        .send()
-        .await
-        .map_err(provider_network_error)?;
-    let status = response.status();
-    let body: Value = response
-        .json()
-        .await
-        .map_err(|_| format!("ComfyUI returned non-JSON response ({status})"))?;
-    if !status.is_success() {
-        return Err(format!(
-            "ComfyUI rejected the workflow ({status}): {}",
-            limit(&body.to_string())
-        ));
-    }
-    let prompt_id = body
-        .get("prompt_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "ComfyUI response has no prompt_id".to_string())?;
-    let mut image_ref = None;
-    for _ in 0..240 {
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        let response = client
-            .get(format!("{base}/history/{prompt_id}"))
-            .send()
-            .await
-            .map_err(provider_network_error)?;
-        if !response.status().is_success() {
-            continue;
-        }
-        let history: Value = response
-            .json()
-            .await
-            .map_err(|error| format!("Invalid ComfyUI history: {error}"))?;
-        if let Some(image) = history
-            .get(prompt_id)
-            .and_then(|entry| entry.pointer("/outputs/9/images/0"))
-        {
-            image_ref = Some(image.clone());
-            break;
-        }
-    }
-    let image = image_ref.ok_or_else(|| {
-        "ComfyUI generation timed out before producing a history image".to_string()
-    })?;
-    let filename = image
-        .get("filename")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "ComfyUI image has no filename".to_string())?;
-    let subfolder = image
-        .get("subfolder")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let image_type = image
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or("output");
-    let response = client
-        .get(format!(
-            "{base}/view?filename={}&subfolder={}&type={}",
-            utf8_percent_encode(filename, NON_ALPHANUMERIC),
-            utf8_percent_encode(subfolder, NON_ALPHANUMERIC),
-            utf8_percent_encode(image_type, NON_ALPHANUMERIC)
-        ))
-        .send()
-        .await
-        .map_err(provider_network_error)?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "ComfyUI image download failed with {}",
-            response.status()
-        ));
-    }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(provider_network_error)?
-        .to_vec();
-    Ok(bytes)}
-/// 参考权重直接映射到 img2img 强度：权重越高，denoise 越低，
-/// 越接近参考图。0.1 → 0.67，1.0 → 0.40，默认 0.85 → 约 0.445。
-fn reference_denoise(weight: f32) -> f64 {
-    let clamped = weight.clamp(0.1, 1.0) as f64;
-    (0.70 - 0.30 * clamped).clamp(0.35, 0.75)
-}
-
-/// ComfyUI 标准 Checkpoint 工作流。带参考图时切换为 img2img：
-/// 参考图先上传到 input，再经 VAEEncode 作为 latent。
-fn comfy_image_workflow(
-    prompt: &str,
-    negative: &str,
-    model: &str,
-    width: u32,
-    height: u32,
-    seed: i64,
-    reference_name: Option<&str>,
-    denoise: f64,
-) -> Value {
-    let negative_text = if negative.trim().is_empty() {
-        "blurry, low quality, text artifacts, watermark"
-    } else {
-        negative.trim()
-    };
-    let conditioned = reference_name.is_some();
-    let latent_image = if conditioned {
-        json!(["11", 0])
-    } else {
-        json!(["5", 0])
-    };
-    let mut workflow = json!({
-        "3": {
-            "class_type": "KSampler",
-            "inputs": {
-                "seed": seed,
-                "steps": 24,
-                "cfg": 7.0,
-                "sampler_name": "euler",
-                "scheduler": "normal",
-                "denoise": denoise,
-                "model": ["4", 0],
-                "positive": ["6", 0],
-                "negative": ["7", 0],
-                "latent_image": latent_image
-            }
-        },
-        "4": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": { "ckpt_name": model }
-        },
-        "6": {
-            "class_type": "CLIPTextEncode",
-            "inputs": { "text": prompt, "clip": ["4", 1] }
-        },
-        "7": {
-            "class_type": "CLIPTextEncode",
-            "inputs": { "text": negative_text, "clip": ["4", 1] }
-        },
-        "8": {
-            "class_type": "VAEDecode",
-            "inputs": { "samples": ["3", 0], "vae": ["4", 2] }
-        },
-        "9": {
-            "class_type": "SaveImage",
-            "inputs": { "filename_prefix": "knowmotion", "images": ["8", 0] }
-        }
-    });
-    match reference_name {
-        Some(name) => {
-            workflow["10"] = json!({
-                "class_type": "LoadImage",
-                "inputs": { "image": name }
-            });
-            // 参考图可能比例不同，先对齐到请求画幅再做 img2img，避免输出尺寸漂移。
-            workflow["12"] = json!({
-                "class_type": "ImageScale",
-                "inputs": {
-                    "upscale_method": "lanczos",
-                    "width": width,
-                    "height": height,
-                    "crop": "center",
-                    "image": ["10", 0]
-                }
-            });
-            workflow["11"] = json!({
-                "class_type": "VAEEncode",
-                "inputs": { "pixels": ["12", 0], "vae": ["4", 2] }
-            });
-        }
-        None => {
-            workflow["5"] = json!({
-                "class_type": "EmptyLatentImage",
-                "inputs": { "width": width, "height": height, "batch_size": 1 }
-            });
-        }
-    }
-    workflow
-}
-
-async fn upload_comfyui_image(
-    client: &Client,
-    base: &str,
-    bytes: &[u8],
-) -> Result<String, String> {
-    let mime = detect_image_mime(bytes)?;
-    let response = client
-        .post(format!(
-            "{base}/upload/image?overwrite=true&type=input&subfolder=knowmotion"
-        ))
-        .header(reqwest::header::CONTENT_TYPE, mime)
-        .body(bytes.to_vec())
-        .send()
-        .await
-        .map_err(provider_network_error)?;
-    let status = response.status();
-    let body: Value = response
-        .json()
-        .await
-        .map_err(|_| format!("ComfyUI upload returned non-JSON response ({status})"))?;
-    if !status.is_success() {
-        return Err(format!(
-            "ComfyUI reference upload failed ({status}): {}",
-            limit(&body.to_string())
-        ));
-    }
-    let name = body
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "ComfyUI upload response has no name".to_string())?;
-    let subfolder = body
-        .get("subfolder")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    Ok(if subfolder.is_empty() {
-        name.to_string()
-    } else {
-        format!("{subfolder}/{name}")
-    })
-}
-
 async fn download_image(client: &Client, url: &str) -> Result<Vec<u8>, String> {
     let parsed = reqwest::Url::parse(url).map_err(|error| format!("Invalid image URL: {error}"))?;
     let host = parsed
         .host_str()
         .ok_or_else(|| "Image URL has no host".to_string())?;
-    if host.eq_ignore_ascii_case("localhost")
-        || host.parse::<IpAddr>().is_ok_and(is_disallowed_ip)
+    if host.eq_ignore_ascii_case("localhost") || host.parse::<IpAddr>().is_ok_and(is_disallowed_ip)
     {
         return Err("Image URL resolves to a disallowed local/private host".to_string());
     }
@@ -1722,21 +1398,6 @@ fn detect_image_mime(bytes: &[u8]) -> Result<&'static str, String> {
     } else {
         Err("Provider returned an unsupported image format".to_string())
     }
-}
-
-fn parse_image_size(size: &str) -> Result<(u32, u32), String> {
-    let (width, height) = size
-        .split_once('x')
-        .ok_or_else(|| "Image size must use WIDTHxHEIGHT".to_string())?;
-    let width = width
-        .parse::<u32>()
-        .map_err(|_| "Invalid image width".to_string())?
-        .clamp(256, 2048);
-    let height = height
-        .parse::<u32>()
-        .map_err(|_| "Invalid image height".to_string())?
-        .clamp(256, 2048);
-    Ok((width - width % 8, height - height % 8))
 }
 
 fn limit(value: &str) -> String {
@@ -1863,8 +1524,7 @@ fn validate_public_url(url: &reqwest::Url) -> Result<(), String> {
     let host = url
         .host_str()
         .ok_or_else(|| "Research URL has no host".to_string())?;
-    if host.eq_ignore_ascii_case("localhost")
-        || host.parse::<IpAddr>().is_ok_and(is_disallowed_ip)
+    if host.eq_ignore_ascii_case("localhost") || host.parse::<IpAddr>().is_ok_and(is_disallowed_ip)
     {
         return Err("Research URL resolves to a local/private host".to_string());
     }
@@ -1956,129 +1616,33 @@ mod tests {
     }
 
     #[test]
-    fn comfy_workflow_locks_seed_and_uses_reference_img2img() {
-        let workflow = comfy_image_workflow(
-            "anchored shot",
-            "",
-            "sdxl.safetensors",
-            1024,
-            576,
-            42,
-            Some("knowmotion/ref.png"),
-            0.45,
-        );
-        assert_eq!(
-            workflow.pointer("/3/inputs/seed").and_then(Value::as_i64),
-            Some(42)
-        );
-        assert_eq!(
-            workflow
-                .pointer("/3/inputs/latent_image/0")
-                .and_then(Value::as_str),
-            Some("11")
-        );
-        assert_eq!(
-            workflow
-                .pointer("/10/inputs/image")
-                .and_then(Value::as_str),
-            Some("knowmotion/ref.png")
-        );
-        assert_eq!(
-            workflow
-                .pointer("/11/inputs/pixels/0")
-                .and_then(Value::as_str),
-            Some("12")
-        );
-        assert_eq!(
-            workflow.pointer("/12/inputs/width").and_then(Value::as_u64),
-            Some(1024)
-        );
-        assert_eq!(
-            workflow.pointer("/3/inputs/denoise").and_then(Value::as_f64),
-            Some(0.45)
-        );
-        assert!(workflow.pointer("/5").is_none());
-        assert_eq!(
-            workflow.pointer("/7/inputs/text").and_then(Value::as_str),
-            Some("blurry, low quality, text artifacts, watermark")
-        );
+    fn parses_audio_cpp_sample_offsets_into_seconds() {
+        let cues = parse_asr_cues(&json!({
+            "sample_rate": 16000,
+            "segments": [
+                {
+                    "start_sample": 16000,
+                    "end_sample": 32000,
+                    "text": "知识动画"
+                }
+            ]
+        }));
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].start, 1.0);
+        assert_eq!(cues[0].end, 2.0);
+        assert_eq!(cues[0].text, "知识动画");
     }
 
     #[test]
-    fn comfy_workflow_without_reference_uses_empty_latent_and_custom_negative() {
-        let workflow = comfy_image_workflow(
-            "plain shot",
-            "cartoon, watermark",
-            "sdxl.safetensors",
-            768,
-            768,
-            7,
-            None,
-            1.0,
-        );
-        assert_eq!(
-            workflow
-                .pointer("/3/inputs/latent_image/0")
-                .and_then(Value::as_str),
-            Some("5")
-        );
-        assert_eq!(
-            workflow.pointer("/5/inputs/width").and_then(Value::as_u64),
-            Some(768)
-        );
-        assert_eq!(
-            workflow.pointer("/7/inputs/text").and_then(Value::as_str),
-            Some("cartoon, watermark")
-        );
-        assert!(workflow.pointer("/10").is_none());
-        assert_eq!(
-            workflow.pointer("/3/inputs/denoise").and_then(Value::as_f64),
-            Some(1.0)
-        );
-    }
-
-    #[test]
-    fn comfy_inpaint_workflow_wires_mask_and_full_denoise() {
-        let workflow = comfy_inpaint_workflow(
-            "repaint the face",
-            "blurry",
-            "sdxl.safetensors",
-            99,
-            "knowmotion/source.png",
-            "knowmotion/mask.png",
-        );
-        assert_eq!(
-            workflow.pointer("/3/inputs/denoise").and_then(Value::as_f64),
-            Some(1.0)
-        );
-        assert_eq!(
-            workflow.pointer("/3/inputs/seed").and_then(Value::as_i64),
-            Some(99)
-        );
-        assert_eq!(
-            workflow.pointer("/11/inputs/pixels/0").and_then(Value::as_str),
-            Some("10")
-        );
-        assert_eq!(
-            workflow.pointer("/11/inputs/mask/0").and_then(Value::as_str),
-            Some("13")
-        );
-        assert_eq!(
-            workflow.pointer("/11/inputs/grow_mask_by").and_then(Value::as_u64),
-            Some(6)
-        );
-        assert_eq!(
-            workflow.pointer("/13/inputs/channel").and_then(Value::as_str),
-            Some("red")
-        );
-        assert_eq!(
-            workflow.pointer("/13/inputs/image").and_then(Value::as_str),
-            Some("knowmotion/mask.png")
-        );
-        assert_eq!(
-            workflow.pointer("/7/inputs/text").and_then(Value::as_str),
-            Some("blurry")
-        );
+    fn prefers_openai_style_segment_seconds() {
+        let cues = parse_asr_cues(&json!({
+            "segments": [
+                {"start": 0.5, "end": 1.75, "text": "字幕"}
+            ]
+        }));
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].start, 0.5);
+        assert_eq!(cues[0].end, 1.75);
     }
 
     #[test]
@@ -2102,15 +1666,6 @@ mod tests {
     }
 
     #[test]
-    fn reference_weight_maps_to_img2img_denoise() {
-        assert!((reference_denoise(0.5) - 0.55).abs() < 0.001);
-        assert!((reference_denoise(1.0) - 0.40).abs() < 0.001);
-        assert!((reference_denoise(0.1) - 0.67).abs() < 0.001);
-        assert!((reference_denoise(-5.0) - 0.67).abs() < 0.001);
-        assert!((reference_denoise(9.0) - 0.40).abs() < 0.001);
-    }
-
-    #[test]
     fn reference_bytes_accept_project_assets_and_data_urls_only() {
         let temp = tempfile::tempdir().expect("temp dir");
         let project_root = temp.path().join("project-1");
@@ -2121,12 +1676,8 @@ mod tests {
         )
         .expect("write");
 
-        let local = read_reference_bytes(
-            temp.path(),
-            "project-1",
-            "assets/images/ref.png",
-        )
-        .expect("local reference");
+        let local = read_reference_bytes(temp.path(), "project-1", "assets/images/ref.png")
+            .expect("local reference");
         assert_eq!(local, b"\x89PNG\r\n\x1a\npayload");
 
         use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -2139,20 +1690,12 @@ mod tests {
         .expect("data url reference");
         assert_eq!(decoded, b"\x89PNG\r\n\x1a\ndata-url");
 
-        assert!(read_reference_bytes(
-            temp.path(),
-            "project-1",
-            "https://example.com/ref.png"
-        )
-        .is_err());
         assert!(
-            read_reference_bytes(temp.path(), "project-1", "../secret.png").is_err()
+            read_reference_bytes(temp.path(), "project-1", "https://example.com/ref.png").is_err()
         );
-        assert!(read_reference_bytes(
-            temp.path(),
-            "project-1",
-            "assets/images/missing.png"
-        )
-        .is_err());
+        assert!(read_reference_bytes(temp.path(), "project-1", "../secret.png").is_err());
+        assert!(
+            read_reference_bytes(temp.path(), "project-1", "assets/images/missing.png").is_err()
+        );
     }
 }

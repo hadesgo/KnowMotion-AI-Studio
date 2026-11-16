@@ -155,7 +155,7 @@ export interface ReferenceAttachment {
 
 export interface InpaintMeta {
   sourceAssetId: string;
-  mode: "openai-edits" | "comfyui-inpaint";
+  mode: "openai-edits";
   coverage: number;
   seed: number;
   anchorLabel: string;
@@ -314,7 +314,8 @@ export interface ProviderProfile {
     | "Gemini"
     | "Ollama"
     | "GGUF"
-    | "ComfyUI";
+    | "audio.cpp"
+    | "stable-diffusion.cpp";
   baseUrl: string;
   model: string;
   contextSize?: number;
