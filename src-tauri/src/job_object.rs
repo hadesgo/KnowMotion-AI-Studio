@@ -6,6 +6,10 @@ use std::{
     os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle},
     sync::Arc,
 };
+#[cfg(all(test, windows))]
+use windows_sys::Win32::System::JobObjects::{
+    JobObjectBasicProcessIdList, QueryInformationJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST,
+};
 #[cfg(windows)]
 use windows_sys::Win32::{
     Foundation::HANDLE,
@@ -15,18 +19,14 @@ use windows_sys::Win32::{
         JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     },
 };
-#[cfg(all(test, windows))]
-use windows_sys::Win32::System::JobObjects::{
-    JobObjectBasicProcessIdList, QueryInformationJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST,
-};
 
 #[derive(Clone)]
-pub(crate) struct RenderJobObject {
+pub(crate) struct ProcessJobObject {
     #[cfg(windows)]
     handle: Arc<OwnedHandle>,
 }
 
-impl RenderJobObject {
+impl ProcessJobObject {
     pub(crate) fn attach(child: &Child) -> Result<Self, String> {
         #[cfg(windows)]
         {
@@ -34,7 +34,7 @@ impl RenderJobObject {
                 let raw_job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
                 if raw_job.is_null() {
                     return Err(format!(
-                        "Unable to create renderer Job Object: {}",
+                        "Unable to create child process Job Object: {}",
                         io::Error::last_os_error()
                     ));
                 }
@@ -51,7 +51,7 @@ impl RenderJobObject {
                 ) == 0
                 {
                     return Err(format!(
-                        "Unable to configure renderer Job Object: {}",
+                        "Unable to configure child process Job Object: {}",
                         io::Error::last_os_error()
                     ));
                 }
@@ -61,7 +61,7 @@ impl RenderJobObject {
                 ) == 0
                 {
                     return Err(format!(
-                        "Unable to assign renderer process to Job Object: {}",
+                        "Unable to assign child process to Job Object: {}",
                         io::Error::last_os_error()
                     ));
                 }
@@ -80,7 +80,7 @@ impl RenderJobObject {
         {
             if unsafe { TerminateJobObject(self.handle.as_raw_handle() as HANDLE, 1) } == 0 {
                 return Err(format!(
-                    "Unable to terminate renderer Job Object: {}",
+                    "Unable to terminate child process Job Object: {}",
                     io::Error::last_os_error()
                 ));
             }
@@ -103,7 +103,7 @@ impl RenderJobObject {
         };
         if success == 0 {
             return Err(format!(
-                "Unable to query renderer Job Object: {}",
+                "Unable to query child process Job Object: {}",
                 io::Error::last_os_error()
             ));
         }
@@ -129,17 +129,13 @@ mod tests {
     };
     use windows_sys::Win32::{
         Foundation::{CloseHandle, STILL_ACTIVE},
-        System::{
-            Threading::{
-                GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-            },
-        },
+        System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
     };
 
     #[test]
     fn terminating_job_kills_descendant_process_tree() {
         let (mut parent, child_pid) = spawn_tree();
-        let job = RenderJobObject::attach(&parent).expect("attach render job object");
+        let job = ProcessJobObject::attach(&parent).expect("attach process job object");
         let child_pid = wait_for_descendant(&job, parent.id()).unwrap_or(child_pid);
         assert!(process_is_alive(child_pid), "descendant should be running");
         job.terminate().expect("terminate render job object");
@@ -150,7 +146,7 @@ mod tests {
     #[test]
     fn closing_last_job_handle_kills_descendant_process_tree() {
         let (mut parent, child_pid) = spawn_tree();
-        let job = RenderJobObject::attach(&parent).expect("attach render job object");
+        let job = ProcessJobObject::attach(&parent).expect("attach process job object");
         let child_pid = wait_for_descendant(&job, parent.id()).unwrap_or(child_pid);
         assert!(process_is_alive(child_pid), "descendant should be running");
         drop(job);
@@ -180,7 +176,7 @@ mod tests {
         );
     }
 
-    fn wait_for_descendant(job: &RenderJobObject, parent_pid: u32) -> Option<u32> {
+    fn wait_for_descendant(job: &ProcessJobObject, parent_pid: u32) -> Option<u32> {
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
             if let Ok(ids) = job.process_ids() {

@@ -1,37 +1,50 @@
 use super::model::ProviderConfig;
 use super::provider::{LlmProvider, LlmRequest, LlmResponse};
+use crate::job_object::ProcessJobObject;
 use async_trait::async_trait;
-#[cfg(target_os = "windows")]
-use llama_rs::backend::dx12::{Dx12Backend, Dx12DeviceType};
-use llama_rs::{ChatTemplate, Engine, EngineConfig, Sampler, SamplerConfig};
+use reqwest::Client;
+use serde_json::{json, Value};
 use std::{
     collections::HashMap,
+    env,
+    io::{BufRead, BufReader, Read, Write},
+    net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
     sync::{Arc, Mutex, OnceLock},
+    thread,
+    time::{Duration, Instant},
 };
+use uuid::Uuid;
 
-struct CachedEngine {
-    context_size: usize,
-    preference: BackendPreference,
-    backend_label: String,
-    engine: Arc<Engine>,
-}
+const DEFAULT_CONTEXT_SIZE: u32 = 8192;
+const MIN_CONTEXT_SIZE: u32 = 512;
+const MAX_CONTEXT_SIZE: u32 = 1_048_576;
+const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(300);
+const MAX_SERVER_LOG_BYTES: usize = 64 * 1024;
 
-static ENGINE_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedEngine>>> = OnceLock::new();
+static SERVER_CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<LlamaServer>>>> = OnceLock::new();
+static RUNTIME_RESOURCE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 pub struct GgufLlmProvider {
-    engine: Arc<Engine>,
+    server: Arc<LlamaServer>,
     model_name: String,
-    backend_label: String,
+    client: Client,
 }
 
 impl GgufLlmProvider {
     pub fn load(config: &ProviderConfig) -> Result<Self, String> {
-        let (engine, backend_label) = load_cached_engine(config)?;
+        let server = load_cached_server(config)?;
+        let client = Client::builder()
+            .timeout(Duration::from_secs(600))
+            .connect_timeout(Duration::from_secs(2))
+            .user_agent("KnowMotion-AI-Studio/0.1")
+            .build()
+            .map_err(|error| format!("Unable to create llama.cpp client: {error}"))?;
         Ok(Self {
-            engine,
-            model_name: config.model.clone(),
-            backend_label,
+            server,
+            model_name: configured_model_name(config),
+            client,
         })
     }
 }
@@ -39,25 +52,67 @@ impl GgufLlmProvider {
 #[async_trait]
 impl LlmProvider for GgufLlmProvider {
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, String> {
-        let engine = Arc::clone(&self.engine);
         let requested_model = if request.model.trim().is_empty() {
             self.model_name.clone()
         } else {
             request.model.clone()
         };
-        let result = tokio::task::spawn_blocking(move || generate_text(&engine, &request))
+        let user = if request.json_mode {
+            format!(
+                "{}\n\n严格输出要求：只返回一个完整、可解析的 JSON 对象，不要使用 Markdown 代码围栏。",
+                request.user
+            )
+        } else {
+            request.user.clone()
+        };
+        let mut payload = json!({
+            "model": requested_model,
+            "messages": [
+                {"role": "system", "content": request.system},
+                {"role": "user", "content": user}
+            ],
+            "temperature": request.temperature.max(0.0),
+            "max_tokens": request.max_tokens.max(1),
+            "stream": false
+        });
+        if request.json_mode {
+            payload["response_format"] = json!({"type": "json_object"});
+        }
+
+        let response = self
+            .client
+            .post(format!("{}/v1/chat/completions", self.server.base_url))
+            .bearer_auth(&self.server.api_key)
+            .json(&payload)
+            .send()
             .await
-            .map_err(|error| format!("GGUF inference task failed: {error}"))??;
-        Ok(LlmResponse {
-            text: result.text,
-            model: requested_model,
-            input_tokens: Some(result.input_tokens as u64),
-            output_tokens: Some(result.output_tokens as u64),
-        })
+            .map_err(|error| {
+                if error.is_timeout() {
+                    "llama.cpp inference timed out".to_string()
+                } else {
+                    format!(
+                        "llama.cpp request failed: {}",
+                        redact_error(&error.to_string())
+                    )
+                }
+            })?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(format!(
+                "llama.cpp returned {status}: {}",
+                sanitize_server_error(&body)
+            ));
+        }
+        let body: Value = response
+            .json()
+            .await
+            .map_err(|error| format!("Invalid llama.cpp response: {error}"))?;
+        parse_completion_response(&requested_model, &body)
     }
 
     fn backend_label(&self) -> Option<&str> {
-        Some(&self.backend_label)
+        Some(&self.server.backend_label)
     }
 }
 
@@ -72,105 +127,388 @@ impl BackendPreference {
     fn from_config(value: Option<&str>) -> Result<Self, String> {
         match value.unwrap_or("auto").trim().to_ascii_lowercase().as_str() {
             "" | "auto" => Ok(Self::Auto),
-            "gpu" | "dx12" => Ok(Self::Gpu),
+            "gpu" | "vulkan" | "dx12" => Ok(Self::Gpu),
             "cpu" => Ok(Self::Cpu),
             other => Err(format!("Unsupported GGUF inference backend: {other}")),
         }
     }
 }
 
-fn load_cached_engine(config: &ProviderConfig) -> Result<(Arc<Engine>, String), String> {
-    let model_path = validate_model_path(&config.base_url)?;
-    let context_size = config.context_size.unwrap_or(8192).clamp(512, 1_048_576) as usize;
-    let preference = BackendPreference::from_config(config.inference_backend.as_deref())?;
-    let cache = ENGINE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(cached) = cache
-        .lock()
-        .map_err(|_| "GGUF model cache is unavailable".to_string())?
-        .get(&model_path)
-    {
-        if cached.context_size == context_size && cached.preference == preference {
-            return Ok((Arc::clone(&cached.engine), cached.backend_label.clone()));
-        }
-    }
-
-    let gpu_name = dx12_gpu_name();
-    let use_gpu = match preference {
-        BackendPreference::Cpu => false,
-        BackendPreference::Gpu => {
-            if gpu_name.is_none() {
-                return Err(
-                    "DirectX 12 GPU inference was requested, but no compatible GPU was detected"
-                        .to_string(),
-                );
-            }
-            true
-        }
-        BackendPreference::Auto => gpu_name.is_some(),
-    };
-    let backend_label = if use_gpu {
-        format!(
-            "DirectX 12 GPU · {}",
-            gpu_name.as_deref().unwrap_or("unknown device")
-        )
-    } else {
-        "CPU".to_string()
-    };
-    let engine_config = EngineConfig {
-        model_path: model_path.to_string_lossy().to_string(),
-        temperature: 0.35,
-        top_k: 40,
-        top_p: 0.95,
-        repeat_penalty: 1.1,
-        max_tokens: 6000,
-        max_context_len: Some(context_size),
-        use_gpu,
-        ..EngineConfig::default()
-    };
-    let (engine, backend_label) = match Engine::load(engine_config.clone()) {
-        Ok(engine) => (Arc::new(engine), backend_label),
-        Err(error) if preference == BackendPreference::Auto && engine_config.use_gpu => {
-            let cpu_config = EngineConfig {
-                use_gpu: false,
-                ..engine_config
-            };
-            (
-                Arc::new(Engine::load(cpu_config).map_err(|fallback_error| {
-                    format!("Unable to load GGUF model on GPU ({error}) or CPU ({fallback_error})")
-                })?),
-                "CPU (GPU initialization failed)".to_string(),
-            )
-        }
-        Err(error) => return Err(format!("Unable to load GGUF model: {error}")),
-    };
-    cache
-        .lock()
-        .map_err(|_| "GGUF model cache is unavailable".to_string())?
-        .insert(
-            model_path,
-            CachedEngine {
-                context_size,
-                preference,
-                backend_label: backend_label.clone(),
-                engine: Arc::clone(&engine),
-            },
-        );
-    Ok((engine, backend_label))
+struct LlamaServer {
+    child: Mutex<Child>,
+    job_object: ProcessJobObject,
+    base_url: String,
+    api_key: String,
+    backend_label: String,
+    model_alias: String,
+    context_size: u32,
+    preference: BackendPreference,
+    log: Arc<Mutex<String>>,
 }
 
-fn dx12_gpu_name() -> Option<String> {
-    #[cfg(target_os = "windows")]
-    {
-        let backend = Dx12Backend::new().ok()?;
-        let has_hardware = Dx12Backend::enumerate_devices()
-            .into_iter()
-            .any(|device| !matches!(device.device_type, Dx12DeviceType::Warp));
-        has_hardware.then(|| backend.device_name().to_string())
+impl LlamaServer {
+    fn stop(&self) {
+        let _ = self.job_object.terminate();
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        None
+
+    fn exit_status(&self) -> Option<String> {
+        let mut child = self.child.lock().ok()?;
+        child
+            .try_wait()
+            .ok()
+            .flatten()
+            .map(|status| status.to_string())
     }
+
+    fn log_tail(&self) -> String {
+        self.log
+            .lock()
+            .map(|log| log.chars().rev().take(3000).collect::<String>())
+            .map(|log| log.chars().rev().collect())
+            .unwrap_or_default()
+    }
+}
+
+impl Drop for LlamaServer {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+pub(crate) fn configure_runtime(resource_dir: PathBuf) {
+    let _ = RUNTIME_RESOURCE_DIR.set(resource_dir);
+}
+
+pub(crate) fn shutdown_runtime() {
+    let Some(cache) = SERVER_CACHE.get() else {
+        return;
+    };
+    let servers = match cache.lock() {
+        Ok(mut cache) => std::mem::take(&mut *cache),
+        Err(_) => return,
+    };
+    for (_, server) in servers {
+        server.stop();
+    }
+}
+
+fn load_cached_server(config: &ProviderConfig) -> Result<Arc<LlamaServer>, String> {
+    let model_path = validate_model_path(&config.base_url)?;
+    let context_size = config
+        .context_size
+        .unwrap_or(DEFAULT_CONTEXT_SIZE)
+        .clamp(MIN_CONTEXT_SIZE, MAX_CONTEXT_SIZE);
+    let preference = BackendPreference::from_config(config.inference_backend.as_deref())?;
+    let model_alias = configured_model_name(config);
+    let cache = SERVER_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut cache = cache
+        .lock()
+        .map_err(|_| "llama.cpp server cache is unavailable".to_string())?;
+
+    if let Some(cached) = cache.get(&model_path) {
+        if cached.context_size == context_size
+            && cached.preference == preference
+            && cached.model_alias == model_alias
+        {
+            return Ok(Arc::clone(cached));
+        }
+    }
+    if let Some(stale) = cache.remove(&model_path) {
+        stale.stop();
+    }
+
+    let executable = find_server_executable()?;
+    let gpu_devices = match preference {
+        BackendPreference::Cpu => Vec::new(),
+        BackendPreference::Gpu | BackendPreference::Auto => list_gpu_devices(&executable),
+    };
+    if preference == BackendPreference::Gpu && gpu_devices.is_empty() {
+        return Err(
+            "Vulkan GPU inference was requested, but llama.cpp detected no compatible GPU"
+                .to_string(),
+        );
+    }
+
+    let use_gpu = preference != BackendPreference::Cpu && !gpu_devices.is_empty();
+    let server = match start_server(
+        &executable,
+        &model_path,
+        &model_alias,
+        context_size,
+        preference,
+        use_gpu,
+        gpu_devices.first().map(String::as_str),
+    ) {
+        Ok(server) => server,
+        Err(gpu_error) if preference == BackendPreference::Auto && use_gpu => start_server(
+            &executable,
+            &model_path,
+            &model_alias,
+            context_size,
+            preference,
+            false,
+            None,
+        )
+        .map_err(|cpu_error| {
+            format!("Unable to start llama.cpp with Vulkan GPU ({gpu_error}) or CPU ({cpu_error})")
+        })?,
+        Err(error) => return Err(error),
+    };
+    let server = Arc::new(server);
+    cache.insert(model_path, Arc::clone(&server));
+    Ok(server)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_server(
+    executable: &Path,
+    model_path: &Path,
+    model_alias: &str,
+    context_size: u32,
+    preference: BackendPreference,
+    use_gpu: bool,
+    gpu_name: Option<&str>,
+) -> Result<LlamaServer, String> {
+    let port = reserve_loopback_port()?;
+    let api_key = Uuid::new_v4().to_string();
+    let log = Arc::new(Mutex::new(String::new()));
+    let mut command = Command::new(executable);
+    command
+        .arg("--model")
+        .arg(model_path)
+        .arg("--alias")
+        .arg(model_alias)
+        .arg("--ctx-size")
+        .arg(context_size.to_string())
+        .arg("--host")
+        .arg("127.0.0.1")
+        .arg("--port")
+        .arg(port.to_string())
+        .arg("--jinja")
+        .arg("--no-webui")
+        .current_dir(executable.parent().unwrap_or_else(|| Path::new(".")))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("LLAMA_LOG_COLORS", "0")
+        .env("LLAMA_API_KEY", &api_key);
+    if use_gpu {
+        command.arg("--n-gpu-layers").arg("auto");
+    } else {
+        command
+            .arg("--n-gpu-layers")
+            .arg("0")
+            .arg("--device")
+            .arg("none");
+    }
+    hide_console_window(&mut command);
+
+    let mut child = command.spawn().map_err(|error| {
+        format!(
+            "Unable to start llama.cpp server {}: {error}",
+            executable.display()
+        )
+    })?;
+    let job_object = match ProcessJobObject::attach(&child) {
+        Ok(job_object) => job_object,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
+    drain_process_output(child.stdout.take(), Arc::clone(&log));
+    drain_process_output(child.stderr.take(), Arc::clone(&log));
+    let backend_label = if use_gpu {
+        format!(
+            "llama.cpp Vulkan GPU · {}",
+            gpu_name.unwrap_or("auto-selected device")
+        )
+    } else if preference == BackendPreference::Auto {
+        "llama.cpp CPU (no compatible Vulkan GPU)".to_string()
+    } else {
+        "llama.cpp CPU".to_string()
+    };
+    let server = LlamaServer {
+        child: Mutex::new(child),
+        job_object,
+        base_url: format!("http://127.0.0.1:{port}"),
+        api_key,
+        backend_label,
+        model_alias: model_alias.to_string(),
+        context_size,
+        preference,
+        log,
+    };
+    wait_until_ready(&server, port).map_err(|error| {
+        server.stop();
+        error
+    })?;
+    Ok(server)
+}
+
+fn reserve_loopback_port() -> Result<u16, String> {
+    TcpListener::bind(("127.0.0.1", 0))
+        .and_then(|listener| listener.local_addr())
+        .map(|address| address.port())
+        .map_err(|error| format!("Unable to reserve a llama.cpp loopback port: {error}"))
+}
+
+fn wait_until_ready(server: &LlamaServer, port: u16) -> Result<(), String> {
+    let timeout = env::var("KNOWMOTION_LLAMA_START_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(DEFAULT_START_TIMEOUT);
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if health_response(port) {
+            return Ok(());
+        }
+        if let Some(status) = server.exit_status() {
+            let log = server.log_tail();
+            return Err(format!(
+                "llama.cpp server exited during model loading ({status}){}",
+                if log.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {log}")
+                }
+            ));
+        }
+        thread::sleep(Duration::from_millis(150));
+    }
+    Err(format!(
+        "llama.cpp model loading did not become ready within {} seconds",
+        timeout.as_secs()
+    ))
+}
+
+fn health_response(port: u16) -> bool {
+    let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(250)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+    if stream
+        .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut response = [0_u8; 128];
+    let read = stream.read(&mut response).unwrap_or(0);
+    String::from_utf8_lossy(&response[..read])
+        .lines()
+        .next()
+        .is_some_and(|status| status.contains(" 200 "))
+}
+
+fn drain_process_output<R>(reader: Option<R>, log: Arc<Mutex<String>>)
+where
+    R: Read + Send + 'static,
+{
+    let Some(reader) = reader else {
+        return;
+    };
+    thread::spawn(move || {
+        for line in BufReader::new(reader).lines().map_while(Result::ok) {
+            let Ok(mut log) = log.lock() else {
+                return;
+            };
+            log.push_str(&line);
+            log.push('\n');
+            if log.len() > MAX_SERVER_LOG_BYTES {
+                let mut split = log.len() - MAX_SERVER_LOG_BYTES;
+                while split < log.len() && !log.is_char_boundary(split) {
+                    split += 1;
+                }
+                log.drain(..split);
+            }
+        }
+    });
+}
+
+fn find_server_executable() -> Result<PathBuf, String> {
+    if let Some(configured) = env::var_os("KNOWMOTION_LLAMA_SERVER") {
+        let path = PathBuf::from(configured);
+        if path.is_file() {
+            return path
+                .canonicalize()
+                .map_err(|error| format!("Unable to resolve llama.cpp server: {error}"));
+        }
+        return Err(format!(
+            "KNOWMOTION_LLAMA_SERVER does not point to a file: {}",
+            path.display()
+        ));
+    }
+
+    let mut candidates = Vec::new();
+    if let Some(resource_dir) = RUNTIME_RESOURCE_DIR.get() {
+        candidates.push(resource_dir.join("resources/llama/llama-server.exe"));
+        candidates.push(resource_dir.join("llama/llama-server.exe"));
+    }
+    candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/llama/llama-server.exe"));
+    if let Ok(executable) = env::current_exe() {
+        if let Some(directory) = executable.parent() {
+            candidates.push(directory.join("resources/llama/llama-server.exe"));
+            candidates.push(directory.join("llama/llama-server.exe"));
+        }
+    }
+    for candidate in candidates {
+        if candidate.is_file() {
+            return candidate
+                .canonicalize()
+                .map_err(|error| format!("Unable to resolve llama.cpp server: {error}"));
+        }
+    }
+    Err(
+        "llama.cpp server runtime is missing. Run `npm run llama:prepare` before building."
+            .to_string(),
+    )
+}
+
+fn list_gpu_devices(executable: &Path) -> Vec<String> {
+    let mut command = Command::new(executable);
+    command
+        .arg("--list-devices")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("LLAMA_LOG_COLORS", "0");
+    hide_console_window(&mut command);
+    let Ok(output) = command.output() else {
+        return Vec::new();
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    stdout
+        .lines()
+        .chain(stderr.lines())
+        .filter_map(|line| {
+            let (device, name) = line.trim().split_once(':')?;
+            let device = device.trim();
+            (device.to_ascii_lowercase().starts_with("vulkan") && !name.trim().is_empty())
+                .then(|| name.trim().to_string())
+        })
+        .collect()
+}
+
+fn configured_model_name(config: &ProviderConfig) -> String {
+    let configured = config.model.trim();
+    if !configured.is_empty() {
+        return configured.replace(',', " ").trim().to_string();
+    }
+    Path::new(config.base_url.trim().trim_matches('"'))
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("local-gguf")
+        .to_string()
 }
 
 fn validate_model_path(value: &str) -> Result<PathBuf, String> {
@@ -202,105 +540,65 @@ fn validate_model_path(value: &str) -> Result<PathBuf, String> {
         .map_err(|error| format!("Unable to resolve GGUF model path: {error}"))
 }
 
-struct GeneratedText {
-    text: String,
-    input_tokens: usize,
-    output_tokens: usize,
-}
-
-fn generate_text(engine: &Engine, request: &LlmRequest) -> Result<GeneratedText, String> {
-    let mut user = request.user.clone();
-    if request.json_mode {
-        user.push_str(
-            "\n\n严格输出要求：只返回一个完整、可解析的 JSON 对象，不要使用 Markdown 代码围栏。",
-        );
+fn parse_completion_response(requested_model: &str, body: &Value) -> Result<LlmResponse, String> {
+    let text = body
+        .pointer("/choices/0/message/content")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "llama.cpp response has no message content".to_string())?;
+    if text.trim().is_empty() {
+        return Err("llama.cpp returned no text".to_string());
     }
-    let prompt = engine
-        .chat_template()
-        .format_first_turn(&request.system, &user);
-    let tokenizer = engine.tokenizer();
-    let mut tokens = tokenizer
-        .encode(&prompt, engine.add_bos())
-        .map_err(|error| format!("Unable to tokenize GGUF prompt: {error}"))?;
-    if tokens.is_empty() {
-        return Err("GGUF tokenizer produced an empty prompt".to_string());
-    }
-
-    let context_limit = engine.model_config().max_seq_len;
-    if tokens.len() >= context_limit {
-        return Err(format!(
-            "GGUF prompt uses {} tokens but the configured context is {} tokens. Increase context length or reduce project context.",
-            tokens.len(),
-            context_limit
-        ));
-    }
-    let max_new_tokens =
-        (request.max_tokens.max(1) as usize).min(context_limit.saturating_sub(tokens.len()));
-    let input_tokens = tokens.len();
-    let mut sampler = Sampler::new(
-        SamplerConfig {
-            temperature: request.temperature.max(0.0),
-            top_k: if request.temperature <= 0.0 { 1 } else { 40 },
-            top_p: 0.95,
-            repeat_penalty: if request.temperature <= 0.0 { 1.0 } else { 1.1 },
-            ..SamplerConfig::default()
-        },
-        engine.model_config().vocab_size,
-    );
-    let mut context = engine.create_inference_context();
-    let eos_token = tokenizer.special_tokens.eos_token_id;
-    let mut output = String::new();
-
-    for _ in 0..max_new_tokens {
-        let logits = if context.position == 0 {
-            engine
-                .model()
-                .forward(&tokens, &mut context)
-                .map_err(|error| format!("GGUF model forward pass failed: {error}"))?
-        } else {
-            engine
-                .model()
-                .forward(&tokens[tokens.len() - 1..], &mut context)
-                .map_err(|error| format!("GGUF model forward pass failed: {error}"))?
-        };
-        let next_token = sampler.sample(&logits, &tokens);
-        if next_token == eos_token {
-            break;
-        }
-        let text = tokenizer
-            .decode(&[next_token])
-            .map_err(|error| format!("Unable to decode GGUF output token: {error}"))?;
-        output.push_str(&text);
-        tokens.push(next_token);
-
-        if truncate_at_stop(engine.chat_template(), &mut output) {
-            break;
-        }
-    }
-
-    if output.trim().is_empty() {
-        return Err("GGUF model returned no text".to_string());
-    }
-    Ok(GeneratedText {
-        text: output.trim().to_string(),
-        input_tokens,
-        output_tokens: tokens.len().saturating_sub(input_tokens),
+    Ok(LlmResponse {
+        text: text.to_string(),
+        model: body
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or(requested_model)
+            .to_string(),
+        input_tokens: body.pointer("/usage/prompt_tokens").and_then(Value::as_u64),
+        output_tokens: body
+            .pointer("/usage/completion_tokens")
+            .and_then(Value::as_u64),
     })
 }
 
-fn truncate_at_stop(template: &ChatTemplate, output: &mut String) -> bool {
-    let positions = template
-        .stop_patterns()
-        .iter()
-        .filter_map(|pattern| output.find(pattern))
-        .collect::<Vec<_>>();
-    if let Some(position) = positions.into_iter().min() {
-        output.truncate(position);
-        true
-    } else {
-        false
-    }
+fn sanitize_server_error(body: &str) -> String {
+    let message = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .pointer("/error/message")
+                .or_else(|| value.get("message"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "llama.cpp request error".to_string());
+    redact_error(&message).chars().take(500).collect()
 }
+
+fn redact_error(message: &str) -> String {
+    message
+        .split_whitespace()
+        .map(|token| {
+            if token.contains("api_key=") || token.contains("Authorization:") {
+                "[redacted]".to_string()
+            } else {
+                token.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(windows)]
+fn hide_console_window(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn hide_console_window(_command: &mut Command) {}
 
 #[cfg(test)]
 mod tests {
@@ -315,6 +613,10 @@ mod tests {
         );
         assert_eq!(
             BackendPreference::from_config(Some("gpu")).expect("GPU preference"),
+            BackendPreference::Gpu
+        );
+        assert_eq!(
+            BackendPreference::from_config(Some("dx12")).expect("legacy GPU preference"),
             BackendPreference::Gpu
         );
         assert_eq!(
@@ -355,70 +657,79 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires KNOWMOTION_GGUF_TEST_MODEL"]
-    fn generates_text_with_a_real_gguf_model() {
+    fn parses_llama_cpp_openai_response() {
+        let response = parse_completion_response(
+            "qwen-local",
+            &json!({
+                "model": "qwen-local",
+                "choices": [{"message": {"content": "hello"}}],
+                "usage": {"prompt_tokens": 9, "completion_tokens": 2}
+            }),
+        )
+        .expect("parse response");
+        assert_eq!(response.text, "hello");
+        assert_eq!(response.input_tokens, Some(9));
+        assert_eq!(response.output_tokens, Some(2));
+    }
+
+    #[test]
+    #[ignore = "requires KNOWMOTION_GGUF_TEST_MODEL and the prepared llama.cpp runtime"]
+    fn generates_with_the_packaged_llama_cpp_server() {
         let model_path = std::env::var("KNOWMOTION_GGUF_TEST_MODEL").expect("GGUF test model path");
-        let config = ProviderConfig {
-            id: "gguf-test".to_string(),
-            name: "GGUF test".to_string(),
+        let provider = GgufLlmProvider::load(&ProviderConfig {
+            id: "gguf-llama-cpp-test".to_string(),
+            name: "GGUF llama.cpp test".to_string(),
             protocol: "GGUF".to_string(),
             base_url: model_path,
-            model: "test".to_string(),
+            model: "knowmotion-test".to_string(),
             context_size: Some(512),
             inference_backend: Some("cpu".to_string()),
             enabled: true,
             capabilities: vec!["LLM".to_string()],
-        };
-        let provider = GgufLlmProvider::load(&config).expect("load GGUF model");
-        let result = generate_text(
-            &provider.engine,
-            &LlmRequest {
-                model: "test".to_string(),
-                system: "You are a concise assistant.".to_string(),
-                user: "Reply with the single word: hello".to_string(),
+        })
+        .expect("load llama.cpp server");
+        assert_eq!(provider.backend_label(), Some("llama.cpp CPU"));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        let response = runtime
+            .block_on(provider.complete(LlmRequest {
+                model: "knowmotion-test".to_string(),
+                system: "Answer concisely.".to_string(),
+                user: "Reply with hello.".to_string(),
                 temperature: 0.0,
                 max_tokens: 16,
                 json_mode: false,
-            },
-        )
-        .expect("generate GGUF response");
-        assert!(!result.text.trim().is_empty());
-        assert!(result.input_tokens > 0);
-        assert!(result.output_tokens > 0);
+            }))
+            .expect("generate with llama.cpp");
+        assert!(!response.text.trim().is_empty());
+        shutdown_runtime();
     }
 
     #[test]
-    #[ignore = "requires KNOWMOTION_GGUF_TEST_MODEL and a DirectX 12 GPU"]
-    fn generates_text_with_a_real_gguf_model_on_gpu() {
+    #[ignore = "requires KNOWMOTION_GGUF_TEST_MODEL, the prepared llama.cpp runtime, and a Vulkan GPU"]
+    fn selects_a_vulkan_gpu_when_available() {
         let model_path = std::env::var("KNOWMOTION_GGUF_TEST_MODEL").expect("GGUF test model path");
-        let config = ProviderConfig {
-            id: "gguf-gpu-test".to_string(),
-            name: "GGUF GPU test".to_string(),
+        let provider = GgufLlmProvider::load(&ProviderConfig {
+            id: "gguf-vulkan-test".to_string(),
+            name: "GGUF Vulkan test".to_string(),
             protocol: "GGUF".to_string(),
             base_url: model_path,
-            model: "test".to_string(),
+            model: "knowmotion-test".to_string(),
             context_size: Some(512),
-            inference_backend: Some("gpu".to_string()),
+            inference_backend: Some("auto".to_string()),
             enabled: true,
             capabilities: vec!["LLM".to_string()],
-        };
-        let provider = GgufLlmProvider::load(&config).expect("load GGUF model on GPU");
-        assert!(provider
-            .backend_label()
-            .is_some_and(|label| label.starts_with("DirectX 12 GPU")));
-        let result = generate_text(
-            &provider.engine,
-            &LlmRequest {
-                model: "test".to_string(),
-                system: "You are a concise assistant.".to_string(),
-                user: "Reply with the single word: hello".to_string(),
-                temperature: 0.0,
-                max_tokens: 16,
-                json_mode: false,
-            },
-        )
-        .expect("generate GGUF response on GPU");
-        assert!(!result.text.trim().is_empty());
-        assert!(result.output_tokens > 0);
+        })
+        .expect("load llama.cpp on auto backend");
+        assert!(
+            provider
+                .backend_label()
+                .is_some_and(|label| label.starts_with("llama.cpp Vulkan GPU")),
+            "expected a Vulkan GPU backend, got {:?}",
+            provider.backend_label()
+        );
+        shutdown_runtime();
     }
 }

@@ -574,7 +574,7 @@ type ProviderErrorCode =
 - `AnthropicLlm`。
 - `GeminiLlm`。
 - `OllamaLlm`。
-- `GgufLocalLlm`：进程内加载本地 GGUF，缓存模型，并按配置选择 DirectX 12 GPU 或 CPU 进行推理。
+- `GgufLocalLlm`：按需启动随包分发的官方 llama.cpp `llama-server`，缓存模型进程，并按配置选择 Vulkan GPU 或 CPU 进行推理。
 - `OpenAiCompatibleImage` / `ComfyUiImage`。
 - `OpenAiCompatibleTts` / 可插拔本地 TTS。
 - `WhisperCompatibleAsr`。

@@ -1,5 +1,5 @@
 use crate::{
-    job_object::RenderJobObject, logging, logging::LogLevel, safe_identifier, write_atomic,
+    job_object::ProcessJobObject, logging, logging::LogLevel, safe_identifier, write_atomic,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
@@ -80,7 +80,7 @@ struct ActiveRender {
     stdin: Mutex<Option<ChildStdin>>,
     child: Arc<Mutex<Child>>,
     canceled: Arc<AtomicBool>,
-    job_object: RenderJobObject,
+    job_object: ProcessJobObject,
 }
 
 struct RenderEnvironment {
@@ -287,7 +287,7 @@ impl RenderManager {
         let mut child = command
             .spawn()
             .map_err(|error| format!("Unable to start renderer: {error}"))?;
-        let job_object = match RenderJobObject::attach(&child) {
+        let job_object = match ProcessJobObject::attach(&child) {
             Ok(job_object) => job_object,
             Err(error) => {
                 logging::log_event(
@@ -486,7 +486,7 @@ impl RenderManager {
         expected_duration_ms: i64,
         child: Arc<Mutex<Child>>,
         canceled: Arc<AtomicBool>,
-        _job_object: RenderJobObject,
+        _job_object: ProcessJobObject,
         stdout: impl Read + Send + 'static,
         stderr: impl Read + Send + 'static,
     ) {

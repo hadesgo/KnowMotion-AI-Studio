@@ -15,7 +15,7 @@ AI-powered knowledge animation studio. 用户从一个知识主题开始，在�
 - 图片局部重绘：画布遮罩画笔，ComfyUI `VAEEncodeForInpaint` 与 OpenAI `images/edits` 双通道，结果另存为新素材。
 - 视频素材与图层：导入 MP4/WebM 等容器，剪出入点/速度/音量后插入镜头；Remotion 用 `OffthreadVideo` 参与 Player 预览与最终渲染。
 - 九个持久化 AI Agent 与 DAG Workflow：模型路由、审批、暂停恢复、局部重跑、受控项目工具、修订和撤销。
-- 原生 GGUF 本地推理：可直接选择 `.gguf` 模型文件，支持 CPU 与 DirectX 12 GPU 加速。
+- 原生 GGUF 本地推理：可直接选择 `.gguf` 模型文件，由 llama.cpp 加载，支持 CPU 与 Vulkan GPU 加速。
 - Remotion Scene/Composition DSL、可复用动画组件、实时 Player 和完整 H.264 渲染。
 - 确定性 Canvas 2D 动画图层：粒子流、动态波形、知识网络和轨道拖尾。
 - 帧驱动 GSAP 运动：漂浮、呼吸、摆动、环绕和弹性入场，Player 与 Renderer 结果一致。
@@ -58,11 +58,11 @@ Windows 干净 VM smoke 会安装 NSIS、校验 runtime 哈希、离线渲染短
 npm run desktop:dev
 ```
 
-要求 Windows 已安装 Rust、MSVC Build Tools、Windows 10 SDK（包含 `dxc.exe`）和 WebView2。GPU 推理使用 DirectX 12，最终用户无需安装 CUDA 或 Vulkan SDK。桌面数据写入 Tauri 应用数据目录：
+要求 Windows 已安装 Rust、MSVC Build Tools、Windows 10 SDK 和 WebView2。GPU 推理使用随包分发的 llama.cpp Vulkan 后端，最终用户无需安装 CUDA 或 Vulkan SDK。桌面数据写入 Tauri 应用数据目录：
 
 构建会复制约 1 GB 的固定渲染依赖。首次构建若本机尚无 Chrome Headless Shell，`renderer:prepare` 会在构建阶段准备一次；正式安装后的应用不需要用户安装 Node、Chrome 或 FFmpeg。
 
-GGUF 使用内置的 llama-rs 推理引擎，不需要额外安装 Ollama 或 llama.cpp。推理设备可选“自动、GPU、CPU”；自动模式会优先使用 DirectX 12 GPU，检测不到兼容 GPU 时回退 CPU。模型文件本身不复制到应用数据目录；Provider 只保存本地文件路径、上下文长度和推理设备偏好。
+GGUF 使用随应用打包的官方 llama.cpp `llama-server`，不依赖 Ollama，也不需要用户另行安装 llama.cpp。推理设备可选“自动、GPU、CPU”；自动模式会优先使用 Vulkan GPU，检测不到兼容设备或初始化失败时回退 CPU。模型文件本身不复制到应用数据目录；Provider 只保存本地文件路径、上下文长度和推理设备偏好。
 
 ```text
 %APPDATA%/com.knowmotion.studio/
@@ -88,6 +88,8 @@ GGUF 使用内置的 llama-rs 推理引擎，不需要额外安装 Ollama 或 ll
 npm run build
 npm run desktop:build
 ```
+
+桌面构建会先准备固定版本的 llama.cpp runtime；需要单独刷新时可运行 `npm run llama:prepare`，设置 `KNOWMOTION_LLAMA_VERSION` 可覆盖版本。
 
 安装包输出位于：
 

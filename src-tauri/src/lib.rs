@@ -717,6 +717,11 @@ pub fn run() {
             let projects_root = app_data.join("projects");
             fs::create_dir_all(&projects_root).map_err(|error| error.to_string())?;
             let database_path = app_data.join("studio.sqlite3");
+            agent::configure_llama_runtime(
+                app.path()
+                    .resource_dir()
+                    .map_err(|error| error.to_string())?,
+            );
             let database = Arc::new(Mutex::new(
                 open_database(&database_path).map_err(|error| error.to_string())?,
             ));
@@ -802,6 +807,7 @@ pub fn run() {
             tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
         ) {
             logging::info("app", "Desktop application exiting");
+            agent::shutdown_llama_runtime();
             logging::shutdown();
         }
     });

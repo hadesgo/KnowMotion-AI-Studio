@@ -24,3 +24,4 @@ async function run(args) {
 await run([path.join(projectRoot, "node_modules/typescript/bin/tsc"), "-b"]);
 await run([path.join(projectRoot, "node_modules/vite/bin/vite.js"), "build"]);
 await run([path.join(projectRoot, "scripts/prepare-render-runtime.mjs")]);
+await run([path.join(projectRoot, "scripts/prepare-llama-runtime.mjs")]);

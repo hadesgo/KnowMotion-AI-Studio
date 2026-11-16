@@ -394,7 +394,7 @@ export default function Models() {
                     {provider.inferenceBackend === "cpu"
                       ? "CPU"
                       : provider.inferenceBackend === "gpu"
-                        ? "DX12 GPU"
+                        ? "VULKAN GPU"
                         : "AUTO GPU"}
                   </Pill>
                 )}
@@ -622,7 +622,7 @@ export default function Models() {
           {draft.protocol === "GGUF" && (
             <Field
               label="推理设备"
-              hint="自动模式优先使用 DirectX 12 GPU；未检测到 GPU 时回退 CPU。"
+              hint="由 llama.cpp 加载模型。自动模式优先使用 Vulkan GPU；未检测到兼容设备时回退 CPU。"
             >
               <Select
                 value={draft.inferenceBackend}
@@ -635,7 +635,7 @@ export default function Models() {
                 }
               >
                 <option value="auto">自动（GPU 优先）</option>
-                <option value="gpu">GPU（DirectX 12）</option>
+                <option value="gpu">GPU（Vulkan）</option>
                 <option value="cpu">CPU</option>
               </Select>
             </Field>

@@ -16,6 +16,14 @@ use tauri::{AppHandle, State};
 pub use model::workflow_definition;
 pub(crate) use provider::get_provider_secret;
 
+pub(crate) fn configure_llama_runtime(resource_dir: std::path::PathBuf) {
+    gguf::configure_runtime(resource_dir);
+}
+
+pub(crate) fn shutdown_llama_runtime() {
+    gguf::shutdown_runtime();
+}
+
 #[tauri::command]
 pub fn agent_workflow_definition() -> WorkflowDefinition {
     workflow_definition()

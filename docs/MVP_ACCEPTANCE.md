@@ -61,7 +61,7 @@
 6. 在 Agent Workflow 为每个 Agent 指定 Provider 与模型。
 7. 启动工作流并完成审批。
 
-GGUF 已使用真实小型量化模型完成 CPU 与 DirectX 12 GPU 生成测试。外部云端 Provider 仍需要用户自己的 API Key；Ollama 需要本地服务运行。Provider 协议解析、GGUF 文件校验、GPU/CPU 路由、密钥边界、工具白名单和结构化 Agent 输出已有自动化测试。
+GGUF 已使用真实小型量化模型完成 llama.cpp CPU 与 Vulkan GPU 生成测试。外部云端 Provider 仍需要用户自己的 API Key；Ollama 需要本地服务运行。Provider 协议解析、GGUF 文件校验、GPU/CPU 路由、密钥边界、工具白名单和结构化 Agent 输出已有自动化测试。
 
 ## 渲染运行时边界
 
