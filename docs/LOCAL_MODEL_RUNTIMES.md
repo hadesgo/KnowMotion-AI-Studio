@@ -19,16 +19,37 @@ Runtime binaries are not bundled with the application and are not downloaded
 when the app starts. The installer runs only after the user selects a local
 model runtime:
 
-1. Run `nvidia-smi --query-gpu=driver_version,compute_cap` to detect a usable
-   NVIDIA GPU and driver.
-2. If the driver is CUDA 12.4-compatible, download the CUDA variant and its
-   matching CUDA runtime libraries.
-3. Otherwise download the portable Vulkan variant.
-4. Verify every archive with its pinned SHA-256 before extraction.
-5. Hash every extracted runtime file and store its relative path, byte count,
+1. Run `nvidia-smi --query-gpu=driver_version,compute_cap` and collect every
+   NVIDIA GPU in the machine.
+2. Prefer the pinned CUDA 12.4 archives when some GPU has driver major ≥ 551 and
+   compute capability 5.0–9.x. Existing installs keep this variant, so nothing is
+   re-downloaded on Ampere/Ada machines.
+3. Otherwise, when the runtime publishes a CUDA 13 archive and some GPU has
+   driver major ≥ 620 and compute capability ≥ 7.5, download the CUDA 13 variant
+   plus its CUDA runtime libraries. CUDA 13 is the only CUDA path with kernel
+   images for Blackwell (10.x/12.x, e.g. RTX 50 series): the 12.4 toolchain stops
+   at 9.x. R620 is the driver branch of the pinned CUDA 13.5 build; the 13.x
+   minor-version-compatibility floor is R580, and 13.5 features need R620, so the
+   stricter of the two is used.
+4. Otherwise download the portable Vulkan variant.
+5. Verify every archive with its pinned SHA-256 before extraction.
+6. Hash every extracted runtime file and store its relative path, byte count,
    and SHA-256 in `manifest.json`.
-6. Store the verified runtime and its manifest under
+7. Store the verified runtime and its manifest under
    `%APPDATA%/com.knowmotion.studio/runtimes/`.
+
+Pinned archives per variant:
+
+| Runtime | CUDA 12.4 | CUDA 13 | Vulkan |
+| --- | --- | --- | --- |
+| `llama.cpp` b12359 | `llama-b12359-bin-win-cuda-12.4-x64` + `cudart-llama-bin-win-cuda-12.4-x64` | `llama-b12359-bin-win-cuda-13.5-x64` + `cudart-llama-bin-win-cuda-13.5-x64` | `llama-b12359-bin-win-vulkan-x64` |
+| `audio.cpp` v0.9.5 | `audio-v0.9.5-bin-windows-x64-cuda12.4` + `…-cudart-windows-x64-cuda12.4` | `audio-v0.9.5-bin-windows-x64-cuda13.3` + `…-cudart-windows-x64-cuda13.3` | `audio-v0.9.5-bin-windows-x64-vulkan-portable` |
+| `stable-diffusion.cpp` master-1106-532d2c1 | `sd-master-532d2c1-bin-win-cuda12-x64` + `cudart-sd-bin-win-cu12-x64` | not published — Blackwell still uses Vulkan | `sd-master-532d2c1-bin-win-vulkan-x64` |
+
+A CUDA 13 install is recorded as `acceleration: "cuda13"` in `manifest.json` so a
+12.4 machine is never forced to re-download, but the managed servers still
+receive `--backend cuda`: `audio.cpp` and `stable-diffusion.cpp` only know
+`cuda`/`vulkan`, and the toolkit minor version is an installation detail.
 
 Before a runtime is reported ready, the executable path is canonicalized
 inside its runtime root and the complete file tree is checked against the

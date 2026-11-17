@@ -21,7 +21,10 @@ static INSTALL_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum RuntimeAcceleration {
+    /// Pinned CUDA 12.4 archives. Highest compute capability they were built for is 9.x.
     Cuda,
+    /// Pinned CUDA 13.x archives. The only CUDA build with kernels for Blackwell (10.x/12.x).
+    Cuda13,
     Vulkan,
 }
 
@@ -29,6 +32,7 @@ impl RuntimeAcceleration {
     fn label(self) -> &'static str {
         match self {
             Self::Cuda => "CUDA 12.4",
+            Self::Cuda13 => "CUDA 13",
             Self::Vulkan => "Vulkan",
         }
     }
@@ -36,13 +40,18 @@ impl RuntimeAcceleration {
     fn manifest_label(self) -> &'static str {
         match self {
             Self::Cuda => "cuda12.4",
+            Self::Cuda13 => "cuda13",
             Self::Vulkan => "vulkan",
         }
     }
 
+    /// Backend name understood by the managed servers. Both CUDA variants keep
+    /// reporting `cuda`, because audio.cpp/stable-diffusion.cpp only know
+    /// `cuda` and `vulkan`; the toolkit minor version is an installation
+    /// detail, not a runtime switch.
     fn backend_name(self) -> &'static str {
         match self {
-            Self::Cuda => "cuda",
+            Self::Cuda | Self::Cuda13 => "cuda",
             Self::Vulkan => "vulkan",
         }
     }
@@ -61,6 +70,9 @@ struct RuntimeSpec {
     version: &'static str,
     executable_name: &'static str,
     cuda: &'static [RuntimeArchive],
+    /// CUDA 13.x archives. Empty when the project does not publish one, in
+    /// which case Blackwell devices keep falling back to Vulkan.
+    cuda13: &'static [RuntimeArchive],
     vulkan: &'static [RuntimeArchive],
 }
 
@@ -76,6 +88,21 @@ const LLAMA_CUDA: [RuntimeArchive; 2] = [
         download_url:
             "https://github.com/ggml-org/llama.cpp/releases/download/b12359/cudart-llama-bin-win-cuda-12.4-x64.zip",
         sha256: "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
+    },
+];
+
+const LLAMA_CUDA13: [RuntimeArchive; 2] = [
+    RuntimeArchive {
+        name: "llama-b12359-bin-win-cuda-13.5-x64.zip",
+        download_url:
+            "https://github.com/ggml-org/llama.cpp/releases/download/b12359/llama-b12359-bin-win-cuda-13.5-x64.zip",
+        sha256: "1de9ca1ff408d6e348ea0007c6880ad2393311a02e7799bcde26dc16daef03dd",
+    },
+    RuntimeArchive {
+        name: "cudart-llama-bin-win-cuda-13.5-x64.zip",
+        download_url:
+            "https://github.com/ggml-org/llama.cpp/releases/download/b12359/cudart-llama-bin-win-cuda-13.5-x64.zip",
+        sha256: "c2bf4cc202bfbaaa7a0b75f5082457c3811326947bb216059b72839d844e9cba",
     },
 ];
 
@@ -98,6 +125,21 @@ const AUDIO_CUDA: [RuntimeArchive; 2] = [
         download_url:
             "https://github.com/0xShug0/audio.cpp/releases/download/v0.9.5/audio-v0.9.5-cudart-windows-x64-cuda12.4.zip",
         sha256: "fa55dfaff1d4b5c6e8fac460d64f380b9df76cd46435f187c39b05700f623a7e",
+    },
+];
+
+const AUDIO_CUDA13: [RuntimeArchive; 2] = [
+    RuntimeArchive {
+        name: "audio-v0.9.5-bin-windows-x64-cuda13.3.zip",
+        download_url:
+            "https://github.com/0xShug0/audio.cpp/releases/download/v0.9.5/audio-v0.9.5-bin-windows-x64-cuda13.3.zip",
+        sha256: "9d413d8565ad26e1ae33743e9c884e733f1684169be6f8934e1af9ee2e57a872",
+    },
+    RuntimeArchive {
+        name: "audio-v0.9.5-cudart-windows-x64-cuda13.3.zip",
+        download_url:
+            "https://github.com/0xShug0/audio.cpp/releases/download/v0.9.5/audio-v0.9.5-cudart-windows-x64-cuda13.3.zip",
+        sha256: "8614040110cc5852b1dd2192e80344295500f4fa7f3199a51c737c2c7549c3dc",
     },
 ];
 
@@ -130,12 +172,17 @@ const STABLE_DIFFUSION_VULKAN: [RuntimeArchive; 1] = [RuntimeArchive {
     sha256: "3e66222c87ca27074e1fd8ce79706eef17a8aaf39949906aa1bee7e060f22ecc",
 }];
 
+/// stable-diffusion.cpp `master-1106-532d2c1` publishes no CUDA 13 archive, so
+/// Blackwell keeps using the Vulkan build for image generation.
+const STABLE_DIFFUSION_CUDA13: [RuntimeArchive; 0] = [];
+
 const RUNTIMES: [RuntimeSpec; 3] = [
     RuntimeSpec {
         id: "llama.cpp",
         version: "b12359",
         executable_name: "llama-server.exe",
         cuda: &LLAMA_CUDA,
+        cuda13: &LLAMA_CUDA13,
         vulkan: &LLAMA_VULKAN,
     },
     RuntimeSpec {
@@ -143,6 +190,7 @@ const RUNTIMES: [RuntimeSpec; 3] = [
         version: "v0.9.5",
         executable_name: "audiocpp_server.exe",
         cuda: &AUDIO_CUDA,
+        cuda13: &AUDIO_CUDA13,
         vulkan: &AUDIO_VULKAN,
     },
     RuntimeSpec {
@@ -150,6 +198,7 @@ const RUNTIMES: [RuntimeSpec; 3] = [
         version: "master-1106-532d2c1",
         executable_name: "sd-server.exe",
         cuda: &STABLE_DIFFUSION_CUDA,
+        cuda13: &STABLE_DIFFUSION_CUDA13,
         vulkan: &STABLE_DIFFUSION_VULKAN,
     },
 ];
@@ -211,6 +260,7 @@ fn runtime_spec(runtime: &str) -> Result<RuntimeSpec, String> {
 fn archives_for(spec: RuntimeSpec, acceleration: RuntimeAcceleration) -> &'static [RuntimeArchive] {
     match acceleration {
         RuntimeAcceleration::Cuda => spec.cuda,
+        RuntimeAcceleration::Cuda13 => spec.cuda13,
         RuntimeAcceleration::Vulkan => spec.vulkan,
     }
 }
@@ -471,13 +521,29 @@ fn hidden_command(program: &str) -> Command {
 ///
 /// 只判断驱动下限是不够的：CUDA 12.4 工具链最高只能生成 compute capability
 /// 9.x 的 kernel，Blackwell（10.x/12.x，如 RTX 50 系）在 CUDA 12.4 归档里没有
-/// 可执行的 kernel image，启动后会退回 CPU 或直接报错。这类设备必须改用
-/// 便携 Vulkan 归档。
+/// 可执行的 kernel image，启动后会退回 CPU 或直接报错。
 fn cuda_12_4_supports(driver_major: u32, compute_capability: f32) -> bool {
     driver_major >= 551 && (5.0..10.0).contains(&compute_capability)
 }
 
-fn cuda_available() -> bool {
+/// 判断 CUDA 13.x 归档能否在这块显卡上执行。
+///
+/// 两个门槛：
+/// - 驱动：本项目固定的是 llama.cpp 的 CUDA 13.5 与 audio.cpp 的 CUDA 13.3 归档，
+///   对应驱动分支分别是 R620 / R610（CUDA 13.x 的 minor version compatibility
+///   最低是 R580，但 13.5 的新特性要求 R620）。取两者更严的 R620，避免在
+///   580–619 的机器上装好却起不来。
+/// - 计算能力：CUDA 13 已取消 Maxwell/Pascal/Volta 的离线编译，最低 Turing（7.5）；
+///   上限不设，Blackwell（10.x/12.x）正是这一档要覆盖的目标。
+fn cuda_13_supports(driver_major: u32, compute_capability: f32) -> bool {
+    driver_major >= CUDA13_MIN_DRIVER && compute_capability >= 7.5
+}
+
+/// 首个能执行 CUDA 13 kernel 的最低驱动分支（R620 = CUDA 13.5）。
+const CUDA13_MIN_DRIVER: u32 = 620;
+
+/// 读取所有 NVIDIA 显卡的（驱动主版本，计算能力）。`nvidia-smi` 不可用时返回空。
+fn detected_gpus() -> Vec<(u32, f32)> {
     let candidates = [
         "nvidia-smi.exe",
         "C:\\Windows\\System32\\nvidia-smi.exe",
@@ -509,23 +575,54 @@ fn cuda_available() -> bool {
             }
             String::from_utf8_lossy(&fallback.stdout).to_string()
         };
-        for line in text.lines().filter(|line| !line.trim().is_empty()) {
-            let fields = line.split(',').map(str::trim).collect::<Vec<_>>();
-            let driver_major = fields
-                .first()
-                .and_then(|value| value.split('.').next())
-                .and_then(|value| value.parse::<u32>().ok())
-                .unwrap_or(0);
-            let compute_cap = fields
-                .get(1)
-                .and_then(|value| value.parse::<f32>().ok())
-                .unwrap_or(5.0);
-            if cuda_12_4_supports(driver_major, compute_cap) {
-                return true;
-            }
+        let gpus = text
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .filter_map(|line| {
+                let fields = line.split(',').map(str::trim).collect::<Vec<_>>();
+                let driver_major = fields
+                    .first()
+                    .and_then(|value| value.split('.').next())
+                    .and_then(|value| value.parse::<u32>().ok())?;
+                let compute_capability = fields
+                    .get(1)
+                    .and_then(|value| value.parse::<f32>().ok())
+                    // 旧版 nvidia-smi 不返回 compute_cap 时按 CUDA 12.4 的
+                    // 最低受支持能力处理，保持历史行为不变。
+                    .unwrap_or(5.0);
+                Some((driver_major, compute_capability))
+            })
+            .collect::<Vec<_>>();
+        if !gpus.is_empty() {
+            return gpus;
         }
     }
-    false
+    Vec::new()
+}
+
+/// 在给定显卡列表里挑加速后端。纯函数，便于测试各代显卡的组合。
+///
+/// 优先级：CUDA 12.4（存量机器不重新下载）→ CUDA 13（Blackwell 唯一可用 CUDA）
+/// → Vulkan（兜底，始终可用）。
+fn select_acceleration(has_cuda13: bool, gpus: &[(u32, f32)]) -> RuntimeAcceleration {
+    if gpus
+        .iter()
+        .any(|(driver, compute)| cuda_12_4_supports(*driver, *compute))
+    {
+        return RuntimeAcceleration::Cuda;
+    }
+    if has_cuda13
+        && gpus
+            .iter()
+            .any(|(driver, compute)| cuda_13_supports(*driver, *compute))
+    {
+        return RuntimeAcceleration::Cuda13;
+    }
+    RuntimeAcceleration::Vulkan
+}
+
+fn choose_acceleration(spec: RuntimeSpec) -> RuntimeAcceleration {
+    select_acceleration(!spec.cuda13.is_empty(), &detected_gpus())
 }
 
 fn extract_zip(archive: &Path, destination: &Path) -> Result<(), String> {
@@ -588,11 +685,7 @@ fn installed_result(
 #[tauri::command]
 pub async fn ensure_local_runtime(runtime: String) -> Result<RuntimeInstallResult, String> {
     let spec = runtime_spec(&runtime)?;
-    let acceleration = if cuda_available() {
-        RuntimeAcceleration::Cuda
-    } else {
-        RuntimeAcceleration::Vulkan
-    };
+    let acceleration = choose_acceleration(spec);
     let mut repair_performed = false;
     match load_installed_manifest(spec, acceleration) {
         Ok(Some((manifest, executable))) => {
@@ -766,6 +859,7 @@ mod tests {
                 && spec
                     .cuda
                     .iter()
+                    .chain(spec.cuda13.iter())
                     .chain(spec.vulkan.iter())
                     .all(|archive| archive.sha256.len() == 64)
         }));
@@ -817,11 +911,85 @@ mod tests {
         assert!(cuda_12_4_supports(621, 9.0));
         // 驱动过旧。
         assert!(!cuda_12_4_supports(550, 8.6));
-        // Blackwell（RTX 50 系）在 CUDA 12.4 归档中没有 kernel，必须走 Vulkan。
+        // Blackwell（RTX 50 系）在 CUDA 12.4 归档中没有 kernel，必须走 Vulkan 或 CUDA 13。
         assert!(!cuda_12_4_supports(621, 10.0));
         assert!(!cuda_12_4_supports(621, 12.0));
         // 低于受支持的最低计算能力。
         assert!(!cuda_12_4_supports(600, 3.5));
+    }
+
+    #[test]
+    fn cuda13_assets_are_pinned_with_runtime_libraries() {
+        let llama = runtime_spec("llama.cpp").expect("llama");
+        assert_eq!(llama.cuda13.len(), 2);
+        assert!(llama
+            .cuda13
+            .iter()
+            .any(|archive| archive.name.contains("cuda-13.5-x64")
+                && archive.name.starts_with("cudart-")));
+
+        let audio = runtime_spec("audio.cpp").expect("audio");
+        assert_eq!(audio.cuda13.len(), 2);
+        assert!(audio
+            .cuda13
+            .iter()
+            .any(|archive| archive.name.starts_with("audio-v0.9.5-cudart")
+                && archive.name.contains("cuda13.3")));
+
+        // stable-diffusion.cpp 没有发布 CUDA 13 归档，必须保持为空以继续回退 Vulkan。
+        let diffusion = runtime_spec("stable-diffusion.cpp").expect("stable-diffusion");
+        assert!(diffusion.cuda13.is_empty());
+    }
+
+    #[test]
+    fn cuda13_selection_covers_blackwell() {
+        // RTX 5070：驱动 621.24、计算能力 12.0，CUDA 12.4 不可用，CUDA 13 可用。
+        assert!(!cuda_12_4_supports(621, 12.0));
+        assert!(cuda_13_supports(621, 12.0));
+        assert_eq!(
+            select_acceleration(true, &[(621, 12.0)]),
+            RuntimeAcceleration::Cuda13
+        );
+        // 运行时没有 CUDA 13 归档（stable-diffusion.cpp）时仍然走 Vulkan。
+        assert_eq!(
+            select_acceleration(false, &[(621, 12.0)]),
+            RuntimeAcceleration::Vulkan
+        );
+        // Ada 上有既有 CUDA 12.4 归档就优先复用，不触发重新下载。
+        assert_eq!(
+            select_acceleration(true, &[(621, 8.9)]),
+            RuntimeAcceleration::Cuda
+        );
+        // 驱动只有 R580 时 CUDA 13 归档起不来，退回 Vulkan。
+        assert!(!cuda_13_supports(580, 12.0));
+        assert_eq!(
+            select_acceleration(true, &[(580, 12.0)]),
+            RuntimeAcceleration::Vulkan
+        );
+        // CUDA 13 不再支持 Turing 之前的架构。
+        assert!(!cuda_13_supports(621, 7.0));
+        // 没有可见 NVIDIA 显卡。
+        assert_eq!(select_acceleration(true, &[]), RuntimeAcceleration::Vulkan);
+        // 多卡：只要有一张卡能跑固定 CUDA 12.4 归档，就沿用 12.4（那张卡可用）；
+        // 两张都是 Blackwell 时才切到 CUDA 13。
+        assert_eq!(
+            select_acceleration(true, &[(560, 6.1), (621, 12.0)]),
+            RuntimeAcceleration::Cuda
+        );
+        assert_eq!(
+            select_acceleration(true, &[(580, 12.0), (621, 12.0)]),
+            RuntimeAcceleration::Cuda13
+        );
+    }
+
+    #[test]
+    fn cuda13_manifests_keep_the_cuda_backend_name() {
+        assert_eq!(RuntimeAcceleration::Cuda13.manifest_label(), "cuda13");
+        assert_eq!(RuntimeAcceleration::Cuda13.label(), "CUDA 13");
+        // 服务器进程只认 cuda / vulkan，不能把 cuda13 传下去。
+        assert_eq!(RuntimeAcceleration::Cuda13.backend_name(), "cuda");
+        assert_eq!(RuntimeAcceleration::Cuda.backend_name(), "cuda");
+        assert_eq!(RuntimeAcceleration::Vulkan.backend_name(), "vulkan");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # KnowMotion AI Studio 实现审计
 
-> 审计更新：2026-11-17 第七轮（`ac67f5d` 平台完整性提交后的全量复验：门禁实跑、陈旧结论修订、IPC 门禁行尾缺陷修复）
+> 审计更新：2026-11-17 第七轮（`ac67f5d` 平台完整性提交后的全量复验：门禁实跑、陈旧结论修订、IPC 门禁行尾缺陷修复；并为 Blackwell 补入 CUDA 13 运行时备选，见 3.22）
 >
 > 基线：原始《项目开发总提示词》、`docs/ARCHITECTURE.md`、`docs/AGENT_WORKFLOW.md`、`docs/REMOTION_ENGINE.md`、`docs/MVP_ACCEPTANCE.md`、`docs/LOCAL_MODEL_RUNTIMES.md` 及最新运行时代码。
 > 判定原则：代码、持久化数据、自动化测试或真实产物可证明的，才算已实现；只有 UI、提示词或设计文档的不算。
@@ -288,7 +288,7 @@
 
 - `ensure_local_runtime` 支持 llama.cpp `b12359`、audio.cpp `v0.9.5` 和 stable-diffusion.cpp `master-1106-532d2c1`。
 - 运行时按需下载到应用数据目录 `runtimes/`，不随 NSIS 安装包分发。
-- 使用 `nvidia-smi` 的驱动版本和计算能力选择 CUDA 12.4 或 Vulkan 归档；CUDA 通道同时下载对应运行库。
+- 使用 `nvidia-smi` 的驱动版本和计算能力选择 CUDA 12.4、CUDA 13 或 Vulkan 归档；CUDA 通道同时下载对应运行库。选择优先级是 12.4（存量机器不重新下载）→ CUDA 13（Blackwell 唯一可用 CUDA，需驱动 ≥ R620）→ Vulkan。
 - 每个归档在解压前校验固定 SHA-256，单个归档设置 1 GiB 下载上限；安装使用 staging 目录后重命名。
 - GGUF Provider 通过应用拉起的 `llama-server` 执行推理，使用随机回环端口、临时 API Key、Windows Job Object 和结构化日志。
 - `LocalModelScheduler` 统一管理三种本地运行时的 GPU 租约、进程状态、启动健康检查和空闲卸载；显存租约默认保留 896 MiB，并允许在 768–1024 MiB 范围内由环境变量调整。
@@ -301,7 +301,7 @@
 - 判定是产物级的，不是“HTTP 200”：LLM 必须产出可解析且字段完整的 JSON；Embedding 必须维度一致且语义排序成立（相关句比无关句高 0.02 以上）；TTS 必须是 `hound` 可解析且时长 > 1.5 s 的 WAV；ASR 直接识别 TTS 产物并要求字符重合率 ≥ 0.4；Image 必须返回尺寸匹配的 PNG 并记录 SHA-256。
 - 实测结果（2026-11-16，RTX 5070 12 GB，全部五项一次通过）：LLM 35.9 s / 136 输入 token / 269 输出 token；Embedding 1.5 s / 768 维 / 相关 0.8213 vs 无关 0.6357；TTS 6.3 s / 8 800 ms WAV；ASR 5.6 s / 字符重合率 1.000；Image 62.7 s / 768×768 PNG 713 281 字节。
 - `scripts/acceptance/install-local-runtimes.mjs` 按 `local_runtime.rs` 的固定版本与 SHA-256 安装三个运行时，避免验收依赖手工解压。`npm run acceptance:runtimes` 与 `npm run acceptance:services` 是对外入口。
-- 本轮同时修掉一个真实缺陷：固定版本 CUDA 12.4 归档无法为 Blackwell（计算能力 10.x/12.x）生成 kernel，原 `cuda_available()` 只校验下限会在 RTX 50 系上选中不可用后端；现在按计算能力上限选择 Vulkan，并补了 `cuda_asset_selection_excludes_blackwell` 测试。
+- 本轮同时修掉一个真实缺陷：固定版本 CUDA 12.4 归档无法为 Blackwell（计算能力 10.x/12.x）生成 kernel，原 `cuda_available()` 只校验下限会在 RTX 50 系上选中不可用后端；当时改为按计算能力上限回退 Vulkan，并补了 `cuda_asset_selection_excludes_blackwell` 测试。第七轮后该缺陷已按根因解决：llama.cpp `b12359` 与 audio.cpp `v0.9.5` 都发布了 CUDA 13 归档（13.5 / 13.3），新增 `RuntimeAcceleration::Cuda13` 作为 12.4 与 Vulkan 之间的备选，Blackwell 且驱动 ≥ R620 时改用 CUDA 13，不再退回 Vulkan；stable-diffusion.cpp 没有发布 CUDA 13 归档，仍走 Vulkan。
 - 明确的边界：本地 Embedding 服务仍由验收脚本拉起，调度器没有托管这一类工作负载；ASR 无时间片段（模型只返回文本与推理耗时）；局部重绘两条通道和九 Agent 全流程不在本轮范围内。
 
 ### 3.18 像素级身份验证与角色锁
@@ -375,6 +375,26 @@
 | `npm run ipc:check` | 修复前失败 / 修复后通过 | 4.10；LF 与 CRLF 工作区均验证 |
 | 桌面 E2E | 未在本轮执行 | 需要 release 构建 + WebDriver + WebView2 环境，仍是 CI 门禁 |
 | 真实本地服务 / 云端 / 签名发布 | 未在本轮执行 | 依赖 GPU 主机、云端 Key、代码签名证书 |
+
+### 3.22 Blackwell 补齐 CUDA 13 备选（2026-11-17）
+
+3.16 记录的缺陷在根因上解决：上游已经发布 CUDA 13 归档，应用不再让 RTX 50 系退回 Vulkan。
+
+- 新增 `RuntimeAcceleration::Cuda13`（`manifest.json` 里记为 `acceleration: "cuda13"`）。选择顺序：CUDA 12.4 → CUDA 13 → Vulkan。12.4 排在最前，Ampere/Ada 的存量安装不会因为这次改动触发重新下载。
+- 固定归档（SHA-256 取自 GitHub Release API 的 asset `digest` 字段，非估算）：
+
+  | 运行时 | CUDA 13 归档 | 字节数 |
+  |---|---|---|
+  | llama.cpp b12359 | `llama-b12359-bin-win-cuda-13.5-x64.zip` / `cudart-llama-bin-win-cuda-13.5-x64.zip` | 179 546 112 / 426 314 199 |
+  | audio.cpp v0.9.5 | `audio-v0.9.5-bin-windows-x64-cuda13.3.zip` / `audio-v0.9.5-cudart-windows-x64-cuda13.3.zip` | 280 869 815 / 575 457 454 |
+  | stable-diffusion.cpp | 未发布，继续走 Vulkan | — |
+
+- 门槛：`cuda_13_supports = 驱动主版本 ≥ 620 && 计算能力 ≥ 7.5`。R620 是固定归档里 CUDA 13.5 对应的驱动分支（CUDA 13.x 的 minor version compatibility 下限是 R580，13.5 的新特性要 R620，取更严的一个）；7.5 是 CUDA 13 取消 Maxwell/Pascal/Volta 离线编译后的最低架构。
+- `backend_name()` 对两种 CUDA 都返回 `cuda`：`audio.cpp` 与 `stable-diffusion.cpp` 的 `--backend` 只认 `cuda`/`vulkan`，工具链版本属于安装细节，不能透传给服务器进程。
+- 纯函数 `select_acceleration(has_cuda13, gpus)` 让判定可测：RTX 5070（驱动 621、算力 12.0）选 CUDA 13；同卡但驱动 R580 退回 Vulkan；Ada（算力 8.9）仍用 12.4；没有 CUDA 13 归档的运行时（stable-diffusion.cpp）继续 Vulkan；多卡时任一卡可用即可。
+- 同步更新 `scripts/acceptance/install-local-runtimes.mjs`（同样的判定与固定哈希，`KNOWMOTION_RUNTIME_ACCELERATION` 增加 `cuda13`）、`docs/LOCAL_MODEL_RUNTIMES.md` 与 `README.md`。
+- 回归：`cargo test --lib` 104 通过 / 8 忽略（新增 3 项：归档固定、选择逻辑、清单标签与 backend 名称）。
+- **未完成的验证**：本机没能把这两个归档真正下载下来做端到端校验。`install-local-runtimes.mjs` 直连 GitHub release 资产连续 26 分钟没有落盘（`response.arrayBuffer()` 全程未完成），改用 `gh-proxy.com` 镜像做 8 MB Range 探测同样在 90 s 内无响应；同一时刻 `api.github.com` 通过工具链可正常访问，说明是 release 资产的下载通道在当前环境被挡，不是哈希逻辑的问题。因此上表的 SHA-256 目前只有 GitHub 上传时计算的 `digest` 这一个来源，尚未在本机用实际字节复算。正常网络下首次安装时 `install-local-runtimes.mjs` 与 `ensure_local_runtime` 都会逐字节比对，哈希若不符会直接报 `Checksum mismatch` 并停止，不会装出半成品。
 
 ## 4. 重新审计发现
 
@@ -517,7 +537,7 @@ manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对�
 | 项目版本 | Agent 修订与保存快照 | 手动 UI 编辑没有同等全局 undo/redo 栈 |
 | 项目复制 | 本地素材与项目数据可复制 | 数据库工作流/渲染历史不复制到新项目 |
 | 项目导入导出 | 含素材、渲染和受保留策略约束修订的 ZIP 包 | 跨项目边界与压缩/解压/单文件/条目预算已闭合；无独立迁移工具和跨设备自动升级 |
-| 本地模型运行时 | 固定版本下载 + 逐文件哈希 + 损坏自动重装；统一调度器负责 GPU 租约、自动启动、启动强制 smoke、健康检查、互斥和空闲卸载 | 真实 audio.cpp/stable-diffusion.cpp 采样需在有模型权重且有 GPU 的机器上重跑一次 |
+| 本地模型运行时 | 固定版本下载 + 逐文件哈希 + 损坏自动重装；CUDA 12.4 / CUDA 13 / Vulkan 三档自动选择；统一调度器负责 GPU 租约、自动启动、启动强制 smoke、健康检查、互斥和空闲卸载 | 真实 audio.cpp/stable-diffusion.cpp 采样需在有模型权重且有 GPU 的机器上重跑一次；CUDA 13 归档尚未在本机完成下载与实跑（3.22） |
 | 渲染 | 持久 Job、进度、取消、Windows Job Object、离线 runtime、验证和原子提交 | 尚无跨平台进程树容器；当前发行目标是 Windows |
 | 4K/60 FPS | Composition 与 Renderer 支持参数 | 渲染页只暴露 720p/1080p 与 30 FPS，无 4K/60 入口与实测，也没有码率/显存资源限制 |
 | 动画组件 | 文本、SVG、图片、图表、视频、Canvas 2D 与确定性 GSAP 已实现 | 视频仅场景内图层，无多轨剪辑、转场、蒙版；渲染嵌入上限 24 MB |
@@ -572,6 +592,7 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 | 配置实际 AI Provider | 本地通道通过，云端未验收 | GGUF 本地通道已实跑；云端 HTTP 路径仍缺实际 Key |
 | AI 生成结构化脚本和分镜 | 通过 | 九 Agent 全流程 723 s、9 次真实 LLM 调用、三个审批节点，产出 4 镜头/8 字幕/质量报告，见 3.19 |
 | 本地 GGUF 模型推理 | 通过 | Qwen3.8-27B 在 Vulkan 上完成真实结构化生成 |
+| Blackwell 上的 CUDA 13 运行时 | 归档与选择逻辑就绪，未实跑 | 2026-11-17 新增 CUDA 13 备选（3.22）；归档哈希取自 GitHub `digest`，本机下载通道被挡，未完成字节级复算与实跑 |
 | audio.cpp TTS/ASR | 通过 | Qwen3-TTS 合成 8.8 s 旁白，Qwen3-ASR 识别字符重合率 1.000；ASR 无时间片段 |
 | stable-diffusion.cpp 图片生成/编辑 | 通过（本地通道） | 生成 768×768 PNG；局部重绘走原生 `img_gen`，遮罩内 Δ103.5 / 外 Δ12.7 |
 | 至少三个动画场景预览 | 通过 | 蓝天项目 6 个场景五风格 |

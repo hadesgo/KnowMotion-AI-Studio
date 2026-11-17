@@ -15,7 +15,7 @@
  *
  * Environment:
  *   KNOWMOTION_RUNTIME_ROOT          install root (default %APPDATA%/com.knowmotion.studio/runtimes)
- *   KNOWMOTION_RUNTIME_ACCELERATION  cuda | vulkan (default: detected)
+ *   KNOWMOTION_RUNTIME_ACCELERATION  cuda | cuda13 | vulkan (default: detected)
  *   KNOWMOTION_GITHUB_MIRROR         optional prefix, e.g. https://gh-proxy.com/
  */
 
@@ -51,6 +51,18 @@ const RUNTIMES = [
           "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
       },
     ],
+    cuda13: [
+      {
+        name: "llama-b12359-bin-win-cuda-13.5-x64.zip",
+        sha256:
+          "1de9ca1ff408d6e348ea0007c6880ad2393311a02e7799bcde26dc16daef03dd",
+      },
+      {
+        name: "cudart-llama-bin-win-cuda-13.5-x64.zip",
+        sha256:
+          "c2bf4cc202bfbaaa7a0b75f5082457c3811326947bb216059b72839d844e9cba",
+      },
+    ],
     vulkan: [
       {
         name: "llama-b12359-bin-win-vulkan-x64.zip",
@@ -73,6 +85,18 @@ const RUNTIMES = [
         name: "audio-v0.9.5-cudart-windows-x64-cuda12.4.zip",
         sha256:
           "fa55dfaff1d4b5c6e8fac460d64f380b9df76cd46435f187c39b05700f623a7e",
+      },
+    ],
+    cuda13: [
+      {
+        name: "audio-v0.9.5-bin-windows-x64-cuda13.3.zip",
+        sha256:
+          "9d413d8565ad26e1ae33743e9c884e733f1684169be6f8934e1af9ee2e57a872",
+      },
+      {
+        name: "audio-v0.9.5-cudart-windows-x64-cuda13.3.zip",
+        sha256:
+          "8614040110cc5852b1dd2192e80344295500f4fa7f3199a51c737c2c7549c3dc",
       },
     ],
     vulkan: [
@@ -99,6 +123,9 @@ const RUNTIMES = [
           "fe20366827d357c00797eebb58244dddab7fd9a348d70090c3871004c320f38d",
       },
     ],
+    // stable-diffusion.cpp master-1106-532d2c1 没有发布 CUDA 13 归档，
+    // Blackwell 上继续使用 Vulkan 包。
+    cuda13: [],
     vulkan: [
       {
         name: "sd-master-532d2c1-bin-win-vulkan-x64.zip",
@@ -200,10 +227,43 @@ async function findFile(root, name, depth = 8) {
   return null;
 }
 
-async function detectAcceleration() {
+// CUDA 12.4 归档最高只编到 compute capability 9.x；CUDA 13 归档最低要求
+// Turing（7.5）与 R620 驱动分支（13.5 的新特性要求 R620，13.x 的 minor
+// version compatibility 最低是 R580，这里取两者更严的 R620）。
+const CUDA12_MAX_COMPUTE = 10;
+const CUDA13_MIN_DRIVER = 620;
+const CUDA13_MIN_COMPUTE = 7.5;
+
+function cuda12Supports(driverMajor, computeCap) {
+  return driverMajor >= 551 && computeCap >= 5 && computeCap < CUDA12_MAX_COMPUTE;
+}
+
+function cuda13Supports(driverMajor, computeCap) {
+  return driverMajor >= CUDA13_MIN_DRIVER && computeCap >= CUDA13_MIN_COMPUTE;
+}
+
+function selectAcceleration(hasCuda13, gpus) {
+  if (gpus.some(([driver, compute]) => cuda12Supports(driver, compute))) {
+    return "cuda";
+  }
+  if (
+    hasCuda13 &&
+    gpus.some(([driver, compute]) => cuda13Supports(driver, compute))
+  ) {
+    return "cuda13";
+  }
+  return "vulkan";
+}
+
+async function detectGpus() {
   const override = process.env.KNOWMOTION_RUNTIME_ACCELERATION?.trim();
-  if (override === "cuda" || override === "vulkan") {
-    return override;
+  if (override) {
+    if (!["cuda", "cuda13", "vulkan"].includes(override)) {
+      throw new Error(
+        `KNOWMOTION_RUNTIME_ACCELERATION must be cuda, cuda13 or vulkan (got ${override})`,
+      );
+    }
+    return { override };
   }
   try {
     const output = await new Promise((resolve, reject) => {
@@ -221,33 +281,36 @@ async function detectAcceleration() {
         code === 0 ? resolve(text) : reject(new Error(`exit ${code}`)),
       );
     });
-    const [driver, compute] = output
+    const gpus = output
       .split("\n")
-      .find((line) => line.trim().length > 0)
-      ?.split(",")
-      .map((value) => value.trim()) ?? [];
-    const driverMajor = Number.parseInt((driver ?? "0").split(".")[0], 10);
-    const computeCap = Number.parseFloat(compute ?? "0");
-    // The pinned CUDA 12.4 builds stop at compute capability 9.x. Blackwell
-    // (10.x/12.x) has no kernel image in them, so the portable Vulkan build is
-    // the only backend that actually runs on those cards.
-    if (driverMajor >= 551 && computeCap >= 5 && computeCap < 10) {
-      log(
-        `  acceleration: cuda (driver ${driver}, compute ${computeCap})`,
-      );
-      return "cuda";
-    }
-    log(
-      `  acceleration: vulkan (driver ${driver || "unknown"}, compute ${compute || "unknown"}; pinned CUDA 12.4 cannot target this device)`,
-    );
-    return "vulkan";
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => {
+        const [driver, compute] = line.split(",").map((value) => value.trim());
+        return [
+          Number.parseInt((driver ?? "0").split(".")[0], 10),
+          Number.parseFloat(compute ?? "0"),
+        ];
+      })
+      .filter(([driver, compute]) => Number.isFinite(driver) && Number.isFinite(compute));
+    return { gpus };
   } catch {
-    log("  acceleration: vulkan (nvidia-smi unavailable)");
-    return "vulkan";
+    return { gpus: [] };
   }
 }
 
+function accelerationFor(runtime, detected) {
+  if (detected.override) return detected.override;
+  return selectAcceleration(runtime.cuda13.length > 0, detected.gpus ?? []);
+}
+
 async function install(runtime, acceleration) {
+  const archives = runtime[acceleration];
+  if (!archives || archives.length === 0) {
+    throw new Error(
+      `${runtime.id} has no ${acceleration} archive; use another acceleration`,
+    );
+  }
   const target = path.join(installRoot, runtime.id);
   const manifestPath = path.join(target, "manifest.json");
   if (existsSync(manifestPath)) {
@@ -264,7 +327,6 @@ async function install(runtime, acceleration) {
     log(`${runtime.id}: reinstalling (${manifest.acceleration} -> ${acceleration})`);
   }
 
-  const archives = runtime[acceleration];
   await mkdir(cacheRoot, { recursive: true });
   await mkdir(installRoot, { recursive: true });
   const staging = await mkdtemp(path.join(installRoot, `.${runtime.id}-`));
@@ -325,8 +387,21 @@ if (selected.length === 0) {
 }
 
 log(`install root: ${installRoot}`);
-const acceleration = await detectAcceleration();
+const detected = await detectGpus();
+if (detected.override) {
+  log(`  acceleration: ${detected.override} (KNOWMOTION_RUNTIME_ACCELERATION)`);
+} else if (detected.gpus.length === 0) {
+  log("  acceleration: vulkan (nvidia-smi unavailable)");
+} else {
+  log(
+    `  gpus: ${detected.gpus
+      .map(([driver, compute]) => `driver ${driver} / compute ${compute}`)
+      .join(", ")}`,
+  );
+}
 for (const runtime of selected) {
+  const acceleration = accelerationFor(runtime, detected);
+  log(`  ${runtime.id}: ${acceleration}`);
   await install(runtime, acceleration);
 }
 

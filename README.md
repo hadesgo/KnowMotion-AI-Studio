@@ -69,11 +69,11 @@ Windows 干净 VM smoke 会安装 NSIS、校验 runtime 哈希、离线渲染短
 npm run desktop:dev
 ```
 
-要求 Windows 已安装 Rust、MSVC Build Tools、Windows 10 SDK 和 WebView2。本地 AI 运行时不再随安装包分发；用户首次选择本地模型时才检测显卡并下载 CUDA 12.4 或 Vulkan 版本。最终用户无需安装 CUDA Toolkit 或 Vulkan SDK。桌面数据写入 Tauri 应用数据目录：
+要求 Windows 已安装 Rust、MSVC Build Tools、Windows 10 SDK 和 WebView2。本地 AI 运行时不再随安装包分发；用户首次选择本地模型时才检测显卡并下载 CUDA 12.4、CUDA 13 或 Vulkan 版本。最终用户无需安装 CUDA Toolkit 或 Vulkan SDK。桌面数据写入 Tauri 应用数据目录：
 
 构建会复制约 1 GB 的固定渲染依赖。首次构建若本机尚无 Chrome Headless Shell，`renderer:prepare` 会在构建阶段准备一次；正式安装后的应用不需要用户安装 Node、Chrome 或 FFmpeg。
 
-运行时按需保存到应用数据目录的 `runtimes/`。安装器优先通过 `nvidia-smi` 检测可用的 NVIDIA 驱动与计算能力，满足 CUDA 12.4 条件时下载 CUDA 包及其运行库，否则下载 Vulkan 包。GGUF 使用官方 llama.cpp `llama-server`，不依赖 Ollama。模型文件本身不复制到应用数据目录；Provider 只保存本地文件路径、上下文长度和推理设备偏好。
+运行时按需保存到应用数据目录的 `runtimes/`。安装器优先通过 `nvidia-smi` 检测可用的 NVIDIA 驱动与计算能力：满足 CUDA 12.4 条件时下载 CUDA 12.4 包及其运行库；只有 Blackwell（RTX 50 系，计算能力 10.x/12.x）等 12.4 归档没有 kernel 的设备，在驱动达到 R620 时改用 CUDA 13 包；其余情况下载 Vulkan 包。GGUF 使用官方 llama.cpp `llama-server`，不依赖 Ollama。模型文件本身不复制到应用数据目录；Provider 只保存本地文件路径、上下文长度和推理设备偏好。
 
 本地 Provider 可填写 audio.cpp 模型文件/包目录或 stable-diffusion.cpp 模型目录。应用会生成受限的本地服务配置、自动发现扩散模型组件、启动服务并等待健康状态；请求之间由同一 `LocalModelScheduler` 串行化 GPU 工作，audio.cpp 和扩散模型空闲后通过各自 API 卸载，llama.cpp 空闲超过默认 180 秒后停止。
 

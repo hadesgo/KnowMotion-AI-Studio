@@ -15,7 +15,7 @@ export type LocalRuntimeInstallResult = Omit<
   "runtime" | "acceleration"
 > & {
   runtime: LocalRuntimeId;
-  acceleration: "CUDA 12.4" | "Vulkan" | string;
+  acceleration: "CUDA 12.4" | "CUDA 13" | "Vulkan" | string;
 };
 
 export type { LocalModelSchedulerStatus, LocalRuntimeConfig };
