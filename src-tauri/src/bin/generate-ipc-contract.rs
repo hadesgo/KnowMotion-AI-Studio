@@ -68,12 +68,20 @@ fn write_generated(path: &Path, contents: &str) -> Result<(), String> {
 fn check_current(path: &Path, expected: &str, label: &str) -> Result<(), String> {
     let actual = fs::read_to_string(path)
         .map_err(|error| format!("{label} is missing or unreadable: {error}"))?;
-    if actual != expected {
+    if normalize_line_endings(&actual) != normalize_line_endings(expected) {
         return Err(format!(
             "{label} is stale; run `npm run ipc:generate` and commit the result"
         ));
     }
     Ok(())
+}
+
+/// The generator always writes LF, but a Windows checkout with
+/// `core.autocrlf=true` turns the committed files into CRLF on disk. Comparing
+/// raw bytes would then report a bogus "stale" result and break the gate on
+/// every clean checkout, so compare after normalising line endings.
+fn normalize_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n")
 }
 
 fn render_typescript(root: &Value) -> Result<String, String> {

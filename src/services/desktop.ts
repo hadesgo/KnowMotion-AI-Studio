@@ -143,12 +143,3 @@ export async function exportDesktopDiagnostics(): Promise<string | null> {
   if (!isTauriDesktop) return null;
   return invoke<string>("export_diagnostics");
 }
-
-export async function getDesktopStoragePath(): Promise<string | null> {
-  if (!isTauriDesktop) return null;
-  try {
-    return await invoke<string>("desktop_storage_path");
-  } catch {
-    return null;
-  }
-}

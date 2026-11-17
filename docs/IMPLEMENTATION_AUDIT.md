@@ -1,13 +1,13 @@
 # KnowMotion AI Studio 实现审计
 
-> 审计更新：2026-11-17（第六轮平台完整性收口；修订保留、ZIP 预算、IPC 契约、CI 门禁、SBOM、诊断包与签名发布链路已接入）
+> 审计更新：2026-11-17 第七轮（`ac67f5d` 平台完整性提交后的全量复验：门禁实跑、陈旧结论修订、IPC 门禁行尾缺陷修复）
 >
 > 基线：原始《项目开发总提示词》、`docs/ARCHITECTURE.md`、`docs/AGENT_WORKFLOW.md`、`docs/REMOTION_ENGINE.md`、`docs/MVP_ACCEPTANCE.md`、`docs/LOCAL_MODEL_RUNTIMES.md` 及最新运行时代码。
 > 判定原则：代码、持久化数据、自动化测试或真实产物可证明的，才算已实现；只有 UI、提示词或设计文档的不算。
 
 ## 1. 总体结论
 
-截至 `c327fd7`，应用已经具备一条可运行的知识动画制作主线：
+截至 `ac67f5d`（2026-11-17 平台完整性提交），应用已经具备一条可运行的知识动画制作主线：
 
 ```text
 创建项目
@@ -38,19 +38,21 @@
 
 仍未覆盖的是第三方云端凭据路径（OpenAI/Anthropic/Gemini）：`real_cloud_acceptance` 与云端局部重绘用例已就绪，但需要真实 Key 才能执行。
 
-**发布判断：仍不通过，但阻断项只剩外部依赖。** 原有 3 个 P1 已全部修复并回归；剩下的是“云端 Key 验收”和“Authenticode 签名 + 签名后干净 VM 复验”两件需要证书/凭据/VM 的事，不是代码缺口。
+第七轮（本节下方 3.21）只做复验，不新增功能：`c327fd7` 之后的 `ac67f5d` 已经落地 修订去重与保留、ZIP 预算、IPC 契约生成、CI 门禁、SBOM 与签名发布链路，本轮把这些逐项对着代码和真实命令重跑了一遍。结论是**代码事实与上一版审计基本一致，但有两处必须改口**：一是 `npm run ipc:check` 在 Windows 默认 Git 配置（`core.autocrlf=true`）下对干净工作区直接报 stale，而它是 `test.yml` 与 `release.yml` 的第一道门禁；二是 `src/services/desktop.ts` 里有一个调用不存在命令 `desktop_storage_path` 的死函数。两者都已修，见 4.10、4.11。同时订正了第二、五节里几条已经过期的结论（局部重绘 P1 状态、本地运行时完整性、Phase 7 闭环度）。
+
+**发布判断：仍不通过，阻断项只由外部依赖和平台缺口两部分构成。** 原有 3 个 P1 已全部修复并回归；外部依赖是“云端 Key 验收”和“Authenticode 签名 + 签名后干净 VM 复验”；平台缺口是 4.12 列出的云端 LLM 通路验收与 Anthropic/Gemini 请求级测试，其中 Mock HTTP 部分不需要凭据就能补，真实云端仍需 Key。
 
 ## 2. 阶段完成度
 
 | 阶段 | 状态 | 说明 |
 |---|---|---|
 | Phase 1：Tauri 桌面框架 | 完成 | 窗口、React、Zustand、WebView、SQLite 迁移、项目锁、目录、Provider 配置和 NSIS 构建已接通 |
-| Phase 2：AI 内容创作 | 框架完成，真实调用待验收 | 九个 Agent、DAG 和 GGUF 本地通道已实现；没有执行外部真实 LLM 端到端测试 |
-| Phase 3：素材生成 | 部分完成 | 本地 SVG、图片导入、OpenAI Images、stable-diffusion.cpp、文件落盘与清单已实现；局部重绘遮罩方向存在 P1 缺陷 |
+| Phase 2：AI 内容创作 | 完成（本地通道）/ 云端待验收 | 九个 Agent、DAG 与 GGUF 本地通道已实现并有全流程真实验收（3.19）；云端 LLM 通路仍无凭据验收（4.12） |
+| Phase 3：素材生成 | 基本完成 | 本地 SVG、图片导入、OpenAI Images、stable-diffusion.cpp、批量队列、局部重绘、文件落盘与清单已实现；原遮罩方向 P1 已修复并有像素级与真实服务双重验收 |
 | Phase 4：Remotion 动画 | 主体完成 | Scene DSL、组件库、Player、单场景和整片预览可用 |
 | Phase 5：音频和渲染 | 完成工程闭环 | SAPI/OpenAI Compatible/audio.cpp TTS、ASR、字幕、音乐、持久渲染 Job、离线 sidecar、进度、取消、验证和安装包已实现；本地服务生命周期、GPU 租约和空闲卸载已托管 |
-| Phase 6：完整 AI 工作流 | 大部分完成 | 审批、局部重跑、自动重试、自然语言场景 Patch、图片/TTS/ASR/RAG/网页正文入口已实现；真实外部服务尚未在线验收 |
-| Phase 7：本地模型运行时 | 部分完成 | 三种 GGUF 类运行时支持按需下载、固定版本和归档校验；正式模型包、服务自动启动、显存租约和空闲卸载仍未闭环 |
+| Phase 6：完整 AI 工作流 | 大部分完成 | 审批、局部重跑、自动重试、自然语言场景 Patch、图片/TTS/ASR/RAG/网页正文入口已实现；本地真实服务已跑通，云端仍未在线验收 |
+| Phase 7：本地模型运行时 | 基本完成 | 三种 GGUF 类运行时按需下载、固定版本、逐文件哈希与损坏自动重装、自动启动、启动强制 smoke、显存租约和空闲卸载均已闭环；缺的是“有模型权重且有 GPU 的机器上重跑一次真实采样” |
 
 ## 3. 已实现
 
@@ -348,7 +350,35 @@
 - `kmasset` 协议改为单独模块，支持 WebM/MOV/OGV/M4V 等完整媒体 MIME、`GET/HEAD/OPTIONS`、单段 `Range`、`206 Partial Content`、`Content-Range`、`Accept-Ranges` 与 `416`；只按请求区间读取文件，不再为了拖动播放把整段视频读入内存。缺失文件使用 `no-store`，避免恢复后继续命中旧 404 缓存。
 - 自动化回归：前端新增羽化真实 alpha/luminance 像素断言、文字带选区与画笔转换测试；Rust 新增逐文件哈希/损坏路径、Range/HEAD/416/MIME 和 smoke WAV 测试。当前执行主机没有可访问的 NVIDIA 设备或本地模型，因此本轮未重跑真实 GPU 推理；既有的 RTX 5070 真实验收记录保留在 `docs/REAL_SERVICE_ACCEPTANCE.md`，下一次在 GPU 主机自动启动本地模型时会执行新的强制 smoke。
 
-## 4. 第三轮重新审计发现
+### 3.21 第七轮复验（2026-11-17，`ac67f5d`）
+
+本轮不改功能，只把上一版审计的每一条结论对着代码和真实命令复核一遍。结论：`ac67f5d` 声称的平台完整性能力确实存在（IPC 契约生成器、SBOM/updater/签名发布工作流、修订与 ZIP 预算、诊断包、E2E 扩展都在代码里且测试覆盖），但门禁本身有一处会让流水线在第一步就红掉的缺陷。
+
+复核结果：
+
+- **`npm run ipc:check` 在干净工作区失败**：报 `src/generated/ipc.ts is stale`。实际内容与提交一致（`git diff --numstat` 为空），差异只在行尾——生成器写 LF，而 Windows 默认 `core.autocrlf=true` 检出为 CRLF，比较用的却是逐字节相等。该命令是 `test.yml` 与 `release.yml` 的**第一道门禁**，因此在本机默认 Git 配置下必然先于任何测试失败。已修（4.10）：比较前归一化 CRLF→LF，CRLF 与 LF 两种工作区都实测通过。
+- **前端存在调用不存在命令的死代码**：`getDesktopStoragePath()` 调用 `desktop_storage_path`，`generate_handler!` 里没有该命令，异常被 `catch` 吞掉后永远返回 `null`，且该函数没有任何调用方。信息本身已由 `desktop_status.storagePath` 提供。已删（4.11）。
+- **云端 LLM 通路没有任何验收**：`real_cloud_acceptance` 只覆盖 Embedding / TTS / ASR / Image / Inpaint，且全部是 OpenAI Compatible 协议；Anthropic 与 Gemini 适配器只有 5 项 `parse_response` 解析级单测，没有请求体/端点/请求头的请求级测试（仓库也没有 httpmock 类依赖）。这是本轮新增的最主要剩余工作（4.12）。
+- **核对后仍成立的能力**：前端调用的 44 个命令除 `desktop_storage_path` 外全部能在 `generate_handler!` 找到；E2E 脚本确实包含三道审批、真实 WAV 落盘、篡改运行时后自动修复、渲染取消与重启恢复、诊断包导出；`scripts/release/tauri.signing.conf.json` 与三个签名脚本齐备，且签名配置没有混进 `tauri.conf.json`。
+
+本轮实跑快照（2026-11-17 19:30，Windows 11 + 本机 `core.autocrlf=true`）：
+
+| 检查 | 结果 | 说明 |
+|---|---|---|
+| `npm run test:frontend` | 通过 | 51 项 |
+| `npm run test:components` | 通过 | 5 个文件 / 14 项 |
+| `cargo test --lib` | 通过 | 101 通过 / 0 失败 / 8 忽略（5 个 real 验收 + 2 个 GGUF + 1 个 Windows SAPI） |
+| `cargo fmt --check` | 通过 | |
+| `cargo clippy --all-targets --all-features -- -D warnings` | 通过 | |
+| `npm run lint` | 通过 | `--max-warnings=0` |
+| `npm run build` | 通过 | 主包 695.31 kB，仍有 >500 kB 分块警告 |
+| `npm run ipc:check` | 修复前失败 / 修复后通过 | 4.10；LF 与 CRLF 工作区均验证 |
+| 桌面 E2E | 未在本轮执行 | 需要 release 构建 + WebDriver + WebView2 环境，仍是 CI 门禁 |
+| 真实本地服务 / 云端 / 签名发布 | 未在本轮执行 | 依赖 GPU 主机、云端 Key、代码签名证书 |
+
+## 4. 重新审计发现
+
+> 按轮次追加：4.1–4.9 为第三轮，4.10–4.12 为第七轮（2026-11-17）。
 
 ### 4.1 P1：局部重绘遮罩语义相反
 
@@ -443,35 +473,67 @@ manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对�
 | 桌面 E2E | 未在本轮执行 | 需要完整 release 构建与 WebDriver 环境 |
 | 真实本地模型服务 | 通过 | 五项能力（LLM/Embedding/TTS/ASR/Image）在 RTX 5070 上以真实模型 + 真实运行时完成端到端验收，详见第 3.17 节 |
 
+（上表是第三轮的历史快照，最新一次实跑见 3.21。）
+
+### 4.10 P2：IPC 门禁对行尾敏感，Windows 默认配置下必然失败（已修复）
+
+`src-tauri/src/bin/generate-ipc-contract.rs` 的 `check_current` 用 `actual != expected` 直接比较磁盘字符串与生成器输出。生成器始终写 LF，但 Windows 默认 `core.autocrlf=true` 会在检出时把提交的生成物转成 CRLF，于是在干净工作区上 `npm run ipc:check` 直接报 `src/generated/ipc.ts is stale`——内容其实完全一致（`git diff --numstat` 为空可证）。
+
+影响面不小：`npm run ipc:check` 是 `.github/workflows/test.yml` 与 `release.yml` 的第一道门禁，等于在任何转换了行尾的环境里，流水线还没跑到编译就红。
+
+修复：比较前先做 `\r\n → \n` 归一化（`normalize_line_endings`），语义仍是“生成物必须与 Rust DTO 一致”，但不再因检出策略误报。实测：把两个生成物强制改写成 CRLF 后 `ipc:check` 通过，还原为 LF 也通过。
+
+### 4.11 P3：前端调用不存在的 `desktop_storage_path`（已修复）
+
+`src/services/desktop.ts` 的 `getDesktopStoragePath()` 执行 `invoke("desktop_storage_path")`，而 `src-tauri/src/lib.rs` 的 `generate_handler!` 里没有这个命令，异常被 `catch` 吞掉后固定返回 `null`；该函数也没有任何调用方。同样的信息 `desktop_status` 已经以 `storagePath` / `databasePath` / `logDirectory` 返回。
+
+修复：删除该函数，避免后续界面误以为“桌面环境拿不到存储路径”。前端命令名与 `generate_handler!` 现在一一对应（`export_project_json` 仍是只注册未调用的命令，保留给后续导出入口）。
+
+### 4.12 P1：云端 LLM 通路没有任何验收，Anthropic/Gemini 只有解析级单测（未修复）
+
+`src-tauri/src/acceptance.rs` 的 `real_cloud_acceptance` 覆盖 Embedding / TTS / ASR / Image / Inpaint 五项，全部走 OpenAI Compatible 协议与 `KNOWMOTION_ACCEPTANCE_OPENAI_KEY`。它**不包含 LLM 对话通路**，而九 Agent 全流程的真实验收（3.19）跑的是本机 GGUF。
+
+同时，`src-tauri/src/agent/provider.rs` 对 Anthropic（`/v1/messages` + `anthropic-version`）与 Gemini（`models/{model}:generateContent`）只有 5 项 `parse_response` / 配置反序列化单测，没有任何请求级断言：请求体字段、端点拼接、鉴权头、错误体脱敏、超时与重试分支都没有被真实或 Mock HTTP 覆盖。仓库当前也没有 httpmock/wiremock 依赖。
+
+风险：云端 LLM 是产品对外承诺的主要通道之一，一旦 Anthropic/Gemini 的请求体或响应解析与官方契约漂移，现有测试不会报警。
+
+建议补法（前两步不依赖凭据）：
+
+1. 加一个本地 Mock HTTP server（dev-dependency，或手写 tokio `net`），对 OpenAI / Anthropic / Gemini 三种协议各断言一次完整请求：方法、路径、鉴权头、`max_tokens` 与 `max_output_tokens` 映射、JSON 模式字段、错误体重试分类。
+2. `real_cloud_acceptance` 增加 LLM 项（一次结构化 JSON 生成，断言可解析且计费字段存在），与现有五项并列计入 `summary.failed`。
+3. 有 Key 的机器上补跑一次，结果写进 `docs/REAL_SERVICE_ACCEPTANCE.md`。
+
 ## 5. 部分实现
 
 | 功能 | 当前状态 | 缺口 |
 |---|---|---|
-| 真实 AI 内容生成 | Agent、HTTP Adapter 和 GGUF 本地 Adapter 已完成 | 当前无外部服务凭据，未完成真实外部模型端到端验收；本地 GGUF 实机测试默认忽略 |
+| 真实 AI 内容生成 | Agent、HTTP Adapter 和 GGUF 本地 Adapter 已完成；九 Agent 全流程已用本机真实 LLM 跑通 | 云端 LLM 通路无验收用例（4.12）；Anthropic/Gemini 只有解析级单测 |
 | Research Agent | 来源候选、正文抓取、Embedding 与项目内检索 | 尚无搜索引擎 API、自动引用核验和跨项目知识库；抓取正文仍需人工核验 |
-| 图片生成 | OpenAI Images、stable-diffusion.cpp、上传与 SVG 均可用；设定集锚点和参考图已接入；stable-diffusion.cpp 已接入 ControlNet/IP-Adapter 原生像素条件与 img2img 参考锁定 | 局部重绘遮罩语义待修复；OpenAI Compatible 仍只有 prompt 级参考；ControlNet/IP-Adapter 尚无真实 GPU 采样验收 |
+| 图片生成 | OpenAI Images、stable-diffusion.cpp、上传与 SVG 均可用；设定集锚点和参考图已接入；stable-diffusion.cpp 已接入 ControlNet/IP-Adapter 原生像素条件与 img2img 参考锁定；局部重绘两条通道已分别验收 | OpenAI Compatible 仍只有 prompt 级参考；ControlNet/IP-Adapter 尚无真实 GPU 采样验收；多人同框只锁一个角色 |
 | 素材保存 | Data URL 与生成结果会落盘并记录哈希 | 外部远程 URL 尚未下载成本地资产 |
 | TTS | SAPI、OpenAI Compatible 与 audio.cpp TTS 已接入 | audio.cpp 支持自动启动和空闲卸载；情绪/角色模板和真实服务验收仍缺 |
-| 字幕 | 已知旁白与云端 ASR 听写 | ASR 依赖服务返回 segment；无时间片段时回退按场景均分 |
+| 字幕 | 已知旁白与云端 ASR 听写 | ASR 依赖服务返回 segment；audio.cpp 不返回时间片段时回退按场景均分 |
 | 项目保存 | debounce、项目锁、内容哈希修订去重、数量/时间/容量保留策略已接通 | 仍是项目级状态合并；文档级 revision/expectedRevision 冲突协议未启用 |
 | 项目版本 | Agent 修订与保存快照 | 手动 UI 编辑没有同等全局 undo/redo 栈 |
 | 项目复制 | 本地素材与项目数据可复制 | 数据库工作流/渲染历史不复制到新项目 |
 | 项目导入导出 | 含素材、渲染和受保留策略约束修订的 ZIP 包 | 跨项目边界与压缩/解压/单文件/条目预算已闭合；无独立迁移工具和跨设备自动升级 |
-| 本地模型运行时 | 三种运行时支持固定版本下载；统一调度器负责 GPU 租约、自动启动、健康检查、互斥和空闲卸载 | 安装后完整性复验偏弱；真实 audio.cpp/stable-diffusion.cpp 模型仍需实机验收 |
+| 本地模型运行时 | 固定版本下载 + 逐文件哈希 + 损坏自动重装；统一调度器负责 GPU 租约、自动启动、启动强制 smoke、健康检查、互斥和空闲卸载 | 真实 audio.cpp/stable-diffusion.cpp 采样需在有模型权重且有 GPU 的机器上重跑一次 |
 | 渲染 | 持久 Job、进度、取消、Windows Job Object、离线 runtime、验证和原子提交 | 尚无跨平台进程树容器；当前发行目标是 Windows |
-| 4K/60 FPS | Composition 与 Renderer 支持参数 | UI 只验证了 1080P；没有 4K/60 实测和资源限制 |
+| 4K/60 FPS | Composition 与 Renderer 支持参数 | 渲染页只暴露 720p/1080p 与 30 FPS，无 4K/60 入口与实测，也没有码率/显存资源限制 |
 | 动画组件 | 文本、SVG、图片、图表、视频、Canvas 2D 与确定性 GSAP 已实现 | 视频仅场景内图层，无多轨剪辑、转场、蒙版；渲染嵌入上限 24 MB |
 | 质量检查 | `status=fail` 在 UI 与 Rust 渲染入口双重阻断 | 没有自动修复、逐项修复按钮或可配置发布规则 |
-| 错误恢复 | Agent 自动指数退避重试；App 重启安全暂停/中断；本地模型有进程和租约回收 | 尚无统一 `tasks` worker 消费器 |
+| 错误恢复 | Agent 自动指数退避重试；App 重启安全暂停/中断；本地模型有进程和租约回收；图片队列有独立 worker | 尚无统一 `tasks` worker 消费器，`tasks` 表仍由渲染与图片队列各自消费 |
 | 用量统计 | LLM token、图片数、音频时长写入 `usage_records` | 无价格表、成本估算、额度与预算限制 |
-| IPC 契约 | Rust DTO 派生 JSON Schema，生成 TS DTO 与 `docs/schemas/ipc.schema.json`，CI 校验生成物 | 项目业务对象仍有 TS 领域类型；命令参数映射尚未全部从宏自动枚举 |
+| IPC 契约 | Rust DTO 派生 JSON Schema，生成 TS DTO 与 `docs/schemas/ipc.schema.json`，CI 校验生成物（4.10 修复后门禁在 Windows 默认配置下也可用） | 项目业务对象仍有 TS 领域类型；命令参数映射尚未全部从宏自动枚举 |
 | JSON Schema | Remotion Zod 与 IPC Rust DTO 分别作为可执行真源 | 设计型项目 Schema 仍保留兼容说明用途 |
 
 ## 6. 未实现
 
 - 实际 Authenticode 证书、时间戳服务和签名 updater 私钥（构建、验签、清单、干净 VM CI 流程已就绪）。
 - 第三方云端 LLM/Image/TTS/ASR/Embedding 服务（OpenAI/Anthropic/Gemini）凭据验收：本地真实服务已完成，云端仍无 Key 记录。
+- 云端 LLM 的验收用例本身（4.12）：`real_cloud_acceptance` 不含对话通路，Anthropic/Gemini 也没有请求级测试。
 - CLIP 语义嵌入通道（需要具备图像嵌入能力的 Provider，当前只有手工视觉描述子）、多人同框的多角色同时锁定，以及 ControlNet/IP-Adapter 在真实 GPU 上的采样验收。
+- 面向手动编辑的全局 undo/redo 栈、成本/额度估算，以及 4K/60 FPS 的 UI 入口与实测（详见第 5 节）。
 
 ## 7. 与架构文档不一致的关键项
 
@@ -515,7 +577,7 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 | 至少三个动画场景预览 | 通过 | 蓝天项目 6 个场景五风格 |
 | 生成真实视频 | 通过 | 60.011 秒 H.264/AAC |
 | 离线 Worker smoke render | 通过 | 随包 Node/Chrome/FFmpeg 输出 966,517 字节 MP4 |
-| 真实进度与取消 | 实现，进行中验收 | JSONL 与 `render.progress` 已接入；完整片长取消只在代码路径验证 |
+| 真实进度与取消 | 通过（E2E 覆盖） | JSONL 与 `render.progress` 已接入；桌面 E2E 已实跑“启动渲染 → 取消 → 导出诊断包”，见 `scripts/run-desktop-e2e.mjs` |
 | NSIS 安装包 | 通过 | `195.97 MiB`，已包含 runtime resources |
 | 重新打开继续编辑 | 通过 | SQLite 与磁盘目录均有数据 |
 | 非模拟渲染进度 | 通过 | Remotion `onProgress` → Worker JSONL → Rust → Tauri event → UI |
@@ -530,8 +592,9 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 | 2 | 修复跨项目素材来源路径校验，禁止导入包触发项目目录外复制 | 完成（`duplicatedFrom` + 项目 ID 白名单 + canonicalize + 导入清洗，5 项回归） |
 | 3 | 用实际 LLM Provider 跑通 Research → Quality | 完成（3.19：723 s / 9 次调用 / 全部一次通过） |
 | 4 | 第三方云端 Image/TTS/ASR/Embedding 凭据验收 | 用例就绪（`real_cloud_acceptance`），缺真实 Key |
-| 5 | 局部重绘两条通道真实服务验收 | 本地通道通过（3.19）；云端通道并入第 4 项 |
+| 5 | 局部重绘两条通道真实服务验收 | 本地通道通过（3.19）；云端通道已并入第 4 项用例（Inpaint 项） |
 | 6 | Authenticode + 签名 updater + 干净 VM 复验 | 脚本与配置就绪（`docs/RELEASE_SIGNING.md`），缺证书与干净 VM |
+| 7 | 云端 LLM 通路验收 + Anthropic/Gemini 请求级测试（4.12） | 未开始；Mock 部分不依赖凭据，可先做 |
 
 ### P1：可靠性与本地模型闭环
 
@@ -545,7 +608,15 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 
 1. 为修订快照增加内容去重和容量/时间保留策略。**完成。**
 2. 为 ZIP 导入增加压缩、解压、单文件和条目数预算。**完成。**
-3. 生成 IPC TypeScript 类型与 JSON Schema，消除手工重复模型。**完成。**
+3. 生成 IPC TypeScript 类型与 JSON Schema，消除手工重复模型。**完成；4.10 修掉门禁的行尾误报后，该校验在 Windows 默认 Git 配置下才真正可用。**
 4. 扩展桌面 E2E 到审批流、真实媒体任务、本地模型安装失败恢复和取消/重启场景。**场景已接入；本地复跑受当前主机 WebView2 GPU/DevTools 环境阻断，CI 中仍是发布门禁。**
 5. 将 `cargo fmt --check`、严格 Clippy 和依赖审计纳入 CI。**完成。**
 6. 增加发布 CI 日志聚合、远程诊断导出、SBOM 与 signed updater。**完成；真实签名发布仍需仓库 Secrets 中的证书与私钥。**
+
+### P3：体验与长期债
+
+1. 渲染页补 4K/60 FPS 入口，并给码率与显存设上限。**未开始。**
+2. 手动编辑接入全局 undo/redo（当前只有 Agent 修订可撤销）。**未开始。**
+3. `usage_records` 接价格表，输出成本/额度估算。**未开始。**
+4. 统一 `tasks` 消费器，替换渲染与图片队列各自的 worker 逻辑。**未开始，属重构。**
+5. 清理 `export_project_json` 这类只注册未调用的命令，或补上界面入口。**待决策。**
