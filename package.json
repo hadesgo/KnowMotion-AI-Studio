@@ -29,7 +29,13 @@
     "renderer:smoke": "node --import tsx scripts/smoke-render-worker.mjs",
     "mvp:render": "tsx scripts/render-sky-blue-mvp.ts",
     "acceptance:runtimes": "node scripts/acceptance/install-local-runtimes.mjs",
-    "acceptance:services": "cargo test --manifest-path src-tauri/Cargo.toml --lib real_service_acceptance -- --ignored --nocapture --test-threads=1"
+    "acceptance:services": "cargo test --manifest-path src-tauri/Cargo.toml --lib real_service_acceptance -- --ignored --nocapture --test-threads=1",
+    "acceptance:inpaint": "cargo test --manifest-path src-tauri/Cargo.toml --lib real_inpaint_acceptance -- --ignored --nocapture --test-threads=1",
+    "acceptance:workflow": "cargo test --manifest-path src-tauri/Cargo.toml --lib real_workflow_acceptance -- --ignored --nocapture --test-threads=1",
+    "desktop:build:signed": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/build-signed.ps1",
+    "desktop:verify:signature": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& scripts/release/verify-signature.ps1\"",
+    "acceptance:cloud": "cargo test --manifest-path src-tauri/Cargo.toml --lib real_cloud_acceptance -- --ignored --nocapture --test-threads=1",
+    "acceptance:gguf-json": "cargo test --manifest-path src-tauri/Cargo.toml --lib real_gguf_json_acceptance -- --ignored --nocapture --test-threads=1"
   },
   "dependencies": {
     "@remotion/bundler": "^4.0.543",
@@ -49,6 +55,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@napi-rs/canvas": "^1.1.1",
     "@tailwindcss/vite": "^4.3.5",
     "@tauri-apps/cli": "^2.12.4",
     "@testing-library/jest-dom": "^7.0.1",

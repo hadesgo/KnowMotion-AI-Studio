@@ -49,11 +49,13 @@ cd src-tauri && cargo test
 npm run renderer:smoke
 npm run acceptance:runtimes
 npm run acceptance:services
+npm run acceptance:inpaint
+npm run acceptance:workflow
 npm run test:e2e:desktop:full
 npm run test:smoke:windows:sandbox
 ```
 
-`acceptance:runtimes` 按固定版本与 SHA-256 安装 llama.cpp / audio.cpp / stable-diffusion.cpp；`acceptance:services` 用本机真实模型跑五项能力验收（默认全部，可用 `KNOWMOTION_ACCEPTANCE_ONLY=LLM,TTS` 只跑部分）。两项都需要本机已下载模型和一块可用 GPU，不进 CI。
+`acceptance:runtimes` 按固定版本与 SHA-256 安装 llama.cpp / audio.cpp / stable-diffusion.cpp；`acceptance:services` 用本机真实模型跑五项能力验收（默认全部，可用 `KNOWMOTION_ACCEPTANCE_ONLY=LLM,TTS` 只跑部分）；`acceptance:inpaint` 验收局部重绘（含遮罩方向判定）；`acceptance:workflow` 跑完整九 Agent 流程。都需要本机已下载模型和一块可用 GPU，不进 CI。云端凭据验收用 `acceptance:cloud`，需要真实 Key。
 
 `renderer:smoke` 需要先执行 `npm run renderer:prepare`，会启动随包 Node/Chrome/FFmpeg 渲染一个短视频片段。
 

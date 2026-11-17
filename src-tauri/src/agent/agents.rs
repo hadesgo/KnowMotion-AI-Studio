@@ -428,11 +428,21 @@ async fn run_structured(
             system: system.to_string(),
             user: user.clone(),
             temperature: 0.35,
-            max_tokens: 6000,
+            // 整体替换式工具（replaceScenes 等）要回吐全部场景；4 个镜头就能吃掉
+            // 6000 token（实测 art_director 两次都在 6000 处被截断），这里放宽预算，
+            // 同时依赖 Provider 的上下文长度足够。
+            max_tokens: 10000,
             json_mode: true,
         })
         .await?;
-    let output = parse_agent_output(&response.text)?;
+    let output = parse_agent_output(&response.text).map_err(|error| {
+        let trimmed = response.text.trim_end();
+        if trimmed.ends_with('}') {
+            error
+        } else {
+            format!("{error}（输出未以 '}}' 结尾，可能是 max_tokens 截断）")
+        }
+    })?;
     validate_output_tools(descriptor, &output)?;
     if output.summary.trim().is_empty() {
         return Err(format!("{} returned an empty summary", descriptor.title));

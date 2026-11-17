@@ -22,6 +22,20 @@ use uuid::Uuid;
 
 pub const WORKFLOW_EVENT: &str = "agent-workflow-changed";
 
+/// 工作流事件出口。
+///
+/// 生产环境是 Tauri `AppHandle`，验收/测试可以换成记录器，这样整条 Research → Quality
+/// 编排可以在没有窗口的情况下跑真实 LLM。
+pub trait WorkflowEventSink: Send + Sync {
+    fn emit_workflow_event(&self, payload: Value);
+}
+
+impl<R: tauri::Runtime> WorkflowEventSink for AppHandle<R> {
+    fn emit_workflow_event(&self, payload: Value) {
+        let _ = self.emit(WORKFLOW_EVENT, payload);
+    }
+}
+
 pub struct AgentRuntime {
     database: Arc<Mutex<Connection>>,
     projects_root: PathBuf,
@@ -48,7 +62,7 @@ impl AgentRuntime {
 
     pub fn create_run(
         self: &Arc<Self>,
-        app: AppHandle,
+        app: Arc<dyn WorkflowEventSink>,
         request: WorkflowStartRequest,
     ) -> Result<WorkflowRunView, String> {
         let project_id = request
@@ -156,7 +170,7 @@ impl AgentRuntime {
         }
 
         self.emit_event(
-            &app,
+            app.as_ref(),
             &run_id,
             None,
             "workflow_created",
@@ -250,7 +264,7 @@ impl AgentRuntime {
 
     pub fn pause(
         self: &Arc<Self>,
-        app: AppHandle,
+        app: Arc<dyn WorkflowEventSink>,
         run_id: &str,
     ) -> Result<WorkflowRunView, String> {
         {
@@ -266,7 +280,7 @@ impl AgentRuntime {
             .map_err(|error| error.to_string())?;
         }
         self.emit_event(
-            &app,
+            app.as_ref(),
             run_id,
             None,
             "workflow_paused",
@@ -278,7 +292,7 @@ impl AgentRuntime {
 
     pub fn resume(
         self: &Arc<Self>,
-        app: AppHandle,
+        app: Arc<dyn WorkflowEventSink>,
         run_id: &str,
     ) -> Result<WorkflowRunView, String> {
         {
@@ -294,7 +308,7 @@ impl AgentRuntime {
             .map_err(|error| error.to_string())?;
         }
         self.emit_event(
-            &app,
+            app.as_ref(),
             run_id,
             None,
             "workflow_resumed",
@@ -307,7 +321,7 @@ impl AgentRuntime {
 
     pub fn retry(
         self: &Arc<Self>,
-        app: AppHandle,
+        app: Arc<dyn WorkflowEventSink>,
         run_id: &str,
     ) -> Result<WorkflowRunView, String> {
         let step_key = {
@@ -330,7 +344,7 @@ impl AgentRuntime {
 
     pub fn rerun_step(
         self: &Arc<Self>,
-        app: AppHandle,
+        app: Arc<dyn WorkflowEventSink>,
         run_id: &str,
         step_key: &str,
     ) -> Result<WorkflowRunView, String> {
@@ -388,7 +402,7 @@ impl AgentRuntime {
             transaction.commit().map_err(|error| error.to_string())?;
         }
         self.emit_event(
-            &app,
+            app.as_ref(),
             run_id,
             Some(step_key),
             "step_rerun",
@@ -401,7 +415,7 @@ impl AgentRuntime {
 
     pub fn approve(
         self: &Arc<Self>,
-        app: AppHandle,
+        app: Arc<dyn WorkflowEventSink>,
         run_id: &str,
         step_key: &str,
         decision: &str,
@@ -463,7 +477,7 @@ impl AgentRuntime {
             }
         }
         self.emit_event(
-            &app,
+            app.as_ref(),
             run_id,
             Some(step_key),
             if decision == "approve" {
@@ -490,7 +504,7 @@ impl AgentRuntime {
 
     pub fn undo(
         &self,
-        app: AppHandle,
+        app: Arc<dyn WorkflowEventSink>,
         run_id: &str,
         revision_id: &str,
     ) -> Result<WorkflowRunView, String> {
@@ -499,7 +513,7 @@ impl AgentRuntime {
             undo_revision(&mut db, &self.projects_root, revision_id)?;
         }
         self.emit_event(
-            &app,
+            app.as_ref(),
             run_id,
             None,
             "revision_undone",
@@ -509,7 +523,7 @@ impl AgentRuntime {
         self.get_run(run_id)
     }
 
-    fn spawn_advance(self: &Arc<Self>, app: AppHandle, run_id: String) {
+    fn spawn_advance(self: &Arc<Self>, app: Arc<dyn WorkflowEventSink>, run_id: String) {
         {
             let mut active = self
                 .active_runs
@@ -524,7 +538,7 @@ impl AgentRuntime {
             let error = runtime.advance(app.clone(), run_id.clone()).await.err();
             if let Some(error) = &error {
                 let _ = runtime.mark_run_failed(&run_id, error);
-                runtime.emit_event(&app, &run_id, None, "workflow_failed", error, "failed");
+                runtime.emit_event(app.as_ref(), &run_id, None, "workflow_failed", error, "failed");
             }
             if let Ok(mut active) = runtime.active_runs.lock() {
                 active.remove(&run_id);
@@ -532,7 +546,11 @@ impl AgentRuntime {
         });
     }
 
-    async fn advance(&self, app: AppHandle, run_id: String) -> Result<(), String> {
+    async fn advance(
+        &self,
+        app: Arc<dyn WorkflowEventSink>,
+        run_id: String,
+    ) -> Result<(), String> {
         loop {
             let run_status = {
                 let db = self.lock_db()?;
@@ -560,11 +578,11 @@ impl AgentRuntime {
 
             let next = self.claim_next_step(&run_id)?;
             let Some(step) = next else {
-                self.finish_if_complete(&app, &run_id)?;
+                self.finish_if_complete(app.as_ref(), &run_id)?;
                 return Ok(());
             };
             self.emit_event(
-                &app,
+                app.as_ref(),
                 &run_id,
                 Some(&step.step_key),
                 "step_started",
@@ -572,7 +590,7 @@ impl AgentRuntime {
                 "running",
             );
 
-            let result = self.execute_step(&app, &run_id, &step).await;
+            let result = self.execute_step(app.as_ref(), &run_id, &step).await;
             match result {
                 Ok(requires_approval) => {
                     if requires_approval {
@@ -613,7 +631,7 @@ impl AgentRuntime {
                             .map_err(|error| error.to_string())?;
                         }
                         self.emit_event(
-                            &app,
+                            app.as_ref(),
                             &run_id,
                             Some(&step.step_key),
                             "step_retry_scheduled",
@@ -628,7 +646,7 @@ impl AgentRuntime {
                     }
                     self.mark_step_failed(&run_id, &step, &error)?;
                     self.emit_event(
-                        &app,
+                        app.as_ref(),
                         &run_id,
                         Some(&step.step_key),
                         "step_failed",
@@ -643,7 +661,7 @@ impl AgentRuntime {
 
     async fn execute_step(
         &self,
-        app: &AppHandle,
+        app: &dyn WorkflowEventSink,
         run_id: &str,
         step: &StepRow,
     ) -> Result<bool, String> {
@@ -930,7 +948,7 @@ impl AgentRuntime {
         Ok(outputs)
     }
 
-    fn finish_if_complete(&self, app: &AppHandle, run_id: &str) -> Result<(), String> {
+    fn finish_if_complete(&self, app: &dyn WorkflowEventSink, run_id: &str) -> Result<(), String> {
         let db = self.lock_db()?;
         let statuses = load_step_rows(&db, run_id)?
             .into_iter()
@@ -1079,7 +1097,7 @@ impl AgentRuntime {
 
     fn emit_event(
         &self,
-        app: &AppHandle,
+        app: &dyn WorkflowEventSink,
         run_id: &str,
         step_key: Option<&str>,
         kind: &str,
@@ -1131,7 +1149,9 @@ impl AgentRuntime {
                 ],
             );
         }
-        let _ = app.emit(WORKFLOW_EVENT, payload);
+        app.emit_workflow_event(
+            serde_json::to_value(&payload).unwrap_or(serde_json::Value::Null),
+        );
     }
 
     fn lock_db(&self) -> Result<std::sync::MutexGuard<'_, Connection>, String> {

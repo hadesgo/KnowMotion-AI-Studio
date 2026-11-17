@@ -34,9 +34,11 @@
 
 第四轮补充了真实服务端到端验收：在 RTX 5070 上用本机真实模型和三个固定版本运行时（llama.cpp / audio.cpp / stable-diffusion.cpp）跑通了 LLM、Embedding、TTS、ASR、Image 五项能力，判定基于可解析 JSON、向量语义排序、WAV 时长、TTS→ASR 闭环和 PNG 尺寸/哈希，产物与报告见 `docs/REAL_SERVICE_ACCEPTANCE.md`。因此“真实模型服务完全没跑过”不再成立。
 
-仍未覆盖的是第三方云端凭据路径（OpenAI/Anthropic/Gemini）与九 Agent 全流程实跑；云端通道目前依然只有实现与单元测试，没有真实 Key 的在线记录。
+第五轮之后又补了 P0 收口（见 3.19）：局部重绘遮罩语义、跨项目素材路径两个 P1 已修复并有回归用例；九 Agent 全流程已用真实本地 LLM 跑通（723 s / 9 次调用 / 三个审批节点）；局部重绘的本地通道有了真实服务验收。
 
-**发布判断：不通过。** 基础工程可构建，原有主链路测试基本健康，但第三轮审计发现 3 个 P1 问题：局部重绘遮罩语义相反、跨项目素材复制存在本地文件路径穿越、远程 URL 私网/DNS/重定向校验不完整。修复并完成对应回归测试前，不应将当前版本判定为发布级完成。
+仍未覆盖的是第三方云端凭据路径（OpenAI/Anthropic/Gemini）：`real_cloud_acceptance` 与云端局部重绘用例已就绪，但需要真实 Key 才能执行。
+
+**发布判断：仍不通过，但阻断项只剩外部依赖。** 原有 3 个 P1 已全部修复并回归；剩下的是“云端 Key 验收”和“Authenticode 签名 + 签名后干净 VM 复验”两件需要证书/凭据/VM 的事，不是代码缺口。
 
 ## 2. 阶段完成度
 
@@ -258,14 +260,17 @@
 局部重绘：
 
 - 交互：在图片上直接涂抹遮罩，笔刷 10–140 px、撤销、清空、实时遮罩覆盖率；遮罩坐标按图片归一化，窗口缩放不漂移。
-- 前端当前生成透明底、笔迹不透明的 PNG 遮罩；后端只接受 data URL、PNG、1 B–8 MiB。该方向与 OpenAI Images edits 的“透明区域可编辑”约定相反，已列为 P1，参见第 4.1 节。
-- 源图只接受项目内登记的图片素材（project.json → src → 安全相对路径），不接受外部 URL。
+- 遮罩按通道分别生成（`buildMaskCanvases` 一次产出两份，尺寸等于源图）：
+  - `alphaMaskDataUrl`：不透明底 + `destination-out` 擦除笔迹，再二值化 alpha（128 阈值）。**透明 = 可重绘**，对应 OpenAI Images edits（见 4.1 修复记录）。
+  - `luminanceMaskDataUrl`：黑底白笔迹。**白 = 可重绘**，对应 stable-diffusion.cpp 原生接口。
+- 源图只接受项目内登记的图片素材（project.json → src → 安全相对路径 + `ensure_within` 规范化校验），不接受外部 URL。
 - OpenAI Compatible：复用现有手写 multipart 构造器调用 `/images/edits`（model/prompt/n/size/image/mask），解析 b64_json 或 url，返回 `mode=openai-edits`。
-- stable-diffusion.cpp 与外部 API 都使用 multipart `images/edits`，源图与遮罩在内存中构造后提交；两条通道都需要在遮罩语义修复后重新做真实服务验收。
+- stable-diffusion.cpp：走原生 `POST /sdcpp/v1/img_gen`（`init_image` + `mask_image` + `strength`），异步任务轮询 `/sdcpp/v1/jobs/{id}`，返回 `mode=sdcpp-native-inpaint`。这条路径才真正保住遮罩外像素；`/v1/images/edits` 会把整幅重画，仅作为旧运行时的降级路径（`mode=openai-edits-fallback`，写警告日志）。
+- 遮罩校验：必须是 PNG、与源图同尺寸；OpenAI 通道额外要求 alpha 通道（color type 4/6）。尺寸不一致会被明确拒绝，不会静默缩放。
 - 结果作为新素材写入 `assets/images`，带 `inpaint { sourceAssetId, mode, coverage, seed, anchorLabel, fingerprint }`；不覆盖原图，可继续采用到场景或收进设定集。
 - 浏览器预览无 Provider 时禁用提交；本地 SVG 草案会提示先转为位图，避免把 SVG 发给需要位图的 Provider。
 
-边界：当前遮罩语义错误；没有遮罩羽化/软边、没有文本自动生成遮罩、没有局部重绘历史对比；队列并发固定为 2，未按 Provider 单独限流；OpenAI 局部重绘的实际可用性仍取决于服务端是否支持 `images/edits`，当前无在线验收记录。
+边界：没有遮罩羽化/软边、没有文本自动生成遮罩、没有局部重绘历史对比；队列并发固定为 2，未按 Provider 单独限流。稳定扩散通道要求运行时提供 `--llm_vision`（Qwen Image 2.1 的编辑需要 Qwen3-VL 视觉权重），调度器会自动发现 `mmproj*.gguf` 并传入。
 
 ### 3.15 视频素材图层与视频剪辑
 
@@ -321,6 +326,19 @@
   - 一个镜头目前只锁一个角色（权重最高者）；多人同框的多角色锁定尚未实现。
   - 本轮没有在真实 GPU 上实跑 ControlNet/IP-Adapter 采样验收，只做了载荷、协商、降级路径的自动化验证；下一次真实服务验收需要补充该项。
 
+### 3.19 P0 修复与全流程真实验收（2026-11-17）
+
+- 第 4.1 节（局部重绘遮罩）与 4.2 节（跨项目素材路径）两个 P1 已修复，修复细节见对应小节。
+- 新增 `real_inpaint_acceptance`：合成 512×512 源图 + 竖直遮罩带，走 `execute_inpaint`，按“遮罩内/外平均像素差”判定方向而不是看 HTTP 200。stable-diffusion.cpp 通道实测遮罩内 103.5 / 遮罩外 12.7，`mode=sdcpp-native-inpaint`，54.9 s；改造前走 `/v1/images/edits` 时是 83.8 / 82.9——遮罩等于没生效。产物 `inpaint-sdcpp-{source,mask,mask-luma,result}.png` 与 `inpaint-acceptance-report.json` 在 `src-tauri/target/acceptance/`。
+- 新增 `real_workflow_acceptance`：空项目 + Qwen3.8-27B（GGUF / Vulkan，上下文 16384）跑完整九 Agent DAG，自动通过三个审批节点。实测 **723 s、9 次真实 Provider 调用、全部步骤一次通过**；产出 4 段大纲、4 个镜头、4 个素材、8 条字幕、8 个时间线片段；Quality 评分 88 / `warn`（提示来源 URL 未核验、镜头 2 信息密度偏高）。报告 `workflow-acceptance-report.json`，项目快照 `workflow-acceptance-project.json`。
+- 为了让全流程真的跑通，顺带修掉四个缺陷：
+  1. **结构化请求没有关闭 thinking**：Qwen3 系把 6000 token 预算全花在思维链上，`content` 为空（Storyboard 连续两次 451 s / 435 s 后 `llama.cpp returned no text`）。现在 JSON 模式携带 `chat_template_kwargs.enable_thinking=false`；同一类请求从“450 s 空响应”变成“23 s / 437 token 的有效 JSON”。空响应错误同时补上 `finish_reason`、`completion_tokens`、`reasoning_chars`。
+  2. **常驻 LLM 被重复要求显存余量**：工作流第二个 Agent 在“891 MiB free, 896 MiB required”上直接失败。现在同一 Provider 的 `llama-server` 已常驻时跳过余量检查（`llm_runtime_is_resident`），需要新加载模型时才检查。
+  3. **本地推理固定 600 s 超时**与 6000 token 输出不匹配：改为 `max(600 s, 180 s + 150 ms × max_tokens)`，并给截断输出加明确提示。
+  4. **Agent 草案 SVG 无法落盘**：草案用百分号编码 data URL，存储层只接受 base64，Asset 步骤报 `must use base64 data encoding`。草案改为 base64，存储层同时兼容百分号编码（旧项目），并补回归用例。
+- 发布签名链路：新增 `scripts/release/sign-windows.ps1`（signtool + SHA-256 + RFC3161 时间戳 + 即时验签）、`build-signed.ps1`（校验凭据 → 合并 `tauri.signing.conf.json` 构建 → 校验 updater `*.sig` → 输出 SHA-256 报告）、`verify-signature.ps1`，以及 `docs/RELEASE_SIGNING.md`。签名配置**不**写进 `tauri.conf.json`：没有证书时普通构建不受影响，签名构建必须显式 `npm run desktop:build:signed`。当前无证书，尚未执行签名构建与签名后的 VM smoke。
+- 仍未完成：第三方云端 Image/TTS/ASR/Embedding 的真实 Key 验收（`real_cloud_acceptance` 已写好，缺 Key 时会明确失败）、局部重绘的云端 channel、Authenticode 签名后的干净 VM 安装/卸载/离线渲染复验。
+
 ## 4. 第三轮重新审计发现
 
 ### 4.1 P1：局部重绘遮罩语义相反
@@ -335,6 +353,10 @@
 - 对涂抹点和未涂抹点断言 alpha 值。
 - 修复后分别使用真实 OpenAI Compatible 和 stable-diffusion.cpp 服务验收。
 
+修复状态：前端改为「先铺不透明底 → `destination-out` 擦出笔迹 → alpha 二值化（阈值 128）」，并额外产出亮度遮罩供本地通道使用；`tests/mask-canvas.test.ts` 用 Skia 真实 canvas 跑真实绘制路径，把 PNG 解码回来逐像素断言（涂抹处 alpha=0、其余 255、无半透明残留、光栅面积与解析覆盖率误差 < 0.02）。
+
+真实服务验收同时暴露了第二个更严重的问题：stable-diffusion.cpp 的 `/v1/images/edits` 不遵守遮罩的保留语义——遮罩外像素也会被整幅重画（实测遮罩内外平均差 83.8 vs 82.9，等于没遮罩）。改为走原生 `/sdcpp/v1/img_gen`（`init_image` + `mask_image` + `strength`）后，同一次验收变成遮罩内 103.5、遮罩外 12.7，遮罩真正生效。因此两条通道现在是独立 Adapter，而不是共用同一个 multipart 请求。另需注意 Qwen Image 2.1 的编辑通道要求 `--llm_vision`（Qwen3-VL 视觉权重），调度器原先没有传，已改为自动发现 `mmproj*.gguf` 并注入。
+
 ### 4.2 P1：项目素材来源存在路径穿越
 
 `src-tauri/src/storage.rs` 的 `materialize_asset` 从 `kmasset` URL 中取出 `source_project_id` 后，只校验了相对素材路径，没有对项目 ID 做相同白名单校验。`projects_root.join(source_project_id).join(relative)` 可能接受 `..`、盘符绝对路径或 UNC 路径。
@@ -347,6 +369,8 @@
 - 规范化源文件与目标文件路径，并确认二者位于允许根目录内。
 - 通用导入流程不接受任意跨项目 URL；跨项目复制仅允许出现在显式的“复制项目”流程。
 - 增加 `..`、绝对路径、UNC 路径和符号链接回归测试。
+
+修复状态：跨项目复制现在需要项目自带 `duplicatedFrom`，且该字段只由前端「复制项目」写入；`source_project_id` 走 `safe_component` 白名单（仅字母数字与 `-`/`_`），源文件与目标目录都经 `canonicalize` 后确认落在允许根目录内，符号链接逃逸会被拒绝。`import_project_zip` 额外调用 `sanitize_imported_sources`：删除 `duplicatedFrom`，把指向自身旧 ID 的 `kmasset` 地址改写为相对路径，指向其它项目的素材来源直接拒绝导入。回归用例 5 项：非复制流程拒绝、复制流程成功、`..`/编码斜杠/盘符/UNC 四种非法项目 ID、`..` 穿越、符号链接逃逸（无符号链接权限时跳过并打印原因）。
 
 ### 4.3 P1：远程资源校验存在 DNS 与重定向绕过（已修复）
 
@@ -471,10 +495,10 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 | Windows 桌面启动 | 通过 | Debug 与 release EXE 均已完成启动 smoke test |
 | 创建和保存项目 | 通过 | SQLite、项目目录和 JSON 已验证 |
 | 配置实际 AI Provider | 本地通道通过，云端未验收 | GGUF 本地通道已实跑；云端 HTTP 路径仍缺实际 Key |
-| AI 生成结构化脚本和分镜 | Provider 层通过 | Qwen3.8-27B 产出可解析分镜 JSON；九 Agent 完整编排仍未实跑 |
+| AI 生成结构化脚本和分镜 | 通过 | 九 Agent 全流程 723 s、9 次真实 LLM 调用、三个审批节点，产出 4 镜头/8 字幕/质量报告，见 3.19 |
 | 本地 GGUF 模型推理 | 通过 | Qwen3.8-27B 在 Vulkan 上完成真实结构化生成 |
 | audio.cpp TTS/ASR | 通过 | Qwen3-TTS 合成 8.8 s 旁白，Qwen3-ASR 识别字符重合率 1.000；ASR 无时间片段 |
-| stable-diffusion.cpp 图片生成/编辑 | 生成通过，编辑未验收 | Qwen Image 2.1 生成 768×768 PNG；局部重绘仍受遮罩语义 P1 阻断 |
+| stable-diffusion.cpp 图片生成/编辑 | 通过（本地通道） | 生成 768×768 PNG；局部重绘走原生 `img_gen`，遮罩内 Δ103.5 / 外 Δ12.7 |
 | 至少三个动画场景预览 | 通过 | 蓝天项目 6 个场景五风格 |
 | 生成真实视频 | 通过 | 60.011 秒 H.264/AAC |
 | 离线 Worker smoke render | 通过 | 随包 Node/Chrome/FFmpeg 输出 966,517 字节 MP4 |
@@ -487,12 +511,14 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 
 ### P0：发布阻断
 
-1. 修复局部重绘遮罩方向，并增加真实 Canvas alpha 像素测试及两条图片通道验收。
-2. 修复跨项目素材来源的路径校验，禁止导入包触发项目目录外文件复制。
-3. 使用实际 LLM Provider 完成一次 Research → Quality 全流程验收（本地 Provider 能力已验收，工作流编排未跑）。
-4. 为第三方云端 Image/TTS/ASR/Embedding 补充凭据验收；本地真实服务 smoke test 已完成。
-5. 完成局部重绘两条通道的真实服务验收。
-6. 配置 Authenticode、签名 updater，并重新执行干净 Windows VM 安装/卸载/离线渲染验收。
+| # | 事项 | 状态 |
+|---|---|---|
+| 1 | 修复局部重绘遮罩方向，增加真实 Canvas alpha 像素测试及两条图片通道验收 | 代码与像素测试完成（`tests/mask-canvas.test.ts` 5 项）；本地通道真实服务通过，云端通道待 Key |
+| 2 | 修复跨项目素材来源路径校验，禁止导入包触发项目目录外复制 | 完成（`duplicatedFrom` + 项目 ID 白名单 + canonicalize + 导入清洗，5 项回归） |
+| 3 | 用实际 LLM Provider 跑通 Research → Quality | 完成（3.19：723 s / 9 次调用 / 全部一次通过） |
+| 4 | 第三方云端 Image/TTS/ASR/Embedding 凭据验收 | 用例就绪（`real_cloud_acceptance`），缺真实 Key |
+| 5 | 局部重绘两条通道真实服务验收 | 本地通道通过（3.19）；云端通道并入第 4 项 |
+| 6 | Authenticode + 签名 updater + 干净 VM 复验 | 脚本与配置就绪（`docs/RELEASE_SIGNING.md`），缺证书与干净 VM |
 
 ### P1：可靠性与本地模型闭环
 

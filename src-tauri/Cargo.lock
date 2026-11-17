@@ -2235,6 +2235,7 @@ dependencies = [
  "hound",
  "keyring",
  "percent-encoding",
+ "png",
  "reqwest",
  "rusqlite",
  "serde",

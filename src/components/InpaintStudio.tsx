@@ -225,6 +225,7 @@ export function InpaintStudio({
         prompt: finalPrompt,
         size: sizeForImage(size.width, size.height),
         maskAlphaDataUrl: masks.alphaMaskDataUrl,
+        maskLuminanceDataUrl: masks.luminanceMaskDataUrl,
         maskCoverage: masks.coverage,
         seed: active?.seed,
         anchorLabel: active?.label ?? "",
@@ -244,7 +245,7 @@ export function InpaintStudio({
       pushToast({
         type: "success",
         title: "局部重绘完成",
-        message: `${provider.name} · images/edits · 遮罩 ${(masks.coverage * 100).toFixed(1)}% · ${Math.round(result.elapsedMs / 1000)} 秒`,
+        message: `${provider.name} · ${result.mode} · 遮罩 ${(masks.coverage * 100).toFixed(1)}% · ${Math.round(result.elapsedMs / 1000)} 秒`,
       });
       onClose();
     } catch (submitError) {
@@ -413,8 +414,9 @@ export function InpaintStudio({
 
           <p className="inpaint-note">
             <Wand2 size={13} />
-            外部 API 与 stable-diffusion.cpp 均通过 images/edits
-            提交原图与透明遮罩。结果会作为新素材写入当前镜头，不覆盖原图。
+            云端 API 走 images/edits（透明=重绘）；stable-diffusion.cpp
+            走原生 img_gen（白=重绘）并保留遮罩外像素。结果会作为新素材写入当前镜头，
+            不覆盖原图。
           </p>
         </aside>
       </div>

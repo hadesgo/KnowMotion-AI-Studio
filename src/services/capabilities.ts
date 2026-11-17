@@ -61,7 +61,7 @@ export interface InpaintResult {
   providerId: string;
   model: string;
   elapsedMs: number;
-  mode: "openai-edits";
+  mode: "openai-edits" | "sdcpp-native-inpaint" | "openai-edits-fallback" | string;
   seed: number;
 }
 
@@ -73,6 +73,8 @@ export async function inpaintProjectImage(input: {
   prompt: string;
   size: string;
   maskAlphaDataUrl: string;
+  /** 亮度遮罩（白 = 重绘），stable-diffusion.cpp 通道使用。 */
+  maskLuminanceDataUrl: string;
   maskCoverage?: number;
   seed?: number;
   anchorLabel?: string;

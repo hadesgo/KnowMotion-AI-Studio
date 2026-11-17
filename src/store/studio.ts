@@ -182,6 +182,9 @@ export const useStudioStore = create<StudioState>()(
           isDemo: false,
           createdAt: nowIso(),
           updatedAt: nowIso(),
+          // 唯一允许跨项目复制素材的凭据：后端只接受“来源项目 == duplicatedFrom”的
+          // kmasset 地址，导入包无法伪造这一步。
+          duplicatedFrom: original.id,
         };
         set((state) => ({ projects: [copy, ...state.projects] }));
         return copy.id;

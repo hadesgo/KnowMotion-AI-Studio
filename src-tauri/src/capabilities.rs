@@ -896,8 +896,11 @@ pub struct InpaintRequest {
     pub provider: ImageProviderConfig,
     pub prompt: String,
     pub size: String,
-    /// 透明=重绘的遮罩，供 OpenAI images/edits 使用。
+    /// alpha 遮罩（透明=重绘），供 OpenAI images/edits 使用。
     pub mask_alpha_data_url: String,
+    /// 亮度遮罩（白=重绘），供 stable-diffusion.cpp 原生 img_gen 使用。
+    #[serde(default)]
+    pub mask_luminance_data_url: String,
     #[serde(default)]
     pub mask_coverage: f32,
     #[serde(default)]
@@ -1152,7 +1155,12 @@ fn read_reference_bytes(
     let relative = crate::storage::client_url_to_relative(project_id, source)
         .or_else(|| crate::storage::safe_relative_path(source))
         .ok_or_else(|| "Reference image must be a project asset".to_string())?;
-    let path = projects_root.join(project_id).join(&relative);
+    let project_root = projects_root.join(project_id);
+    let path = crate::storage::ensure_within(
+        &project_root,
+        &project_root.join(&relative),
+        "Reference image",
+    )?;
     let metadata = std::fs::metadata(&path)
         .map_err(|error| format!("Reference image is unavailable: {error}"))?;
     if metadata.len() as usize > MAX_REFERENCE_IMAGE_BYTES {
@@ -1194,30 +1202,26 @@ pub async fn inpaint_project_image(
     let seed = request
         .seed
         .unwrap_or_else(|| (Utc::now().timestamp_millis() as i64).rem_euclid(2_000_000_000));
-    let _local_lease = prepare_local_diffusion(&request.provider).await?;
     let started = Instant::now();
-    let (bytes, mode) = match request.provider.protocol.as_str() {
-        "OpenAI Compatible" | STABLE_DIFFUSION_CPP_PROTOCOL => {
-            let alpha_mask = decode_png_data_url(&request.mask_alpha_data_url, "alpha mask")?;
-            (
-                generate_openai_inpaint(
-                    &request.provider,
-                    request.prompt.trim(),
-                    &request.size,
-                    &source_bytes,
-                    source_mime,
-                    &alpha_mask,
-                )
-                .await?,
-                "openai-edits",
-            )
-        }
-        other => {
-            return Err(format!(
-                "Provider protocol {other} does not implement image inpainting"
-            ))
-        }
+    let alpha_mask = decode_png_data_url(&request.mask_alpha_data_url, "alpha mask")?;
+    let luminance_mask = if request.mask_luminance_data_url.trim().is_empty() {
+        None
+    } else {
+        Some(decode_png_data_url(
+            &request.mask_luminance_data_url,
+            "luminance mask",
+        )?)
     };
+    let (bytes, mode) = execute_inpaint(
+        &request.provider,
+        request.prompt.trim(),
+        &request.size,
+        &source_bytes,
+        source_mime,
+        &alpha_mask,
+        luminance_mask.as_deref(),
+    )
+    .await?;
 
     let asset_id = format!("asset_{}", Uuid::new_v4().simple());
     let mime_type = detect_image_mime(&bytes)?;
@@ -1315,7 +1319,11 @@ fn read_project_asset_image(
         .unwrap_or_else(|| source.to_string());
     let relative = crate::storage::safe_relative_path(&relative)
         .ok_or_else(|| "Inpaint source path is unsafe".to_string())?;
-    let path = project_root.join(&relative);
+    let path = crate::storage::ensure_within(
+        &project_root,
+        &project_root.join(&relative),
+        "Inpaint source",
+    )?;
     let bytes = std::fs::read(&path)
         .map_err(|error| format!("Unable to read inpaint source image: {error}"))?;
     if bytes.is_empty() || bytes.len() > 25 * 1024 * 1024 {
@@ -1323,6 +1331,216 @@ fn read_project_asset_image(
     }
     let mime = detect_image_mime(&bytes)?;
     Ok((bytes, mime))
+}
+
+/// 局部重绘的可复用执行路径（命令与真实服务验收共用同一条代码路径）。
+///
+/// 两条通道对遮罩的约定**不同**，必须分开适配：
+///
+/// * OpenAI Images edits：alpha 通道，**透明像素 = 允许重绘**，不透明 = 保留。
+/// * stable-diffusion.cpp 原生 `/sdcpp/v1/img_gen`：`mask_image` 是**亮度**遮罩，
+///   白色 = 重绘区域，黑色 = 保留；它同时做 init image 混合，只有这条路径能真正保住
+///   遮罩外的像素（`/v1/images/edits` 会把整幅重画）。
+pub(crate) async fn execute_inpaint(
+    provider: &ImageProviderConfig,
+    prompt: &str,
+    size: &str,
+    source: &[u8],
+    source_mime: &str,
+    alpha_mask: &[u8],
+    luminance_mask: Option<&[u8]>,
+) -> Result<(Vec<u8>, &'static str), String> {
+    match provider.protocol.as_str() {
+        STABLE_DIFFUSION_CPP_PROTOCOL => {
+            let luminance_mask = luminance_mask.ok_or_else(|| {
+                "stable-diffusion.cpp inpainting needs a luminance mask (white = repaint)".to_string()
+            })?;
+            validate_inpaint_mask(source, luminance_mask, false)?;
+            let _local_lease = prepare_local_diffusion(provider).await?;
+            let seed = (Utc::now().timestamp_millis() as i64).rem_euclid(2_000_000_000);
+            match generate_sd_cpp_inpaint(provider, prompt, size, source, luminance_mask, seed).await
+            {
+                Ok(bytes) => Ok((bytes, "sdcpp-native-inpaint")),
+                Err(NativeFailure::Unsupported(reason)) => {
+                    logging::log_event(
+                        LogLevel::Warn,
+                        "provider.image",
+                        "stable-diffusion.cpp native inpaint is unavailable; falling back to images/edits",
+                        Some(json!({ "reason": reason })),
+                    );
+                    validate_inpaint_mask(source, alpha_mask, true)?;
+                    let bytes = generate_openai_inpaint(
+                        provider,
+                        prompt,
+                        size,
+                        source,
+                        source_mime,
+                        alpha_mask,
+                    )
+                    .await?;
+                    Ok((bytes, "openai-edits-fallback"))
+                }
+                Err(NativeFailure::Failed(message)) => Err(message),
+            }
+        }
+        "OpenAI Compatible" => {
+            validate_inpaint_mask(source, alpha_mask, true)?;
+            let bytes =
+                generate_openai_inpaint(provider, prompt, size, source, source_mime, alpha_mask)
+                    .await?;
+            Ok((bytes, "openai-edits"))
+        }
+        other => Err(format!(
+            "Provider protocol {other} does not implement image inpainting"
+        )),
+    }
+}
+
+/// stable-diffusion.cpp 原生局部重绘：init image + 亮度遮罩 + strength。
+/// 该接口是异步任务制，提交后需要轮询 `/sdcpp/v1/jobs/{id}`。
+async fn generate_sd_cpp_inpaint(
+    provider: &ImageProviderConfig,
+    prompt: &str,
+    size: &str,
+    source: &[u8],
+    luminance_mask: &[u8],
+    seed: i64,
+) -> Result<Vec<u8>, NativeFailure> {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    let (mut width, mut height) = parse_image_size(size);
+    if let Some((source_width, source_height)) = probe_image_dimensions(source) {
+        // 遮罩与源图同尺寸，输出也跟随源图，避免 Provider 缩放后遮罩错位。
+        width = source_width;
+        height = source_height;
+    }
+    let source_mime = detect_image_mime(source).map_err(NativeFailure::Failed)?;
+    let payload = json!({
+        "prompt": prompt,
+        "width": width,
+        "height": height,
+        "batch_count": 1,
+        "seed": seed,
+        "output_format": "png",
+        "strength": 1.0,
+        "init_image": format!("data:{source_mime};base64,{}", BASE64.encode(source)),
+        "mask_image": format!(
+            "data:image/png;base64,{}",
+            BASE64.encode(luminance_mask)
+        ),
+    });
+    let secret = optional_provider_secret(provider).map_err(NativeFailure::Failed)?;
+    let base = provider.base_url.trim_end_matches('/').to_string();
+    let client = http_client().map_err(NativeFailure::Failed)?;
+    let mut request = client.post(format!("{base}/sdcpp/v1/img_gen")).json(&payload);
+    if let Some(secret) = secret {
+        request = request.bearer_auth(secret);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| NativeFailure::Failed(provider_network_error(error)))?;
+    let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND
+        || status == reqwest::StatusCode::METHOD_NOT_ALLOWED
+    {
+        return Err(NativeFailure::Unsupported(
+            "当前 stable-diffusion.cpp 运行时没有 /sdcpp/v1/img_gen 原生接口".to_string(),
+        ));
+    }
+    let body: Value = response.json().await.map_err(|_| {
+        NativeFailure::Failed(format!(
+            "stable-diffusion.cpp 局部重绘返回了非 JSON 响应（{status}）"
+        ))
+    })?;
+    if !status.is_success() {
+        let message = body
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .or_else(|| body.get("error").and_then(Value::as_str))
+            .unwrap_or("局部重绘失败");
+        return Err(NativeFailure::Failed(format!(
+            "stable-diffusion.cpp 局部重绘返回 {status}: {}",
+            limit(message)
+        )));
+    }
+    let images = if let Some(images) = job_images(&body) {
+        images
+    } else {
+        await_sd_cpp_job(&client, &base, &body).await
+    }
+    .map_err(NativeFailure::Failed)?;
+    images
+        .into_iter()
+        .next()
+        .ok_or_else(|| NativeFailure::Failed("局部重绘没有返回图像".to_string()))
+}
+
+/// 遮罩必须是 PNG，且与源图同尺寸；OpenAI 通道还要求带 alpha 通道。
+fn validate_inpaint_mask(
+    source: &[u8],
+    mask: &[u8],
+    require_alpha: bool,
+) -> Result<(u32, u32), String> {
+    let (mask_width, mask_height, has_alpha) = probe_png_header(mask)?;
+    if require_alpha && !has_alpha {
+        return Err("Mask PNG must carry an alpha channel (color type 4 or 6)".to_string());
+    }
+    if mask_width == 0 || mask_height == 0 {
+        return Err("Mask PNG has a zero dimension".to_string());
+    }
+    if let Some((source_width, source_height)) = probe_image_dimensions(source) {
+        if (source_width, source_height) != (mask_width, mask_height) {
+            return Err(format!(
+                "Mask is {mask_width}x{mask_height} but the source image is {source_width}x{source_height}; inpainting requires identical sizes"
+            ));
+        }
+    }
+    Ok((mask_width, mask_height))
+}
+
+/// 只读 PNG 头部，取得宽高与是否带 alpha；不解码像素。
+fn probe_png_header(bytes: &[u8]) -> Result<(u32, u32, bool), String> {
+    const SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    if bytes.len() < 33 || !bytes.starts_with(&SIGNATURE) {
+        return Err("Mask must be a PNG image".to_string());
+    }
+    if &bytes[12..16] != b"IHDR" {
+        return Err("Mask PNG is missing its IHDR chunk".to_string());
+    }
+    let width = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+    let height = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+    let color_type = bytes[25];
+    Ok((width, height, matches!(color_type, 4 | 6)))
+}
+
+/// PNG / JPEG 的像素尺寸；其它格式返回 None（不阻断，只跳过尺寸比对）。
+fn probe_image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    if let Ok((width, height, _)) = probe_png_header(bytes) {
+        return Some((width, height));
+    }
+    if bytes.len() > 4 && bytes[0] == 0xff && bytes[1] == 0xd8 {
+        let mut index = 2;
+        while index + 9 < bytes.len() {
+            if bytes[index] != 0xff {
+                index += 1;
+                continue;
+            }
+            let marker = bytes[index + 1];
+            if (0xc0..=0xcf).contains(&marker)
+                && !matches!(marker, 0xc4 | 0xc8 | 0xcc)
+            {
+                let height = u16::from_be_bytes([bytes[index + 5], bytes[index + 6]]) as u32;
+                let width = u16::from_be_bytes([bytes[index + 7], bytes[index + 8]]) as u32;
+                return Some((width, height));
+            }
+            let segment = u16::from_be_bytes([bytes[index + 2], bytes[index + 3]]) as usize;
+            if segment < 2 {
+                return None;
+            }
+            index += 2 + segment;
+        }
+    }
+    None
 }
 
 fn decode_png_data_url(source: &str, label: &str) -> Result<Vec<u8>, String> {
@@ -2188,6 +2406,57 @@ fn decode_html_entities(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn encode_png(width: u32, height: u32, color: png::ColorType) -> Vec<u8> {
+        let channels: u32 = match color {
+            png::ColorType::Rgba => 4,
+            png::ColorType::Rgb => 3,
+            png::ColorType::GrayscaleAlpha => 2,
+            _ => 1,
+        };
+        let mut output = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut output, width, height);
+            encoder.set_color(color);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().expect("png header");
+            writer
+                .write_image_data(&vec![0_u8; (width * height * channels) as usize])
+                .expect("png data");
+        }
+        output
+    }
+
+    #[test]
+    fn inpaint_mask_must_match_source_size_and_carry_alpha() {
+        let source = encode_png(64, 48, png::ColorType::Rgb);
+        let mask = encode_png(64, 48, png::ColorType::Rgba);
+        assert_eq!(
+            validate_inpaint_mask(&source, &mask, true).expect("matching mask"),
+            (64, 48)
+        );
+
+        let opaque_mask = encode_png(64, 48, png::ColorType::Rgb);
+        assert!(validate_inpaint_mask(&source, &opaque_mask, true)
+            .expect_err("RGB mask has no alpha")
+            .contains("alpha channel"));
+
+        let wrong_size = encode_png(32, 32, png::ColorType::Rgba);
+        assert!(validate_inpaint_mask(&source, &wrong_size, true)
+            .expect_err("size mismatch must fail")
+            .contains("identical sizes"));
+
+        assert!(validate_inpaint_mask(&source, b"not a png", true)
+            .expect_err("non PNG mask must fail")
+            .contains("PNG"));
+    }
+
+    #[test]
+    fn image_dimension_probe_reads_png_headers() {
+        let png = encode_png(160, 90, png::ColorType::Rgba);
+        assert_eq!(probe_image_dimensions(&png), Some((160, 90)));
+        assert_eq!(probe_image_dimensions(b"garbage"), None);
+    }
 
     #[test]
     fn validates_provider_image_mime_signature() {

@@ -44,6 +44,18 @@ impl Drop for ServerActivity<'_> {
     }
 }
 
+/// 本地推理超时下限。真正的上限按输出 token 数放大：27B IQ2 这类模型在 12 GB 卡上
+/// 生成 6000 token 需要十几分钟，固定 600 s 会把正常的重活判成失败（实测 storyboard
+/// 步骤就因为 600 s 超时而重试）。
+const LOCAL_INFERENCE_TIMEOUT_FLOOR: Duration = Duration::from_secs(600);
+const LOCAL_INFERENCE_BASE_OVERHEAD: Duration = Duration::from_secs(180);
+
+fn local_inference_timeout(max_tokens: u32) -> Duration {
+    // 按 6.7 tok/s 的下限估算输出时间，再叠加上下文处理与模型唤醒的固定开销。
+    let generated = Duration::from_millis(max_tokens as u64 * 150);
+    LOCAL_INFERENCE_TIMEOUT_FLOOR.max(LOCAL_INFERENCE_BASE_OVERHEAD + generated)
+}
+
 impl GgufLlmProvider {
     #[cfg(test)]
     pub fn load(config: &ProviderConfig) -> Result<Self, String> {
@@ -63,7 +75,7 @@ impl GgufLlmProvider {
     ) -> Result<Self, String> {
         let server = load_cached_server(config)?;
         let client = Client::builder()
-            .timeout(Duration::from_secs(600))
+            .timeout(LOCAL_INFERENCE_TIMEOUT_FLOOR)
             .connect_timeout(Duration::from_secs(2))
             .user_agent("KnowMotion-AI-Studio/0.1")
             .build()
@@ -106,11 +118,17 @@ impl LlmProvider for GgufLlmProvider {
         });
         if request.json_mode {
             payload["response_format"] = json!({"type": "json_object"});
+            // Qwen3 系列默认开 thinking，思维链会把 max_tokens 预算吃光，content 变成
+            // 空字符串（实测 Storyboard 步骤连续两次 450 s 后返回空文本）。结构化 Agent
+            // 要的是 JSON，不是推理过程，这里显式关掉；模板不支持 enable_thinking 时
+            // llama.cpp 会忽略该变量，不影响其它模型。
+            payload["chat_template_kwargs"] = json!({"enable_thinking": false});
         }
 
         let response = self
             .client
             .post(format!("{}/v1/chat/completions", self.server.base_url))
+            .timeout(local_inference_timeout(request.max_tokens))
             .bearer_auth(&self.server.api_key)
             .json(&payload)
             .send()
@@ -627,7 +645,22 @@ fn parse_completion_response(requested_model: &str, body: &Value) -> Result<LlmR
         .and_then(Value::as_str)
         .ok_or_else(|| "llama.cpp response has no message content".to_string())?;
     if text.trim().is_empty() {
-        return Err("llama.cpp returned no text".to_string());
+        let finish_reason = body
+            .pointer("/choices/0/finish_reason")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let completion_tokens = body
+            .pointer("/usage/completion_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let reasoning_chars = body
+            .pointer("/choices/0/message/reasoning_content")
+            .and_then(Value::as_str)
+            .map(str::len)
+            .unwrap_or(0);
+        return Err(format!(
+            "llama.cpp returned no text (finish_reason={finish_reason}, completion_tokens={completion_tokens}, reasoning_chars={reasoning_chars})"
+        ));
     }
     Ok(LlmResponse {
         text: text.to_string(),
@@ -814,5 +847,14 @@ mod tests {
             provider.backend_label()
         );
         shutdown_runtime();
+    }
+
+    #[test]
+    fn inference_timeout_scales_with_output_tokens() {
+        // 6000 token 的本地生成在多分钟内完成，固定 600 s 会把正常请求判成超时。
+        assert_eq!(local_inference_timeout(16), LOCAL_INFERENCE_TIMEOUT_FLOOR);
+        assert!(local_inference_timeout(6000) > LOCAL_INFERENCE_TIMEOUT_FLOOR);
+        assert_eq!(local_inference_timeout(6000).as_secs(), 180 + 900);
+        assert!(local_inference_timeout(8000) > local_inference_timeout(6000));
     }
 }

@@ -11,7 +11,10 @@ export interface MaskStroke {
 }
 
 export interface MaskCanvasPair {
+  /** alpha 遮罩：透明 = 重绘（OpenAI Images edits）。 */
   alphaMaskDataUrl: string;
+  /** 亮度遮罩：白 = 重绘（stable-diffusion.cpp 原生 img_gen）。 */
+  luminanceMaskDataUrl: string;
   coverage: number;
 }
 
@@ -150,7 +153,25 @@ function drawStrokes(
   }
 }
 
-/** 生成透明底黑色涂抹区域，供图片编辑接口使用。 */
+/**
+ * 遮罩语义：**涂抹区域 alpha = 0（允许重绘），其余区域 alpha = 255（保持不变）**。
+ *
+ * OpenAI Images edits 与 stable-diffusion.cpp `/v1/images/edits` 都按这个方向解释遮罩：
+ * 透明像素是可以被改写的区域，不透明像素必须回填原图。反方向会让“涂抹处不动、
+ * 没涂的地方被重画”，这是第三轮审计的 P1 缺陷。
+ */
+export const EDITABLE_ALPHA = 0;
+export const LOCKED_ALPHA = 255;
+
+/**
+ * 生成图片编辑接口所需的遮罩，两条通道约定不同，必须各给一份：
+ *
+ * - `alphaMaskDataUrl`：先把画布铺满不透明底色，再用 `destination-out` 把笔迹擦成透明。
+ *   透明像素 = 允许重绘（OpenAI Images edits）。
+ * - `luminanceMaskDataUrl`：黑底白笔迹。白色 = 允许重绘（stable-diffusion.cpp 原生 img_gen）。
+ *
+ * 两份遮罩尺寸都与源图一致，避免 Provider 端缩放导致遮罩错位。
+ */
 export function buildMaskCanvases(
   strokes: MaskStroke[],
   width: number,
@@ -164,12 +185,48 @@ export function buildMaskCanvases(
   const alphaContext = alpha.getContext("2d");
   if (!alphaContext) throw new Error("Canvas 2D context is unavailable");
   alphaContext.clearRect(0, 0, safeWidth, safeHeight);
+  alphaContext.globalCompositeOperation = "source-over";
+  alphaContext.fillStyle = "#000000";
+  alphaContext.fillRect(0, 0, safeWidth, safeHeight);
+  alphaContext.save();
+  // 只在笔迹处把 alpha 擦成 0；不透明底色代表“保留原像素”。
+  alphaContext.globalCompositeOperation = "destination-out";
   drawStrokes(alphaContext, strokes, safeWidth, safeHeight, "#000000");
+  alphaContext.restore();
+  alphaContext.globalCompositeOperation = "source-over";
+  binarizeMaskAlpha(alphaContext, safeWidth, safeHeight);
+
+  const luminance = document.createElement("canvas");
+  luminance.width = safeWidth;
+  luminance.height = safeHeight;
+  const luminanceContext = luminance.getContext("2d");
+  if (!luminanceContext) throw new Error("Canvas 2D context is unavailable");
+  luminanceContext.fillStyle = "#000000";
+  luminanceContext.fillRect(0, 0, safeWidth, safeHeight);
+  drawStrokes(luminanceContext, strokes, safeWidth, safeHeight, "#FFFFFF");
 
   return {
     alphaMaskDataUrl: alpha.toDataURL("image/png"),
+    luminanceMaskDataUrl: luminance.toDataURL("image/png"),
     coverage: maskCoverage(strokes),
   };
+}
+
+/** 抗锯齿边缘会留下半透明像素；Provider 对半透明的解释各不相同，这里二值化。 */
+export const MASK_ALPHA_THRESHOLD = 128;
+
+function binarizeMaskAlpha(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+) {
+  const image = context.getImageData(0, 0, width, height);
+  const pixels = image.data;
+  for (let index = 3; index < pixels.length; index += 4) {
+    pixels[index] =
+      pixels[index] >= MASK_ALPHA_THRESHOLD ? LOCKED_ALPHA : EDITABLE_ALPHA;
+  }
+  context.putImageData(image, 0, 0);
 }
 
 export function sizeForImage(width: number, height: number):

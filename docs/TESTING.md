@@ -23,9 +23,26 @@ npm run test:components
 ```bash
 npm run acceptance:runtimes   # 首次准备：按固定版本与 SHA-256 安装三个运行时
 npm run acceptance:services   # 用本机真实模型跑五项能力验收
+npm run acceptance:inpaint    # 局部重绘两条通道（stable-diffusion.cpp 真实服务）
+npm run acceptance:workflow   # 九 Agent Research → Quality 全流程
 ```
 
-用例是 `src-tauri/src/acceptance.rs` 的 `real_service_acceptance`，带 `#[ignore]`，因此普通 `cargo test` 不会触发它。它需要本机已下载模型、已安装运行时和一块能跑 Vulkan 的 GPU，不进 CI。默认约 2 分钟，产物与 JSON 报告写入 `src-tauri/target/acceptance/`；可用 `KNOWMOTION_ACCEPTANCE_ONLY=LLM,TTS` 只跑部分能力。判定标准、实测数据与限制见 `docs/REAL_SERVICE_ACCEPTANCE.md`。
+用例都在 `src-tauri/src/acceptance.rs`，带 `#[ignore]`，因此普通 `cargo test` 不会触发。它们需要本机已下载模型、已安装运行时和一块能跑 Vulkan 的 GPU，不进 CI。产物与 JSON 报告写入 `src-tauri/target/acceptance/`：
+
+- `real_service_acceptance`：LLM / Embedding / TTS / ASR / Image 五项能力，可用 `KNOWMOTION_ACCEPTANCE_ONLY=LLM,TTS` 只跑部分。
+- `real_inpaint_acceptance`：真实源图 + 遮罩走 `execute_inpaint`，按“遮罩内像素变化显著、遮罩外基本不变”判定方向；云端 OpenAI 通道需要 `KNOWMOTION_ACCEPTANCE_OPENAI_KEY`（缺失时标记为 skipped，不计失败）。
+- `real_workflow_acceptance`：从空的验收项目启动完整九 Agent DAG，自动通过三个审批节点，最后校验步骤全绿、`provider_calls ≥ 9`、场景/字幕/质量报告齐全。
+
+判定标准、实测数据与限制见 `docs/REAL_SERVICE_ACCEPTANCE.md`。
+
+## 遮罩像素测试
+
+`tests/mask-canvas.test.ts` 不 mock canvas：用 Skia 实现（`@napi-rs/canvas`）当作浏览器 canvas，走真实绘制路径，再把产出的 PNG 解码回来逐像素断言：
+
+- alpha 遮罩：涂抹处 `alpha = 0`、其余 `alpha = 255`，且没有半透明残留（OpenAI Images edits 约定）；
+- 亮度遮罩：涂抹处纯白、其余纯黑（stable-diffusion.cpp 原生 `img_gen` 约定）；
+- 光栅化面积与解析覆盖率 `maskCoverage` 的误差 < 0.02。
+
 
 ## 桌面 E2E
 

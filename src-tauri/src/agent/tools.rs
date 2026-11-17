@@ -1,7 +1,7 @@
 use super::model::{AgentOutput, AssetBrief, ProjectToolCall, WorkflowRevision};
 use crate::{mirror_project_files, write_atomic};
 use chrono::Utc;
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -666,10 +666,9 @@ fn svg_asset(scene_id: &str, brief: &AssetBrief, index: usize) -> (Value, String
 <rect x="82" y="640" width="110" height="3" fill="{accent}"/>
 </svg>"##
     );
-    let src = format!(
-        "data:image/svg+xml;charset=utf-8,{}",
-        utf8_percent_encode(&svg, NON_ALPHANUMERIC)
-    );
+    // 统一用 base64 载荷：存储层把 data URL 落盘成文件后靠它还原字节，
+    // 百分号编码虽然也是合法 RFC 2397，但会让“草案 → 项目文件”这一步失败。
+    let src = format!("data:image/svg+xml;base64,{}", BASE64.encode(svg.as_bytes()));
     (
         json!({
             "id": asset_id,

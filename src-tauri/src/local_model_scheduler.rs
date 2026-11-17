@@ -48,6 +48,10 @@ pub(crate) struct LocalRuntimeConfig {
     pub diffusion_model: Option<String>,
     #[serde(default)]
     pub text_encoder: Option<String>,
+    /// Qwen3-VL 之类的视觉塔（`--llm_vision`）。Qwen Image 2.1 的编辑通道缺少它
+    /// 会直接报 “editing requires Qwen3-VL vision weights”。
+    #[serde(default)]
+    pub llm_vision: Option<String>,
     #[serde(default)]
     pub vae: Option<String>,
     #[serde(default)]
@@ -150,6 +154,7 @@ struct DiffusionRegistration {
     model_directory: Option<PathBuf>,
     diffusion_model: Option<PathBuf>,
     text_encoder: Option<PathBuf>,
+    llm_vision: Option<PathBuf>,
     vae: Option<PathBuf>,
 }
 
@@ -334,7 +339,10 @@ pub(crate) async fn acquire_gpu(
         state.waiting_requests = state.waiting_requests.saturating_sub(1);
     }
 
-    if let Err(error) = scheduler.prepare_for_lease(workload, backend).await {
+    if let Err(error) = scheduler
+        .prepare_for_lease(workload, provider_id, backend)
+        .await
+    {
         drop(gate);
         return Err(error);
     }
@@ -388,10 +396,22 @@ pub(crate) async fn acquire_gpu(
     })
 }
 
+/// LLM 运行时是否已常驻（对应 provider 的 `llama-server` 仍在运行且模型已加载）。
+/// 常驻时不需要再为新加载预留显存余量。
+fn llm_runtime_is_resident(
+    runtimes: &HashMap<String, RuntimeRecord>,
+    provider_id: &str,
+) -> bool {
+    runtimes
+        .get(&format!("llm:{provider_id}"))
+        .is_some_and(|runtime| runtime.model_loaded)
+}
+
 impl LocalModelScheduler {
     async fn prepare_for_lease(
         &self,
         workload: Workload,
+        provider_id: &str,
         backend: Option<&str>,
     ) -> Result<(), String> {
         match workload {
@@ -421,7 +441,17 @@ impl LocalModelScheduler {
 
         let use_gpu = !backend.is_some_and(|value| value.eq_ignore_ascii_case("cpu"));
         if use_gpu {
-            self.wait_for_vram_margin().await?;
+            // 已经常驻的 llama-server 自己就占着显存，再要求 896 MiB 空闲会让同一工作流
+            // 的第二个 Agent 直接失败（“891 MiB free, 896 MiB required”）。只有确实要
+            // 新加载模型时才检查余量。
+            let resident = self
+                .state
+                .lock()
+                .map(|state| llm_runtime_is_resident(&state.runtimes, provider_id))
+                .unwrap_or(false);
+            if !(workload == Workload::Llm && resident) {
+                self.wait_for_vram_margin().await?;
+            }
         }
         Ok(())
     }
@@ -1052,6 +1082,11 @@ fn diffusion_registration(
         registration.model_directory.as_deref(),
         ModelRole::TextEncoder,
     )?;
+    registration.llm_vision = explicit_or_discover(
+        runtime.and_then(|runtime| runtime.llm_vision.as_deref()),
+        registration.model_directory.as_deref(),
+        ModelRole::Vision,
+    )?;
     registration.vae = explicit_or_discover(
         runtime.and_then(|runtime| runtime.vae.as_deref()),
         registration.model_directory.as_deref(),
@@ -1064,6 +1099,7 @@ fn diffusion_registration(
 enum ModelRole {
     Diffusion,
     TextEncoder,
+    Vision,
     Vae,
 }
 
@@ -1107,6 +1143,11 @@ fn discover_model_component(root: &Path, role: ModelRole) -> Option<PathBuf> {
                 normalized.contains("/text_encoders/")
                     && (normalized.ends_with(".gguf") || normalized.ends_with(".safetensors"))
             }
+            ModelRole::Vision => {
+                let name = normalized.rsplit('/').next().unwrap_or_default();
+                (name.contains("mmproj") || name.contains("vision"))
+                    && normalized.ends_with(".gguf")
+            }
             ModelRole::Vae => {
                 normalized.contains("/vae/")
                     && (normalized.ends_with(".safetensors")
@@ -1139,6 +1180,7 @@ fn diffusion_signature(registration: &DiffusionRegistration) -> Result<String, S
         "directory": registration.model_directory,
         "diffusionModel": registration.diffusion_model,
         "textEncoder": registration.text_encoder,
+        "llmVision": registration.llm_vision,
         "vae": registration.vae,
         "backend": registration.backend
     }))
@@ -1176,6 +1218,10 @@ async fn start_diffusion_server(
         arguments.push("--llm".to_string());
         arguments.push(encoder.to_string_lossy().to_string());
     }
+    if let Some(vision) = registration.llm_vision.as_ref() {
+        arguments.push("--llm_vision".to_string());
+        arguments.push(vision.to_string_lossy().to_string());
+    }
     if let Some(vae) = registration.vae.as_ref() {
         arguments.push("--vae".to_string());
         arguments.push(vae.to_string_lossy().to_string());
@@ -1204,6 +1250,7 @@ async fn start_diffusion_server(
             "baseUrl": origin,
             "diffusionModel": registration.diffusion_model,
             "textEncoder": registration.text_encoder,
+            "llmVision": registration.llm_vision,
             "vae": registration.vae
         })),
     );
@@ -1675,5 +1722,29 @@ mod tests {
         assert!(json_contains_id(&payload, "qwen3-tts"));
         assert!(json_contains_id(&payload, "qwen3-asr"));
         assert!(!json_contains_id(&payload, "missing"));
+    }
+
+    #[test]
+    fn resident_llm_runtime_skips_the_vram_margin() {
+        let mut runtimes = HashMap::new();
+        runtimes.insert(
+            "llm:acceptance-workflow-llm".to_string(),
+            RuntimeRecord {
+                runtime: Workload::Llm,
+                base_url: "http://127.0.0.1:1".to_string(),
+                model_loaded: true,
+                managed_process: true,
+                idle_seconds: 180,
+                last_used: Instant::now(),
+            },
+        );
+        assert!(llm_runtime_is_resident(&runtimes, "acceptance-workflow-llm"));
+
+        runtimes
+            .get_mut("llm:acceptance-workflow-llm")
+            .expect("runtime record")
+            .model_loaded = false;
+        assert!(!llm_runtime_is_resident(&runtimes, "acceptance-workflow-llm"));
+        assert!(!llm_runtime_is_resident(&runtimes, "other-provider"));
     }
 }

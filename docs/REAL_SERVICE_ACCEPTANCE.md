@@ -92,10 +92,8 @@ embedding-server.log     嵌入服务启动日志
   Embedding 服务"的自动启动入口。验收里嵌入服务由一个受管子进程按
   `llama-server --embeddings` 启动，应用的 Embedding Provider 仍然走真实的
   `/v1/embeddings` 代码路径。把本地嵌入纳入调度器是后续待办。
-- **只验收了文生图**：`images/edits` 局部重绘两条通道（OpenAI 与
-  stable-diffusion.cpp）没有纳入本轮，因为审计中的遮罩语义 P1 仍需独立回归。
-- **没有跑完九 Agent 全流程**：本轮验证的是 Provider 能力，不是
-  `Research → Quality` 的完整工作流编排。
+- **只验收了文生图**：局部重绘两条通道不在本轮（已被第七节的独立验收补齐，本地通道通过，云端通道待 Key）。
+- **没有跑完九 Agent 全流程**：本轮验证的是 Provider 能力（已被第七节补齐）。
 
 ## 6. 复现步骤
 
@@ -119,3 +117,59 @@ npm run acceptance:services
 验收用例是 `src-tauri/src/acceptance.rs` 中的 `real_service_acceptance`，
 带 `#[ignore]`，不会拖慢普通 `cargo test`。它依赖真实模型、真实运行时和一块
 能跑 Vulkan 的 GPU，因此不进 CI。
+
+## 7. 局部重绘与九 Agent 全流程（2026-11-17）
+
+两项 P0 验收都用 `#[ignore]` 的独立用例，走应用自身代码路径，不是脚本手写 HTTP。
+
+### 7.1 局部重绘（`real_inpaint_acceptance`）
+
+合成一张 512×512 棋盘格源图（左右两半色相不同）+ 竖直遮罩带（可重绘区为 x∈[170,341)），
+直接调用 `execute_inpaint`，再把返回的 PNG 解码成像素，比较**遮罩内**与**遮罩外**的平均绝对差：
+
+| 通道 | 走法 | 遮罩内 Δ | 遮罩外 Δ | 耗时 | 判定 |
+| --- | --- | --- | --- | --- | --- |
+| stable-diffusion.cpp | `/sdcpp/v1/img_gen`（init_image + 亮度遮罩 + strength=1.0） | **103.5** | 12.7 | 54.9 s | 通过 |
+| OpenAI Compatible | `/images/edits`（alpha 遮罩） | — | — | — | 缺 Key，标记 skipped |
+
+对照组说明问题所在：同一张图、同一份遮罩，改造前走 `/v1/images/edits` 时是
+**遮罩内 83.8 / 遮罩外 82.9**——遮罩内外被同等重画，等于遮罩没生效。现在两条通道各自适配
+遮罩方向（OpenAI：透明=重绘；stable-diffusion.cpp：白=重绘），不再共用同一个请求。
+
+### 7.2 九 Agent 全流程（`real_workflow_acceptance`）
+
+空项目 + `Qwen3.8-27B-UD-IQ2_S`（GGUF / Vulkan / ctx 16384），`AgentRuntime` 直接驱动
+完整 DAG，三个审批节点自动通过，判定看数据库与项目产物：
+
+| 指标 | 实测 |
+| --- | --- |
+| Run 状态 | `completed` |
+| 总耗时 | 723 s（12.1 分钟，含模型加载与三次审批） |
+| Provider 调用 | 9 次，全部成功；所有步骤 `attempt=1` |
+| 产出 | 4 段大纲、4 个镜头、4 个本地素材、8 条字幕、8 个时间线片段 |
+| Quality Agent | 评分 88，`warn`（来源 URL 未核验、镜头 2 信息密度偏高） |
+| 事件 | 23 条 workflow_events |
+
+单步耗时：research 33.7 s、director 30.5 s、script 45.5 s、storyboard 65.5 s、
+art_director 85.7 s、asset 33.7 s、animation 177.4 s、audio 61.4 s。
+
+### 7.3 这轮验收暴露并修复的缺陷
+
+1. **思考链吃光 token**：Qwen3 系默认 thinking，结构化请求的 6000 token 全花在推理上，
+   `content` 为空（Storyboard 两次 451 s / 435 s 后报 `returned no text`）。关闭
+   `enable_thinking` 后同一类请求 23 s 返回 437 token 的有效 JSON。
+2. **常驻 LLM 被要求显存余量**：第二个 Agent 在 891 MiB / 896 MiB 上失败。已常驻的
+   Provider 现在跳过余量检查。
+3. **固定 600 s 推理超时**：与 6000 token 输出不匹配；改为按 `max_tokens` 缩放。
+4. **Agent 草案 SVG 无法落盘**：草案用百分号编码 data URL，存储层只收 base64。草案改为
+   base64，存储层同时兼容百分号编码。
+
+## 8. 复现（P0 新增项）
+
+```bash
+npm run acceptance:inpaint    # 局部重绘，需要本机 stable-diffusion.cpp 运行时
+npm run acceptance:workflow   # 九 Agent 全流程，需要本机 GGUF 模型
+
+# 云端通道（需要真实 Key）
+KNOWMOTION_ACCEPTANCE_OPENAI_KEY=sk-... npm run acceptance:cloud
+```

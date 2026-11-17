@@ -81,6 +81,10 @@ pub(crate) fn normalize_project_assets(
     fs::create_dir_all(project_root.join("assets/images")).map_err(|error| error.to_string())?;
     fs::create_dir_all(project_root.join("assets/audio")).map_err(|error| error.to_string())?;
 
+    let duplicated_from = project
+        .get("duplicatedFrom")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let mut normalized = project.clone();
     let mut manifest = Vec::new();
     if let Some(assets) = normalized.get_mut("assets").and_then(Value::as_array_mut) {
@@ -98,8 +102,14 @@ pub(crate) fn normalize_project_assets(
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            let (relative_path, mime_type, bytes, sha256, status) =
-                materialize_asset(&project_root, project_id, &asset_id, asset, &source)?;
+            let (relative_path, mime_type, bytes, sha256, status) = materialize_asset(
+                &project_root,
+                project_id,
+                duplicated_from.as_deref(),
+                &asset_id,
+                asset,
+                &source,
+            )?;
             asset["src"] = Value::String(relative_path.clone());
             let record = json!({
                 "assetId": asset_id,
@@ -129,6 +139,7 @@ pub(crate) fn normalize_project_assets(
 fn materialize_asset(
     project_root: &Path,
     project_id: &str,
+    duplicated_from: Option<&str>,
     asset_id: &str,
     asset: &Value,
     source: &str,
@@ -140,12 +151,20 @@ fn materialize_asset(
         if encoded.len() > MAX_EMBEDDED_ASSET_BYTES * 2 {
             return Err(format!("Asset {asset_id} exceeds the 25 MB limit"));
         }
-        let mime_type = header
-            .strip_suffix(";base64")
-            .ok_or_else(|| format!("Asset {asset_id} must use base64 data encoding"))?;
-        let bytes = BASE64
-            .decode(encoded)
-            .map_err(|error| format!("Asset {asset_id} is not valid base64: {error}"))?;
+        // RFC 2397 允许 base64 与百分号编码两种载荷。Agent 生成的 SVG 草案历史上
+        // 走的是 `;charset=utf-8,<percent-encoded>`，旧项目里也还留着这种写法，
+        // 所以这里两种都接受，落盘后统一成文件。
+        let (mime_type, is_base64) = match header.strip_suffix(";base64") {
+            Some(mime) => (mime, true),
+            None => (header.split(';').next().unwrap_or(header), false),
+        };
+        let bytes = if is_base64 {
+            BASE64
+                .decode(encoded)
+                .map_err(|error| format!("Asset {asset_id} is not valid base64: {error}"))?
+        } else {
+            percent_decode_bytes(encoded)
+        };
         if bytes.is_empty() || bytes.len() > MAX_EMBEDDED_ASSET_BYTES {
             return Err(format!("Asset {asset_id} has an invalid file size"));
         }
@@ -176,16 +195,36 @@ fn materialize_asset(
     if let Some((source_project_id, relative_path)) = parse_client_url(source) {
         let safe = safe_relative_path(&relative_path)
             .ok_or_else(|| format!("Asset {asset_id} contains an unsafe path"))?;
+        let destination = project_root.join(&safe);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            ensure_within(project_root, parent, "Asset destination")?;
+        }
         if source_project_id != project_id {
+            // 跨项目素材只允许出现在“复制项目”流程里：复制出来的项目必须明确声明
+            // duplicatedFrom，且来源项目 ID 仍需通过组件白名单。导入包无法伪造这一步，
+            // 因此不会出现“导入一个 zip 就把项目目录外的文件复制进来”的路径。
+            if !safe_component(&source_project_id) {
+                return Err(format!(
+                    "Asset {asset_id} references an invalid source project id"
+                ));
+            }
+            if duplicated_from != Some(source_project_id.as_str()) {
+                return Err(format!(
+                    "Asset {asset_id} references project {source_project_id}; \
+                     cross-project asset copying is only allowed by the duplicate-project flow"
+                ));
+            }
             let projects_root = project_root
                 .parent()
                 .ok_or_else(|| "Project root is unavailable".to_string())?;
-            let source_path = projects_root.join(&source_project_id).join(&safe);
+            let source_root = projects_root.join(&source_project_id);
+            let source_path =
+                ensure_within(&source_root, &source_root.join(&safe), "Asset source")?;
             let bytes = fs::read(&source_path)
                 .map_err(|error| format!("Unable to copy duplicated asset: {error}"))?;
-            write_atomic(&project_root.join(&safe), &bytes)?;
+            write_atomic(&destination, &bytes)?;
         }
-        let destination = project_root.join(&safe);
         let exists = destination.is_file();
         return Ok((
             safe,
@@ -467,6 +506,14 @@ pub(crate) fn import_project_zip(
                 .map_err(|error| format!("Invalid project manifest: {error}"))?,
         )
         .map_err(|error| format!("Invalid project manifest: {error}"))?;
+        let manifest_id = project
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        // 导入包只能引用自己包内的文件：清掉 duplicatedFrom，并拒绝指向其它项目的
+        // kmasset 地址，否则一次导入就能把别人的（甚至项目目录外的）文件复制进来。
+        sanitize_imported_sources(&mut project, &manifest_id)?;
         let new_id = format!("project_{}", uuid::Uuid::new_v4().simple());
         let title = project
             .get("title")
@@ -491,8 +538,43 @@ pub(crate) fn import_project_zip(
     extraction_result
 }
 
-fn collect_package_files(root: &Path, current: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
-    for entry in fs::read_dir(current).map_err(|error| error.to_string())? {
+/// 导入包只能引用包内文件。
+///
+/// - 删除 `duplicatedFrom`：导入的项目不是任何项目的副本，不允许触发跨项目复制。
+/// - 指向自身旧 ID 的 `kmasset` 地址改写为相对路径（导出包里正常就是相对路径，
+///   这里兼容旧包），指向其它项目的来源直接拒绝导入。
+fn sanitize_imported_sources(project: &mut Value, manifest_id: &str) -> Result<(), String> {
+    if let Some(object) = project.as_object_mut() {
+        object.remove("duplicatedFrom");
+    }
+    let Some(assets) = project.get_mut("assets").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for asset in assets {
+        let Some(source) = asset
+            .get("src")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let Some((source_project_id, relative)) = parse_client_url(&source) else {
+            continue;
+        };
+        if source_project_id != manifest_id {
+            return Err(format!(
+                "Package references assets from another project ({source_project_id}); \
+                 imported packages may only contain their own files"
+            ));
+        }
+        let safe = safe_relative_path(&relative)
+            .ok_or_else(|| "Package asset path is unsafe".to_string())?;
+        asset["src"] = Value::String(safe);
+    }
+    Ok(())
+}
+
+fn collect_package_files(root: &Path, current: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {    for entry in fs::read_dir(current).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
         let path = entry.path();
         let name = entry.file_name();
@@ -566,6 +648,10 @@ fn parse_client_url(source: &str) -> Option<(String, String)> {
 }
 
 fn percent_decode_path(value: &str) -> String {
+    String::from_utf8_lossy(&percent_decode_bytes(value)).to_string()
+}
+
+fn percent_decode_bytes(value: &str) -> Vec<u8> {
     let bytes = value.as_bytes();
     let mut output = Vec::with_capacity(bytes.len());
     let mut index = 0;
@@ -584,7 +670,7 @@ fn percent_decode_path(value: &str) -> String {
         output.push(bytes[index]);
         index += 1;
     }
-    String::from_utf8_lossy(&output).to_string()
+    output
 }
 
 pub(crate) fn safe_relative_path(value: &str) -> Option<String> {
@@ -615,6 +701,23 @@ fn safe_component(value: &str) -> bool {
         && value
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+}
+
+/// 规范化 `candidate` 后确认它仍在 `root` 内。
+///
+/// `canonicalize` 会解析 `..`、符号链接与 8.3 短名，因此“项目目录里放一个指向
+/// 外部的符号链接”也会在这里被拦下；两个路径都取规范化结果，避免大小写/短名绕过。
+pub(crate) fn ensure_within(root: &Path, candidate: &Path, label: &str) -> Result<PathBuf, String> {
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("{label} root is unavailable: {error}"))?;
+    let resolved = candidate
+        .canonicalize()
+        .map_err(|error| format!("{label} is unavailable: {error}"))?;
+    if !resolved.starts_with(&root) {
+        return Err(format!("{label} escapes its allowed directory"));
+    }
+    Ok(resolved)
 }
 
 fn validate_image_mime<'a>(declared: &'a str, bytes: &[u8]) -> Result<&'a str, String> {
@@ -945,6 +1048,30 @@ mod tests {
     }
 
     #[test]
+    fn materializes_percent_encoded_svg_data_url() {
+        // 旧项目里 Agent 草案用的是 `;charset=utf-8,` 百分号编码载荷，仍要能落盘。
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let project = json!({
+            "id": "project-1",
+            "assets": [{
+                "id": "asset-svg",
+                "sceneId": "scene-1",
+                "name": "draft.svg",
+                "kind": "image",
+                "src": "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3C%2Fsvg%3E"
+            }]
+        });
+        let normalized =
+            normalize_project_assets(directory.path(), &project).expect("normalize assets");
+        assert_eq!(normalized["assets"][0]["src"], "assets/images/asset-svg.svg");
+        let written = fs::read_to_string(
+            directory.path().join("project-1/assets/images/asset-svg.svg"),
+        )
+        .expect("svg file");
+        assert!(written.contains("http://www.w3.org/2000/svg"));
+    }
+
+    #[test]
     fn project_zip_contains_project_and_images() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let project_root = directory.path().join("project-1");
@@ -993,5 +1120,155 @@ mod tests {
     #[test]
     fn crc32_matches_standard_vector() {
         assert_eq!(crc32(b"123456789"), 0xcbf4_3926);
+    }
+
+    fn duplicate_fixture(directory: &tempfile::TempDir) -> PathBuf {
+        let projects_root = directory.path().join("projects");
+        let source = projects_root.join("project-a/assets/images");
+        fs::create_dir_all(&source).expect("source project dirs");
+        fs::write(source.join("a.svg"), b"<svg id=\"a\"/>").expect("source asset");
+        projects_root
+    }
+
+    fn duplicated_project(source_id: &str) -> Value {
+        json!({
+            "id": "project-b",
+            "title": "b",
+            "assets": [{
+                "id": "asset-copy",
+                "sceneId": "scene-1",
+                "name": "a.svg",
+                "kind": "image",
+                "src": format!("http://kmasset.localhost/{source_id}/assets/images/a.svg")
+            }]
+        })
+    }
+
+    #[test]
+    fn cross_project_assets_are_rejected_outside_the_duplicate_flow() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let projects_root = duplicate_fixture(&directory);
+        let error = normalize_project_assets(&projects_root, &duplicated_project("project-a"))
+            .expect_err("plain save must not copy another project's assets");
+        assert!(
+            error.contains("duplicate-project flow"),
+            "unexpected error: {error}"
+        );
+        assert!(!projects_root
+            .join("project-b/assets/images/a.svg")
+            .exists());
+    }
+
+    #[test]
+    fn duplicate_flow_copies_assets_into_the_new_project() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let projects_root = duplicate_fixture(&directory);
+        let mut project = duplicated_project("project-a");
+        project["duplicatedFrom"] = json!("project-a");
+        let normalized = normalize_project_assets(&projects_root, &project).expect("duplicate");
+        assert_eq!(normalized["assets"][0]["src"], "assets/images/a.svg");
+        let copied = projects_root.join("project-b/assets/images/a.svg");
+        assert!(copied.is_file());
+        assert_eq!(fs::read(copied).expect("copied bytes"), b"<svg id=\"a\"/>");
+    }
+
+    #[test]
+    fn source_project_ids_must_pass_the_component_whitelist() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let projects_root = duplicate_fixture(&directory);
+        let cases = [
+            ("..", "http://kmasset.localhost/../assets/images/a.svg"),
+            ("a%2Fb", "http://kmasset.localhost/a%2Fb/assets/images/a.svg"),
+            (
+                "C:%5CWindows",
+                "http://kmasset.localhost/C:%5CWindows/assets/images/a.svg",
+            ),
+            (
+                "%5C%5Cserver%5Cshare",
+                "http://kmasset.localhost/%5C%5Cserver%5Cshare/assets/images/a.svg",
+            ),
+        ];
+        for (project_id, source) in cases {
+            let project = json!({
+                "id": "project-b",
+                "duplicatedFrom": project_id,
+                "assets": [{
+                    "id": "asset-copy",
+                    "sceneId": "scene-1",
+                    "kind": "image",
+                    "src": source
+                }]
+            });
+            let error = normalize_project_assets(&projects_root, &project)
+                .expect_err("unsafe source project ids must be rejected");
+            assert!(
+                error.contains("invalid source project id")
+                    || error.contains("unsafe path")
+                    || error.contains("escapes"),
+                "unexpected error for {source}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn ensure_within_rejects_traversal_out_of_the_root() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path().join("project");
+        fs::create_dir_all(root.join("assets/images")).expect("project dirs");
+        let outside = directory.path().join("outside.svg");
+        fs::write(&outside, b"<svg/>").expect("outside file");
+        let inside = root.join("assets/images/a.svg");
+        fs::write(&inside, b"<svg/>").expect("inside file");
+
+        assert!(ensure_within(&root, &inside, "Asset source").is_ok());
+        let traversal = root.join("assets/../../outside.svg");
+        let error = ensure_within(&root, &traversal, "Asset source")
+            .expect_err("traversal out of the root must be rejected");
+        assert!(error.contains("escapes"), "unexpected error: {error}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn symlinked_assets_outside_the_project_are_rejected() {
+        use std::os::windows::fs::symlink_file;
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let projects_root = duplicate_fixture(&directory);
+        let outside = directory.path().join("outside.svg");
+        fs::write(&outside, b"<svg id=\"outside\"/>").expect("outside file");
+        let link = projects_root.join("project-a/assets/images/link.svg");
+        if symlink_file(&outside, &link).is_err() {
+            // 未开启开发者模式/无符号链接权限时跳过，不把环境限制当成通过。
+            eprintln!("skipping symlink regression test: symlink creation is not permitted");
+            return;
+        }
+        let project = json!({
+            "id": "project-b",
+            "duplicatedFrom": "project-a",
+            "assets": [{
+                "id": "asset-link",
+                "sceneId": "scene-1",
+                "kind": "image",
+                "src": "http://kmasset.localhost/project-a/assets/images/link.svg"
+            }]
+        });
+        let error = normalize_project_assets(&projects_root, &project)
+            .expect_err("symlink escaping the project root must be rejected");
+        assert!(error.contains("escapes"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn import_sanitizes_asset_sources_and_drops_duplicate_marker() {
+        let mut project = duplicated_project("project-a");
+        project["duplicatedFrom"] = json!("project-a");
+        project["assets"][0]["src"] =
+            json!("http://kmasset.localhost/project-self/assets/images/a.svg");
+        sanitize_imported_sources(&mut project, "project-self").expect("self reference");
+        assert!(project.get("duplicatedFrom").is_none());
+        assert_eq!(project["assets"][0]["src"], "assets/images/a.svg");
+
+        let mut foreign = duplicated_project("project-a");
+        let error = sanitize_imported_sources(&mut foreign, "project-self")
+            .expect_err("foreign asset sources must be rejected");
+        assert!(error.contains("another project"), "unexpected error: {error}");
     }
 }

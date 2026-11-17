@@ -337,6 +337,8 @@ export interface VideoProject {
   title: string;
   createdAt: string;
   updatedAt: string;
+  /** 由「复制项目」写入的来源项目 ID；仅用于允许跨项目素材复制。 */
+  duplicatedFrom?: string;
   stage: ProjectStage;
   isDemo: boolean;
   settings: ProjectSettings;
@@ -378,6 +380,8 @@ export interface LocalModelRuntimeConfig {
   modelFamily?: string;
   diffusionModel?: string;
   textEncoder?: string;
+  /** 视觉塔（mmproj*.gguf）。Qwen Image 编辑通道必需；留空时自动发现。 */
+  llmVision?: string;
   vae?: string;
   idleUnloadSeconds?: number;
 }

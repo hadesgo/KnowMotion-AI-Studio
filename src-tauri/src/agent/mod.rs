@@ -5,18 +5,18 @@ mod provider;
 pub(crate) mod runtime;
 mod tools;
 
-use model::{
-    ProviderTestRequest, ProviderTestResult, WorkflowDefinition, WorkflowRunView,
-    WorkflowStartRequest,
-};
-use runtime::AgentRuntime;
+use model::{ProviderTestRequest, ProviderTestResult, WorkflowDefinition, WorkflowRunView};
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
 pub use model::workflow_definition;
 pub(crate) use provider::get_provider_secret;
+pub(crate) use model::WorkflowStartRequest;
+pub(crate) use runtime::AgentRuntime;
 #[cfg(test)]
-pub(crate) use model::ProviderConfig;
+pub(crate) use runtime::WorkflowEventSink;
+#[cfg(test)]
+pub(crate) use model::{AgentModelRoute, ProviderConfig};
 #[cfg(test)]
 pub(crate) use provider::{
     clear_provider_secret, resolve_provider, save_provider_secret, LlmRequest,
@@ -45,7 +45,7 @@ pub fn workflow_start(
     runtime: State<'_, Arc<AgentRuntime>>,
     request: WorkflowStartRequest,
 ) -> Result<WorkflowRunView, String> {
-    runtime.inner().create_run(app, request)
+    runtime.inner().create_run(Arc::new(app), request)
 }
 
 #[tauri::command]
@@ -71,7 +71,7 @@ pub fn workflow_pause(
     runtime: State<'_, Arc<AgentRuntime>>,
     run_id: String,
 ) -> Result<WorkflowRunView, String> {
-    runtime.inner().pause(app, &run_id)
+    runtime.inner().pause(Arc::new(app), &run_id)
 }
 
 #[tauri::command]
@@ -80,7 +80,7 @@ pub fn workflow_resume(
     runtime: State<'_, Arc<AgentRuntime>>,
     run_id: String,
 ) -> Result<WorkflowRunView, String> {
-    runtime.inner().resume(app, &run_id)
+    runtime.inner().resume(Arc::new(app), &run_id)
 }
 
 #[tauri::command]
@@ -89,7 +89,7 @@ pub fn workflow_retry(
     runtime: State<'_, Arc<AgentRuntime>>,
     run_id: String,
 ) -> Result<WorkflowRunView, String> {
-    runtime.inner().retry(app, &run_id)
+    runtime.inner().retry(Arc::new(app), &run_id)
 }
 
 #[tauri::command]
@@ -99,7 +99,7 @@ pub fn workflow_rerun_step(
     run_id: String,
     step_key: String,
 ) -> Result<WorkflowRunView, String> {
-    runtime.inner().rerun_step(app, &run_id, &step_key)
+    runtime.inner().rerun_step(Arc::new(app), &run_id, &step_key)
 }
 
 #[tauri::command]
@@ -113,7 +113,7 @@ pub fn workflow_approve(
 ) -> Result<WorkflowRunView, String> {
     runtime
         .inner()
-        .approve(app, &run_id, &step_key, &decision, note)
+        .approve(Arc::new(app), &run_id, &step_key, &decision, note)
 }
 
 #[tauri::command]
@@ -123,7 +123,7 @@ pub fn workflow_undo_revision(
     run_id: String,
     revision_id: String,
 ) -> Result<WorkflowRunView, String> {
-    runtime.inner().undo(app, &run_id, &revision_id)
+    runtime.inner().undo(Arc::new(app), &run_id, &revision_id)
 }
 
 #[tauri::command]
