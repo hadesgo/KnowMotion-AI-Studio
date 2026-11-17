@@ -270,7 +270,7 @@
 - 结果作为新素材写入 `assets/images`，带 `inpaint { sourceAssetId, mode, coverage, seed, anchorLabel, fingerprint }`；不覆盖原图，可继续采用到场景或收进设定集。
 - 浏览器预览无 Provider 时禁用提交；本地 SVG 草案会提示先转为位图，避免把 SVG 发给需要位图的 Provider。
 
-边界：没有遮罩羽化/软边、没有文本自动生成遮罩、没有局部重绘历史对比；队列并发固定为 2，未按 Provider 单独限流。稳定扩散通道要求运行时提供 `--llm_vision`（Qwen Image 2.1 的编辑需要 Qwen3-VL 视觉权重），调度器会自动发现 `mmproj*.gguf` 并传入。
+边界：文字自动选区是本机高对比文字带分析（浏览器提供 `TextDetector` 时优先使用），不是 OCR，也不会返回文字内容；复杂纹理背景仍可能需要手工补画。队列并发固定为 2，未按 Provider 单独限流。稳定扩散通道要求运行时提供 `--llm_vision`（Qwen Image 2.1 的编辑需要 Qwen3-VL 视觉权重），调度器会自动发现 `mmproj*.gguf` 并传入。
 
 ### 3.15 视频素材图层与视频剪辑
 
@@ -339,6 +339,15 @@
 - 发布签名链路：新增 `scripts/release/sign-windows.ps1`（signtool + SHA-256 + RFC3161 时间戳 + 即时验签）、`build-signed.ps1`（校验凭据 → 合并 `tauri.signing.conf.json` 构建 → 校验 updater `*.sig` → 输出 SHA-256 报告）、`verify-signature.ps1`，以及 `docs/RELEASE_SIGNING.md`。签名配置**不**写进 `tauri.conf.json`：没有证书时普通构建不受影响，签名构建必须显式 `npm run desktop:build:signed`。当前无证书，尚未执行签名构建与签名后的 VM smoke。
 - 仍未完成：第三方云端 Image/TTS/ASR/Embedding 的真实 Key 验收（`real_cloud_acceptance` 已写好，缺 Key 时会明确失败）、局部重绘的云端 channel、Authenticode 签名后的干净 VM 安装/卸载/离线渲染复验。
 
+### 3.20 P1 可靠性与本地模型闭环
+
+- 运行时 manifest 现在记录除 manifest 自身外的逐文件大小与 SHA-256；`installed_executable`、加速后端探测和 `ensure_local_runtime` 都会复验文件树、路径边界和哈希。旧 manifest 或任一文件缺失、截断、替换都会触发固定归档重下与 staging 原子替换，`RuntimeInstallResult.repairPerformed` 会告知界面。
+- audio.cpp 与 stable-diffusion.cpp 由应用自动拉起后不再只检查 `/health`：TTS 必须返回合法非空 WAV，ASR 必须实际处理一个 0.25 s WAV 并返回 JSON 文本字段，扩散服务必须以 256×256、1 step 完成一次 PNG 推理。smoke 只在应用自己启动进程时运行，失败会停止进程并拒绝报告模型就绪；GPU 模式通过后调度器状态显示 `gpuSmokeTested`。
+- 图片与视频素材页都会扫描项目清单中的本地文件。缺失图片提供“重新生成当前资产”，尽量复用原提示词、负向词、种子和参考图，创建新素材并替换镜头、角色、场景与风格锁中的旧 assetId；没有 Image Provider 时回退到本地 SVG 候选。缺失视频提供“重新导入当前资产”，替换场景图层与时间轴中的旧 assetId。
+- 局部重绘新增 0–64 px 羽化、基于本机像素的自动文字选区，以及跨面板重开的持久重绘谱系对比。历史记录由新素材的 `inpaint.sourceAssetId` 链恢复，可拖动前后分割线并继续编辑任意版本。
+- `kmasset` 协议改为单独模块，支持 WebM/MOV/OGV/M4V 等完整媒体 MIME、`GET/HEAD/OPTIONS`、单段 `Range`、`206 Partial Content`、`Content-Range`、`Accept-Ranges` 与 `416`；只按请求区间读取文件，不再为了拖动播放把整段视频读入内存。缺失文件使用 `no-store`，避免恢复后继续命中旧 404 缓存。
+- 自动化回归：前端新增羽化真实 alpha/luminance 像素断言、文字带选区与画笔转换测试；Rust 新增逐文件哈希/损坏路径、Range/HEAD/416/MIME 和 smoke WAV 测试。当前执行主机没有可访问的 NVIDIA 设备或本地模型，因此本轮未重跑真实 GPU 推理；既有的 RTX 5070 真实验收记录保留在 `docs/REAL_SERVICE_ACCEPTANCE.md`，下一次在 GPU 主机自动启动本地模型时会执行新的强制 smoke。
+
 ## 4. 第三轮重新审计发现
 
 ### 4.1 P1：局部重绘遮罩语义相反
@@ -388,17 +397,21 @@
 
 修复状态：新增 `src-tauri/src/public_url.rs`，研究网页和图片下载共用安全抓取器。解析全部 A/AAAA 地址并拒绝任一非公网结果，使用 `resolve_to_addrs` 固定已验证地址，禁用代理和自动重定向。每个重定向跳重新执行 URL/DNS/IP 校验，限制 5 跳并检测循环；HTTPS→HTTP 降级被拒绝。响应按流读取并限制 5 MiB/25 MiB，研究正文限制可提取的 Content-Type。自动化测试覆盖 IPv4/IPv6 特殊网段、IPv4 映射/兼容形式、私网混合 DNS 结果、相对重定向、凭据 URL 和协议降级。
 
-### 4.4 P2：本地运行时“已安装”不验证文件完整性
+### 4.4 P2：本地运行时“已安装”不验证文件完整性（已修复）
 
 `src-tauri/src/local_runtime.rs` 的 `installed_manifest` 只核对 manifest 元数据和 `is_file()`，没有校验可执行文件或周边 DLL。二进制损坏、截断或被替换后，安装入口仍可能返回 `alreadyInstalled=true`，直到实际启动模型时才失败。
 
 manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对应 runtime 根目录内。应在安装时记录关键文件树或关键二进制哈希，并在每次启动前复验；失败时自动进入可恢复重装，而不是继续报告就绪。
 
-### 4.5 P2：视频资源服务缺少 Range 和完整 MIME
+修复状态：manifest 已增加 `files[]`（相对 path、bytes、SHA-256），安装完成前对运行时文件树做哈希；读取时先验证 executable 与每个文件仍 canonicalize 在 runtime 根目录内，再校验大小和哈希。旧清单（没有 `files[]`）也被视为需要修复，`ensure_local_runtime` 会从固定归档自动重装。
+
+### 4.5 P2：视频资源服务缺少 Range 和完整 MIME（已修复）
 
 视频导入允许 MP4/M4V/WebM/MOV/OGV，但 `kmasset` 协议处理器会一次性读取整个文件，且只映射 MP4 的 MIME。WebM/MOV/OGV 会返回 `application/octet-stream`，同时缺少 `Range`、`206 Partial Content` 和 `Accept-Ranges`。
 
 该实现可能造成 128 MiB 文件的内存峰值，并使视频播放、拖动和重复加载行为不稳定。应增加流式 Range 响应、完整的视频 MIME 映射和缺失文件缓存策略。
+
+修复状态：`asset_protocol.rs` 支持单段 closed/open/suffix Range、HEAD、206、416、完整媒体 MIME 与恢复友好的缺失缓存。请求有 Range 时只读取所需字节；无 Range 仍由 Tauri 协议回调返回 Vec，但播放器拖动与元数据探测不再整文件读取。
 
 ### 4.6 P2：修订快照与项目导出持续膨胀
 
@@ -522,11 +535,11 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 
 ### P1：可靠性与本地模型闭环
 
-1. 为本地运行时建立关键文件哈希、损坏检测和自动修复。
-2. 对自动启动的 audio.cpp/stable-diffusion.cpp 模型完成真实 GPU smoke test。
-3. 为素材缺失增加“重新生成当前资产”操作。
-4. 增加遮罩羽化、文本自动选区与重绘历史对比。
-5. 为 `kmasset` 增加视频 Range 和完整 MIME 支持。
+1. 为本地运行时建立关键文件哈希、损坏检测和自动修复。**代码完成，回归通过。**
+2. 对自动启动的 audio.cpp/stable-diffusion.cpp 模型完成真实 GPU smoke test。**启动强制 smoke 已完成；当前主机缺模型权重，待具备模型的环境实跑。**
+3. 为素材缺失增加“重新生成当前资产”操作。**完成。**
+4. 增加遮罩羽化、文本自动选区与重绘历史对比。**完成。**
+5. 为 `kmasset` 增加视频 Range 和完整 MIME 支持。**完成。**
 
 ### P2：平台完整性
 

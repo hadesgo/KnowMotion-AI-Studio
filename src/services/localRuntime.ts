@@ -12,6 +12,7 @@ export interface LocalRuntimeInstallResult {
   installPath: string;
   executablePath: string;
   alreadyInstalled: boolean;
+  repairPerformed: boolean;
 }
 
 export interface LocalModelSchedulerStatus {
@@ -33,6 +34,7 @@ export interface LocalModelSchedulerStatus {
     modelLoaded: boolean;
     managedProcess: boolean;
     idleSeconds: number;
+    gpuSmokeTested: boolean;
   }>;
 }
 

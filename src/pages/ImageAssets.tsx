@@ -3,6 +3,7 @@ import {
   ArrowRight,
   BookmarkPlus,
   Check,
+  CircleAlert,
   Download,
   Image as ImageIcon,
   Images,
@@ -11,6 +12,7 @@ import {
   LoaderCircle,
   Paintbrush,
   Plus,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
   Upload,
@@ -40,6 +42,7 @@ import {
 } from "../components/ui";
 import { useStudioStore } from "../store/studio";
 import { useImageJobs } from "../hooks/useImageJobs";
+import { useMissingAssets } from "../hooks/useMissingAssets";
 import type { Asset, ConsistencyStamp, ReferenceRole } from "../types";
 import { createVisualDraftSvg, formatBytes, makeId, nowIso } from "../utils";
 import { isTauriDesktop } from "../services/desktop";
@@ -60,6 +63,7 @@ import {
   resolveSceneAnchors,
   STYLE_LOCK_ENTITY_ID,
 } from "../services/consistency";
+import { sizeForImage } from "../utils/mask";
 import "./ImageAssets.css";
 
 const styles = ["编辑部极简", "电影感纪录片", "复古科学杂志", "未来主义数据"];
@@ -98,7 +102,9 @@ export default function ImageAssets() {
   const [collectEntity, setCollectEntity] = useState("");
   const [batchOpen, setBatchOpen] = useState(false);
   const [inpaintTarget, setInpaintTarget] = useState<Asset | null>(null);
+  const [regeneratingId, setRegeneratingId] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+  const missing = useMissingAssets(project);
 
   const scene = project?.scenes.find((item) => item.id === sceneId);
   const anchors = useMemo(
@@ -341,6 +347,143 @@ export default function ImageAssets() {
     event.target.value = "";
   };
 
+  const regenerateAsset = async (target: Asset) => {
+    if (regeneratingId) return;
+    const targetScene =
+      project.scenes.find((item) => item.id === target.sceneId) ?? scene;
+    const generationPrompt =
+      target.prompt.trim() ||
+      target.consistency?.prompt.trim() ||
+      targetScene.visualPrompt.trim();
+    if (!generationPrompt) {
+      pushToast({
+        type: "error",
+        title: "无法重新生成",
+        message: "这个素材没有保留提示词；请先在画面需求中补充描述。",
+      });
+      return;
+    }
+    setRegeneratingId(target.id);
+    try {
+      let replacement: Asset;
+      if (imageProvider && isTauriDesktop) {
+        const referenceIds = new Set(
+          target.consistency?.referenceAssetIds ??
+            anchors?.referenceAssetIds ??
+            [],
+        );
+        referenceIds.delete(target.id);
+        const references: ImageReferenceInput[] = [...referenceIds]
+          .filter((assetId) => !missing.missingIds.has(assetId))
+          .map((assetId) =>
+            project.assets.find((asset) => asset.id === assetId),
+          )
+          .filter((asset): asset is Asset => Boolean(asset?.reference))
+          .map((asset) => ({
+            assetId: asset.id,
+            role: asset.reference!.role,
+            label: asset.reference!.label,
+            weight: asset.reference!.weight,
+            source: asset.src,
+          }));
+        const result = await generateProjectImages({
+          projectId: project.id,
+          sceneId: targetScene.id,
+          provider: imageProvider,
+          prompt: generationPrompt,
+          style: project.settings.style,
+          size: sizeForImage(target.width ?? 0, target.height ?? 0),
+          count: 1,
+          negativePrompt: target.consistency?.negativePrompt ?? "",
+          seed: target.consistency?.seed,
+          references,
+          anchorLabel: target.consistency?.anchorLabel ?? "",
+          consistencyFingerprint:
+            target.consistency?.fingerprint ?? "",
+        });
+        const generated = result.assets[0];
+        if (!generated) throw new Error("图片服务没有返回可替换的素材");
+        replacement = {
+          ...generated,
+          reference: target.reference,
+          name: `${target.name.replace(/ · 重新生成(?: \d+)?$/, "")} · 重新生成`,
+        };
+      } else {
+        const visual = createVisualDraftSvg(
+          generationPrompt,
+          project.settings.style,
+          1,
+          target.consistency
+            ? {
+                seed: target.consistency.seed,
+                palette:
+                  anchors?.characters[0]?.palette ??
+                  (targetScene.accent ? [targetScene.accent] : undefined),
+                anchorLabel: target.consistency.anchorLabel,
+              }
+            : undefined,
+        );
+        replacement = {
+          ...target,
+          id: makeId("asset"),
+          src: visual.src,
+          prompt: generationPrompt,
+          createdAt: nowIso(),
+          local: true,
+          bytes: undefined,
+          mimeType: "image/svg+xml",
+          inpaint: undefined,
+        };
+      }
+      const replacementId = replacement.id;
+      await updateProject(project.id, (current) => {
+        const remapIds = (ids: string[] | undefined) =>
+          (ids ?? []).map((id) => (id === target.id ? replacementId : id));
+        return {
+          ...current,
+          assets: current.assets.map((asset) =>
+            asset.id === target.id ? replacement : asset,
+          ),
+          scenes: current.scenes.map((item) => ({
+            ...item,
+            assetId:
+              item.assetId === target.id ? replacementId : item.assetId,
+            characterIds: remapIds(item.characterIds),
+          })),
+          characters: current.characters.map((character) => ({
+            ...character,
+            referenceAssetIds: remapIds(character.referenceAssetIds),
+          })),
+          locations: current.locations.map((location) => ({
+            ...location,
+            referenceAssetIds: remapIds(location.referenceAssetIds),
+          })),
+          styleLock: {
+            ...current.styleLock,
+            referenceAssetIds: remapIds(current.styleLock.referenceAssetIds),
+          },
+        };
+      });
+      setSelectedAssetId(replacement.id);
+      missing.markPresent(replacement.id);
+      pushToast({
+        type: "success",
+        title: "当前资产已重新生成",
+        message: imageProvider
+          ? `${imageProvider.name} · 已替换缺失文件与项目引用`
+          : "已生成新的本地 SVG 候选，并替换缺失文件引用。",
+      });
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: "重新生成当前资产失败",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setRegeneratingId("");
+    }
+  };
+
   const openCollect = () => {
     const role: ReferenceRole = project.characters.length
       ? "character"
@@ -408,6 +551,22 @@ export default function ImageAssets() {
         description="优先使用矢量、图表和已有素材；图片生成是可选能力，不会替代所有画面。"
         actions={
           <>
+            <Button
+              variant="ghost"
+              icon={
+                missing.scanning ? (
+                  <LoaderCircle className="spin" size={15} />
+                ) : (
+                  <RefreshCw size={15} />
+                )
+              }
+              disabled={missing.scanning}
+              onClick={() => void missing.refresh()}
+            >
+              {missing.missingIds.size
+                ? `${missing.missingIds.size} 个缺失`
+                : "检查素材"}
+            </Button>
             <Button
               variant="secondary"
               icon={<ListChecks size={15} />}
@@ -691,11 +850,36 @@ export default function ImageAssets() {
                   key={asset.id}
                   className={`asset-card ${
                     selectedAsset?.id === asset.id ? "is-selected" : ""
-                  } ${scene.assetId === asset.id ? "is-applied" : ""}`}
+                  } ${scene.assetId === asset.id ? "is-applied" : ""} ${
+                    missing.missingIds.has(asset.id) ? "is-missing" : ""
+                  }`}
                   onClick={() => setSelectedAssetId(asset.id)}
                 >
                   <div className="asset-card__image">
-                    <img src={asset.src} alt={asset.name} />
+                    {missing.missingIds.has(asset.id) ? (
+                      <div className="asset-card__missing">
+                        <CircleAlert size={20} />
+                        <span>源文件缺失</span>
+                        <button
+                          type="button"
+                          disabled={regeneratingId === asset.id}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void regenerateAsset(asset);
+                          }}
+                        >
+                          {regeneratingId === asset.id
+                            ? "生成中…"
+                            : "重新生成当前资产"}
+                        </button>
+                      </div>
+                    ) : (
+                      <img
+                        src={asset.src}
+                        alt={asset.name}
+                        onError={() => missing.markMissing(asset.id)}
+                      />
+                    )}
                     {scene.assetId === asset.id && (
                       <span className="asset-card__applied">
                         <Check size={12} /> 场景已采用
@@ -706,7 +890,9 @@ export default function ImageAssets() {
                     <div>
                       <strong>{asset.name}</strong>
                       <small>
-                        {asset.local ? "LOCAL" : "AI"} · {asset.prompt.slice(0, 42)}
+                        {missing.missingIds.has(asset.id)
+                          ? "缺失 · 可从提示词恢复"
+                          : `${asset.local ? "LOCAL" : "AI"} · ${asset.prompt.slice(0, 42)}`}
                       </small>
                     </div>
                     <button
@@ -742,7 +928,18 @@ export default function ImageAssets() {
           {selectedAsset ? (
             <>
               <div className="asset-inspector__preview">
-                <img src={selectedAsset.src} alt={selectedAsset.name} />
+                {missing.missingIds.has(selectedAsset.id) ? (
+                  <div className="asset-inspector__missing">
+                    <CircleAlert size={20} />
+                    <span>文件缺失</span>
+                  </div>
+                ) : (
+                  <img
+                    src={selectedAsset.src}
+                    alt={selectedAsset.name}
+                    onError={() => missing.markMissing(selectedAsset.id)}
+                  />
+                )}
               </div>
               <h3>{selectedAsset.name}</h3>
               <p>{selectedAsset.prompt}</p>
@@ -786,6 +983,34 @@ export default function ImageAssets() {
                   指纹 <code>{selectedAsset.consistency.fingerprint}</code>
                   {` · ${CONDITIONING_LABEL[selectedAsset.consistency.conditioning] ?? "文字锚点"}`}
                 </p>
+              )}
+              {missing.missingIds.has(selectedAsset.id) && (
+                <div className="asset-missing-warning">
+                  <CircleAlert size={15} />
+                  <p>
+                    清单里仍保留提示词、镜头和参考关系，但源文件已经不存在。
+                    重新生成会替换缺失文件和项目内引用。
+                  </p>
+                </div>
+              )}
+              {missing.missingIds.has(selectedAsset.id) && (
+                <Button
+                  variant="primary"
+                  className="full-button"
+                  icon={
+                    regeneratingId === selectedAsset.id ? (
+                      <LoaderCircle className="spin" size={15} />
+                    ) : (
+                      <RefreshCw size={15} />
+                    )
+                  }
+                  disabled={Boolean(regeneratingId)}
+                  onClick={() => void regenerateAsset(selectedAsset)}
+                >
+                  {regeneratingId === selectedAsset.id
+                    ? "正在重新生成…"
+                    : "重新生成当前资产"}
+                </Button>
               )}
               <Button
                 variant="primary"

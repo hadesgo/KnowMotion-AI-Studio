@@ -208,15 +208,19 @@ export default function Models() {
       setRuntimeInstall({
         runtime,
         status: "ready",
-        message: result.alreadyInstalled
-          ? `${runtime} · ${result.acceleration} 已安装`
-          : `${runtime} · ${result.acceleration} 已下载并校验`,
+        message: result.repairPerformed
+          ? `${runtime} · ${result.acceleration} 检测到文件损坏，已自动修复`
+          : result.alreadyInstalled
+            ? `${runtime} · ${result.acceleration} 已安装，关键文件哈希通过`
+            : `${runtime} · ${result.acceleration} 已下载并完成逐文件校验`,
       });
-      if (!result.alreadyInstalled) {
+      if (!result.alreadyInstalled || result.repairPerformed) {
         pushToast({
           type: "success",
-          title: "本地运行时已就绪",
-          message: `${runtime} · ${result.acceleration} · ${result.version}`,
+          title: result.repairPerformed
+            ? "本地运行时已自动修复"
+            : "本地运行时已就绪",
+          message: `${runtime} · ${result.acceleration} · ${result.version} · 关键文件哈希通过`,
         });
       }
     } catch (error) {
@@ -543,6 +547,13 @@ export default function Models() {
                       ? `${schedulerStatus.activeLease.workload.toUpperCase()} 正在运行`
                       : "当前空闲"
                   } · ${schedulerStatus.managedProcesses} 个 HTTP 托管进程`
+                    + `${
+                      schedulerStatus.runtimes.some(
+                        (runtime) => runtime.gpuSmokeTested,
+                      )
+                        ? ` · ${schedulerStatus.runtimes.filter((runtime) => runtime.gpuSmokeTested).length} 个模型已通过真实 GPU 推理 smoke`
+                        : ""
+                    }`
                 : "按需启动 llama.cpp、audio.cpp 与 stable-diffusion.cpp，并在空闲时自动卸载模型。"}
             </p>
           </div>

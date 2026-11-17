@@ -76,6 +76,7 @@ export async function inpaintProjectImage(input: {
   /** 亮度遮罩（白 = 重绘），stable-diffusion.cpp 通道使用。 */
   maskLuminanceDataUrl: string;
   maskCoverage?: number;
+  maskFeatherPx?: number;
   seed?: number;
   anchorLabel?: string;
   consistencyFingerprint?: string;

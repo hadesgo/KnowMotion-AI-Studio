@@ -1,7 +1,10 @@
 import {
+  Check,
+  GitCompareArrows,
   Eraser,
   Image as ImageIcon,
   LoaderCircle,
+  ScanText,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -29,11 +32,17 @@ import { useStudioStore } from "../store/studio";
 import {
   buildMaskCanvases,
   hasMaskContent,
+  MAX_MASK_FEATHER_PX,
   maskCoverage,
   sizeForImage,
   type MaskPoint,
   type MaskStroke,
 } from "../utils/mask";
+import {
+  analyzeImageText,
+  textRegionsToStrokes,
+  type TextRegion,
+} from "../utils/textSelection";
 import { Button, Modal, Pill, TextArea } from "./ui";
 import "./InpaintStudio.css";
 
@@ -60,7 +69,13 @@ export function InpaintStudio({
   const pushToast = useStudioStore((state) => state.pushToast);
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [brush, setBrush] = useState(42);
+  const [feather, setFeather] = useState(0);
   const [strokes, setStrokes] = useState<MaskStroke[]>([]);
+  const [autoRegions, setAutoRegions] = useState<TextRegion[]>([]);
+  const [detectingText, setDetectingText] = useState(false);
+  const [workingAsset, setWorkingAsset] = useState<Asset | undefined>(asset);
+  const [selectedHistoryId, setSelectedHistoryId] = useState("");
+  const [comparePosition, setComparePosition] = useState(52);
   const [anchorsEnabled, setAnchorsEnabled] = useState(useAnchors);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [busy, setBusy] = useState(false);
@@ -70,8 +85,9 @@ export function InpaintStudio({
   const drawingRef = useRef(false);
   const lastPointRef = useRef<MaskPoint | null>(null);
 
-  const scene = asset
-    ? project.scenes.find((item) => item.id === asset.sceneId)
+  const currentAsset = workingAsset ?? asset;
+  const scene = currentAsset
+    ? project.scenes.find((item) => item.id === currentAsset.sceneId)
     : undefined;
   const anchors = useMemo(
     () => (scene ? resolveSceneAnchors(project, scene) : null),
@@ -79,7 +95,56 @@ export function InpaintStudio({
   );
   const coverage = useMemo(() => maskCoverage(strokes), [strokes]);
   const isSvg =
-    asset?.mimeType === "image/svg+xml" || asset?.src.startsWith("data:image/svg");
+    currentAsset?.mimeType === "image/svg+xml" ||
+    currentAsset?.src.startsWith("data:image/svg");
+  const history = useMemo(() => {
+    if (!asset) return [];
+    let root = asset;
+    const seen = new Set<string>();
+    while (root.inpaint?.sourceAssetId && !seen.has(root.id)) {
+      seen.add(root.id);
+      const parent = project.assets.find(
+        (item) => item.id === root.inpaint?.sourceAssetId,
+      );
+      if (!parent) break;
+      root = parent;
+    }
+    const known = new Set([root.id]);
+    let discovered = true;
+    while (discovered) {
+      discovered = false;
+      for (const item of project.assets) {
+        if (
+          item.inpaint?.sourceAssetId &&
+          known.has(item.inpaint.sourceAssetId) &&
+          !known.has(item.id)
+        ) {
+          known.add(item.id);
+          discovered = true;
+        }
+      }
+    }
+    return project.assets
+      .filter((item) => item.inpaint && known.has(item.inpaint.sourceAssetId))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map((after) => ({
+        after,
+        before: project.assets.find(
+          (item) => item.id === after.inpaint?.sourceAssetId,
+        ),
+      }))
+      .filter(
+        (
+          item,
+        ): item is {
+          after: Asset;
+          before: Asset;
+        } => Boolean(item.before),
+      );
+  }, [asset, project.assets]);
+  const selectedHistory =
+    history.find((item) => item.after.id === selectedHistoryId) ??
+    history[history.length - 1];
 
   const resizeCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -128,7 +193,22 @@ export function InpaintStudio({
       }
       context.stroke();
     }
-  }, [strokes]);
+    if (autoRegions.length) {
+      context.save();
+      context.setLineDash([5, 4]);
+      context.lineWidth = Math.max(1, width * 0.0015);
+      context.strokeStyle = "rgba(200, 255, 101, 0.92)";
+      for (const region of autoRegions) {
+        context.strokeRect(
+          region.x * width,
+          region.y * height,
+          region.width * width,
+          region.height * height,
+        );
+      }
+      context.restore();
+    }
+  }, [autoRegions, strokes]);
 
   useEffect(() => {
     resizeCanvas();
@@ -161,6 +241,7 @@ export function InpaintStudio({
     if (busy) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     drawingRef.current = true;
+    setAutoRegions([]);
     const point = toPoint(event);
     lastPointRef.current = point;
     setStrokes((current) => [
@@ -191,8 +272,50 @@ export function InpaintStudio({
     lastPointRef.current = null;
   };
 
+  const selectDetectedText = async () => {
+    if (!currentAsset || isSvg || busy || detectingText) return;
+    setDetectingText(true);
+    setError("");
+    try {
+      const result = await analyzeImageText(currentAsset.src);
+      setAutoRegions(result.regions);
+      if (!result.regions.length) {
+        setStrokes([]);
+        pushToast({
+          type: "info",
+          title: "没有找到可选的文字带",
+          message: "当前画面可能没有清晰文字；仍可直接用画笔涂抹。",
+        });
+        return;
+      }
+      setStrokes(
+        textRegionsToStrokes(
+          result.regions,
+          0.12,
+          size.width && size.height ? size.height / size.width : 1,
+        ),
+      );
+      pushToast({
+        type: "success",
+        title: `已选中 ${result.regions.length} 处文字区域`,
+        message:
+          result.method === "text-detector"
+            ? "使用浏览器文字检测器完成，图像未离开本机。"
+            : "使用本机高对比文字带分析完成；提交前可继续增删笔迹。",
+      });
+    } catch (selectionError) {
+      const message =
+        selectionError instanceof Error
+          ? selectionError.message
+          : String(selectionError);
+      setError(`自动文字选区失败：${message}`);
+    } finally {
+      setDetectingText(false);
+    }
+  };
+
   const submit = async () => {
-    if (!provider || !asset || !scene || !anchors) {
+    if (!provider || !currentAsset || !scene || !anchors) {
       pushToast({ type: "error", title: "重绘需要图片素材、镜头与 Image Provider" });
       return;
     }
@@ -211,7 +334,12 @@ export function InpaintStudio({
     setBusy(true);
     setError("");
     try {
-      const masks = buildMaskCanvases(strokes, size.width, size.height);
+      const masks = buildMaskCanvases(
+        strokes,
+        size.width,
+        size.height,
+        feather,
+      );
       const active =
         anchorsEnabled && hasSceneAnchors(anchors) ? anchors : null;
       const finalPrompt = active ? composeAnchoredPrompt(prompt, active) : prompt;
@@ -220,13 +348,14 @@ export function InpaintStudio({
       const result = await inpaintProjectImage({
         projectId: project.id,
         sceneId: scene.id,
-        sourceAssetId: asset.id,
+        sourceAssetId: currentAsset.id,
         provider,
         prompt: finalPrompt,
         size: sizeForImage(size.width, size.height),
         maskAlphaDataUrl: masks.alphaMaskDataUrl,
         maskLuminanceDataUrl: masks.luminanceMaskDataUrl,
         maskCoverage: masks.coverage,
+        maskFeatherPx: masks.featherPx,
         seed: active?.seed,
         anchorLabel: active?.label ?? "",
         consistencyFingerprint: active?.fingerprint ?? "",
@@ -242,12 +371,16 @@ export function InpaintStudio({
           }
         : result.asset;
       onComplete(stamped);
+      setWorkingAsset(stamped);
+      setSelectedHistoryId(stamped.id);
+      setComparePosition(52);
+      setStrokes([]);
+      setAutoRegions([]);
       pushToast({
         type: "success",
         title: "局部重绘完成",
-        message: `${provider.name} · ${result.mode} · 遮罩 ${(masks.coverage * 100).toFixed(1)}% · ${Math.round(result.elapsedMs / 1000)} 秒`,
+        message: `${provider.name} · ${result.mode} · 遮罩 ${(masks.coverage * 100).toFixed(1)}% · 羽化 ${feather}px · ${Math.round(result.elapsedMs / 1000)} 秒`,
       });
-      onClose();
     } catch (submitError) {
       const message =
         submitError instanceof Error ? submitError.message : String(submitError);
@@ -269,10 +402,10 @@ export function InpaintStudio({
       <div className="inpaint-body">
         <section className="inpaint-canvas-panel">
           <div className="inpaint-canvas" ref={containerRef}>
-            {asset ? (
+            {currentAsset ? (
               <img
-                src={asset.src}
-                alt={asset.name}
+                src={currentAsset.src}
+                alt={currentAsset.name}
                 draggable={false}
                 onLoad={(event) =>
                   setSize({
@@ -311,7 +444,34 @@ export function InpaintStudio({
                 aria-label="笔刷大小"
               />
             </label>
+            <label className="inpaint-brush">
+              <span>羽化 {feather}px</span>
+              <input
+                type="range"
+                min={0}
+                max={MAX_MASK_FEATHER_PX}
+                step={1}
+                value={feather}
+                onChange={(event) => setFeather(Number(event.target.value))}
+                aria-label="遮罩羽化"
+              />
+            </label>
             <div className="inpaint-toolbar__actions">
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={
+                  detectingText ? (
+                    <LoaderCircle className="spin" size={14} />
+                  ) : (
+                    <ScanText size={14} />
+                  )
+                }
+                disabled={busy || detectingText || !currentAsset || isSvg}
+                onClick={() => void selectDetectedText()}
+              >
+                {detectingText ? "识别中" : "文字选区"}
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"
@@ -326,7 +486,10 @@ export function InpaintStudio({
                 size="sm"
                 icon={<Trash2 size={14} />}
                 disabled={!strokes.length || busy}
-                onClick={() => setStrokes([])}
+                onClick={() => {
+                  setStrokes([]);
+                  setAutoRegions([]);
+                }}
               >
                 清空
               </Button>
@@ -342,9 +505,9 @@ export function InpaintStudio({
 
         <aside className="inpaint-settings">
           <div className="inpaint-source">
-            {asset ? (
+            {currentAsset ? (
               <>
-                <strong>{asset.name}</strong>
+                <strong>{currentAsset.name}</strong>
                 <small>
                   {size.width && size.height
                     ? `${size.width} × ${size.height}`
@@ -421,9 +584,110 @@ export function InpaintStudio({
         </aside>
       </div>
 
+      {selectedHistory && (
+        <section className="inpaint-history" aria-label="重绘历史对比">
+          <header>
+            <div>
+              <span className="eyebrow">REPAINT HISTORY</span>
+              <h3>
+                <GitCompareArrows size={16} /> 重绘历史对比
+              </h3>
+            </div>
+            <Pill tone="info">{history.length} 个版本</Pill>
+          </header>
+          <div className="inpaint-history__layout">
+            <div className="inpaint-compare">
+              <div className="inpaint-compare__frame">
+                <img src={selectedHistory.before.src} alt="重绘前" />
+                <div
+                  className="inpaint-compare__after"
+                  style={{
+                    clipPath: `inset(0 0 0 ${comparePosition}%)`,
+                  }}
+                >
+                  <img src={selectedHistory.after.src} alt="重绘后" />
+                </div>
+                <span
+                  className="inpaint-compare__divider"
+                  style={{ left: `${comparePosition}%` }}
+                />
+                <span className="inpaint-compare__label is-before">重绘前</span>
+                <span className="inpaint-compare__label is-after">重绘后</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={comparePosition}
+                aria-label="重绘前后对比位置"
+                onChange={(event) =>
+                  setComparePosition(Number(event.target.value))
+                }
+              />
+            </div>
+            <div className="inpaint-history__versions">
+              {history.map((item, index) => (
+                <button
+                  type="button"
+                  key={item.after.id}
+                  className={
+                    selectedHistory.after.id === item.after.id
+                      ? "is-selected"
+                      : ""
+                  }
+                  onClick={() => setSelectedHistoryId(item.after.id)}
+                >
+                  <img src={item.after.src} alt="" />
+                  <span>
+                    <strong>版本 {index + 1}</strong>
+                    <small>
+                      {new Date(item.after.createdAt).toLocaleTimeString("zh-CN", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit",
+                      })}
+                      {" · "}
+                      {item.after.inpaint?.mode ?? "inpaint"}
+                    </small>
+                  </span>
+                  {selectedHistory.after.id === item.after.id && (
+                    <Check size={13} />
+                  )}
+                </button>
+              ))}
+            </div>
+            <div className="inpaint-history__meta">
+              <span>
+                遮罩{" "}
+                {((selectedHistory.after.inpaint?.coverage ?? 0) * 100).toFixed(
+                  1,
+                )}
+                %
+              </span>
+              <span>种子 {selectedHistory.after.inpaint?.seed ?? "—"}</span>
+              <span>
+                羽化 {selectedHistory.after.inpaint?.featherPx ?? 0}px
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  setWorkingAsset(selectedHistory.after);
+                  setStrokes([]);
+                  setAutoRegions([]);
+                }}
+              >
+                继续编辑此版本
+              </Button>
+            </div>
+          </div>
+        </section>
+      )}
+
       <div className="modal__footer">
         <Button variant="secondary" onClick={onClose} disabled={busy}>
-          取消
+          完成
         </Button>
         <Button
           variant="primary"
@@ -434,7 +698,9 @@ export function InpaintStudio({
               <Sparkles size={16} />
             )
           }
-          disabled={busy || !provider || !asset || isSvg || !hasMaskContent(strokes)}
+          disabled={
+            busy || !provider || !currentAsset || isSvg || !hasMaskContent(strokes)
+          }
           onClick={() => void submit()}
         >
           {busy ? "正在重绘…" : "重绘遮罩区域"}

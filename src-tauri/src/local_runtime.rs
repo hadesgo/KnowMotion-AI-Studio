@@ -3,7 +3,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::OnceLock,
@@ -12,6 +12,8 @@ use std::{
 use tokio::sync::Mutex;
 
 const MAX_ARCHIVE_BYTES: usize = 1024 * 1024 * 1024;
+const MAX_RUNTIME_FILES: usize = 4096;
+const RUNTIME_HASH_BUFFER_BYTES: usize = 1024 * 1024;
 static RUNTIME_ROOT: OnceLock<PathBuf> = OnceLock::new();
 static INSTALL_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -159,7 +161,19 @@ struct RuntimeManifest {
     acceleration: RuntimeAcceleration,
     archives: Vec<String>,
     executable: String,
+    /// SHA-256 for every installed runtime file except the manifest itself.
+    /// Missing/empty lists are treated as legacy installs and repaired.
+    #[serde(default)]
+    files: Vec<RuntimeFileHash>,
     installed_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeFileHash {
+    path: String,
+    bytes: u64,
+    sha256: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -171,6 +185,7 @@ pub struct RuntimeInstallResult {
     pub install_path: String,
     pub executable_path: String,
     pub already_installed: bool,
+    pub repair_performed: bool,
 }
 
 pub(crate) fn configure(install_root: PathBuf) {
@@ -206,44 +221,187 @@ fn archive_hashes(archives: &[RuntimeArchive]) -> Vec<String> {
         .collect()
 }
 
-fn installed_manifest(
+fn manifest_executable(target: &Path, manifest: &RuntimeManifest) -> Result<PathBuf, String> {
+    let relative = crate::storage::safe_relative_path(&manifest.executable)
+        .ok_or_else(|| "Runtime manifest contains an unsafe executable path".to_string())?;
+    let executable = target.join(relative);
+    let canonical_target = target
+        .canonicalize()
+        .map_err(|error| format!("Runtime directory is unavailable: {error}"))?;
+    let canonical_executable = executable
+        .canonicalize()
+        .map_err(|error| format!("Runtime executable is unavailable: {error}"))?;
+    if !canonical_executable.starts_with(&canonical_target) || !canonical_executable.is_file() {
+        return Err("Runtime executable escapes its installation directory".to_string());
+    }
+    Ok(canonical_executable)
+}
+
+fn hash_file(path: &Path) -> Result<String, String> {
+    let mut file =
+        File::open(path).map_err(|error| format!("Unable to open runtime file: {error}"))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; RUNTIME_HASH_BUFFER_BYTES];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("Unable to read runtime file: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+fn collect_runtime_files(
+    root: &Path,
+    current: &Path,
+    files: &mut Vec<RuntimeFileHash>,
+) -> Result<(), String> {
+    for entry in fs::read_dir(current).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_symlink() {
+            return Err("Runtime archive contains a symbolic link".to_string());
+        }
+        if file_type.is_dir() {
+            collect_runtime_files(root, &path, files)?;
+            continue;
+        }
+        if !file_type.is_file()
+            || path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("manifest.json"))
+        {
+            continue;
+        }
+        if files.len() >= MAX_RUNTIME_FILES {
+            return Err(format!(
+                "Runtime contains more than {MAX_RUNTIME_FILES} files"
+            ));
+        }
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|error| error.to_string())?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let metadata = entry.metadata().map_err(|error| error.to_string())?;
+        files.push(RuntimeFileHash {
+            path: relative,
+            bytes: metadata.len(),
+            sha256: hash_file(&path)?,
+        });
+    }
+    Ok(())
+}
+
+fn runtime_files(root: &Path) -> Result<Vec<RuntimeFileHash>, String> {
+    let mut files = Vec::new();
+    collect_runtime_files(root, root, &mut files)?;
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    if files.is_empty() {
+        return Err("Runtime package contains no files".to_string());
+    }
+    Ok(files)
+}
+
+fn verify_runtime_files(target: &Path, files: &[RuntimeFileHash]) -> Result<(), String> {
+    if files.is_empty() {
+        return Err("Runtime manifest has no per-file integrity data".to_string());
+    }
+    let canonical_target = target
+        .canonicalize()
+        .map_err(|error| format!("Runtime directory is unavailable: {error}"))?;
+    for expected in files {
+        let relative = crate::storage::safe_relative_path(&expected.path)
+            .ok_or_else(|| "Runtime manifest contains an unsafe file path".to_string())?;
+        let path = target.join(relative);
+        let canonical = path
+            .canonicalize()
+            .map_err(|_| format!("Runtime file is missing: {}", expected.path))?;
+        if !canonical.starts_with(&canonical_target) || !canonical.is_file() {
+            return Err(format!("Runtime file is invalid: {}", expected.path));
+        }
+        let length = fs::metadata(&canonical)
+            .map_err(|error| error.to_string())?
+            .len();
+        if length != expected.bytes {
+            return Err(format!(
+                "Runtime file size mismatch for {}: expected {}, got {}",
+                expected.path, expected.bytes, length
+            ));
+        }
+        let actual = hash_file(&canonical)?;
+        if actual != expected.sha256 {
+            return Err(format!(
+                "Runtime file checksum mismatch for {}: expected {}, got {}",
+                expected.path, expected.sha256, actual
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn load_installed_manifest(
     spec: RuntimeSpec,
     acceleration: RuntimeAcceleration,
-) -> Option<(RuntimeManifest, PathBuf)> {
-    let target = install_root().ok()?.join(spec.id);
+) -> Result<Option<(RuntimeManifest, PathBuf)>, String> {
+    let target = install_root()?.join(spec.id);
     let manifest_path = target.join("manifest.json");
-    let manifest: RuntimeManifest =
-        serde_json::from_str(&fs::read_to_string(manifest_path).ok()?).ok()?;
+    let text = match fs::read_to_string(manifest_path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("Runtime manifest could not be read: {error}")),
+    };
+    let manifest: RuntimeManifest = serde_json::from_str(&text)
+        .map_err(|error| format!("Runtime manifest is invalid: {error}"))?;
     if manifest.runtime != spec.id
         || manifest.version != spec.version
         || manifest.acceleration != acceleration
         || manifest.archives != archive_hashes(archives_for(spec, acceleration))
     {
-        return None;
+        return Ok(None);
     }
-    let executable = target.join(&manifest.executable);
-    executable.is_file().then_some((manifest, executable))
+    let executable = manifest_executable(&target, &manifest)?;
+    verify_runtime_files(&target, &manifest.files)?;
+    Ok(Some((manifest, executable)))
 }
 
-fn any_installed_manifest(spec: RuntimeSpec) -> Option<(RuntimeManifest, PathBuf)> {
-    let target = install_root().ok()?.join(spec.id);
-    let manifest: RuntimeManifest =
-        serde_json::from_str(&fs::read_to_string(target.join("manifest.json")).ok()?).ok()?;
+fn load_any_installed_manifest(
+    spec: RuntimeSpec,
+) -> Result<Option<(RuntimeManifest, PathBuf)>, String> {
+    let target = install_root()?.join(spec.id);
+    let text = match fs::read_to_string(target.join("manifest.json")) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("Runtime manifest could not be read: {error}")),
+    };
+    let manifest: RuntimeManifest = serde_json::from_str(&text)
+        .map_err(|error| format!("Runtime manifest is invalid: {error}"))?;
     if manifest.runtime != spec.id || manifest.version != spec.version {
-        return None;
+        return Ok(None);
     }
-    let executable = target.join(&manifest.executable);
-    executable.is_file().then_some((manifest, executable))
+    let executable = manifest_executable(&target, &manifest)?;
+    verify_runtime_files(&target, &manifest.files)?;
+    Ok(Some((manifest, executable)))
 }
 
 pub(crate) fn installed_executable(runtime: &str) -> Option<PathBuf> {
     let spec = runtime_spec(runtime).ok()?;
-    any_installed_manifest(spec).map(|(_, executable)| executable)
+    load_any_installed_manifest(spec)
+        .ok()
+        .flatten()
+        .map(|(_, executable)| executable)
 }
 
 pub(crate) fn installed_acceleration(runtime: &str) -> Option<String> {
     let spec = runtime_spec(runtime).ok()?;
-    any_installed_manifest(spec)
+    load_any_installed_manifest(spec)
+        .ok()
+        .flatten()
         .map(|(manifest, _)| manifest.acceleration.backend_name().to_string())
 }
 
@@ -392,6 +550,7 @@ fn installed_result(
     manifest: RuntimeManifest,
     executable: PathBuf,
     already_installed: bool,
+    repair_performed: bool,
 ) -> RuntimeInstallResult {
     let target = install_root()
         .map(|root| root.join(spec.id))
@@ -403,6 +562,7 @@ fn installed_result(
         install_path: target.to_string_lossy().to_string(),
         executable_path: executable.to_string_lossy().to_string(),
         already_installed,
+        repair_performed,
     }
 }
 
@@ -414,14 +574,45 @@ pub async fn ensure_local_runtime(runtime: String) -> Result<RuntimeInstallResul
     } else {
         RuntimeAcceleration::Vulkan
     };
-    if let Some((manifest, executable)) = installed_manifest(spec, acceleration) {
-        return Ok(installed_result(spec, manifest, executable, true));
+    let mut repair_performed = false;
+    match load_installed_manifest(spec, acceleration) {
+        Ok(Some((manifest, executable))) => {
+            return Ok(installed_result(spec, manifest, executable, true, false));
+        }
+        Ok(None) => {}
+        Err(error) => {
+            repair_performed = true;
+            crate::logging::log_event(
+                crate::logging::LogLevel::Warn,
+                "runtime",
+                "Local runtime integrity check failed; automatic repair scheduled",
+                Some(json!({ "runtime": spec.id, "error": error })),
+            );
+        }
     }
 
     let lock = INSTALL_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().await;
-    if let Some((manifest, executable)) = installed_manifest(spec, acceleration) {
-        return Ok(installed_result(spec, manifest, executable, true));
+    match load_installed_manifest(spec, acceleration) {
+        Ok(Some((manifest, executable))) => {
+            return Ok(installed_result(
+                spec,
+                manifest,
+                executable,
+                true,
+                repair_performed,
+            ));
+        }
+        Ok(None) => {}
+        Err(error) => {
+            repair_performed = true;
+            crate::logging::log_event(
+                crate::logging::LogLevel::Warn,
+                "runtime",
+                "Local runtime is damaged; reinstalling from the pinned archive",
+                Some(json!({ "runtime": spec.id, "error": error })),
+            );
+        }
     }
 
     let root = install_root()?;
@@ -501,19 +692,20 @@ pub async fn ensure_local_runtime(runtime: String) -> Result<RuntimeInstallResul
         .strip_prefix(&staging)
         .map_err(|error| error.to_string())?
         .to_path_buf();
+    let files = runtime_files(&staging)?;
     let manifest = RuntimeManifest {
         runtime: spec.id.to_string(),
         version: spec.version.to_string(),
         acceleration,
         archives: archive_hashes(archives),
         executable: executable_relative.to_string_lossy().to_string(),
+        files,
         installed_at: chrono::Utc::now().to_rfc3339(),
     };
-    fs::write(
-        staging.join("manifest.json"),
-        serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
+    crate::write_atomic(
+        &staging.join("manifest.json"),
+        &serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?,
+    )?;
     remove_if_present(&target)?;
     fs::rename(&staging, &target).map_err(|error| error.to_string())?;
     let installed_executable = target.join(executable_relative);
@@ -533,6 +725,7 @@ pub async fn ensure_local_runtime(runtime: String) -> Result<RuntimeInstallResul
         manifest,
         installed_executable,
         false,
+        repair_performed,
     ))
 }
 
@@ -613,12 +806,18 @@ mod tests {
 
     #[test]
     fn writes_expected_manifest_shape() {
+        let file = RuntimeFileHash {
+            path: "bin/audiocpp_server.exe".to_string(),
+            bytes: 4,
+            sha256: sha256(b"test"),
+        };
         let manifest = RuntimeManifest {
             runtime: "audio.cpp".to_string(),
             version: "v0.9.5".to_string(),
             acceleration: RuntimeAcceleration::Cuda,
             archives: vec!["a".repeat(64)],
             executable: "bin/audiocpp_server.exe".to_string(),
+            files: vec![file.clone()],
             installed_at: "2026-11-16T00:00:00Z".to_string(),
         };
         let value: serde_json::Value = serde_json::to_value(manifest).expect("manifest");
@@ -628,5 +827,54 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("cuda")
         );
+        assert_eq!(value["files"][0]["path"], file.path);
+        assert_eq!(value["files"][0]["sha256"], file.sha256);
+    }
+
+    #[test]
+    fn runtime_file_hashes_detect_missing_and_modified_files() {
+        let root = tempdir().expect("temporary directory");
+        let bin = root.path().join("bin");
+        fs::create_dir_all(&bin).expect("bin directory");
+        fs::write(bin.join("server.exe"), b"original").expect("executable");
+        fs::write(bin.join("runtime.dll"), b"library").expect("library");
+        let files = runtime_files(root.path()).expect("file hashes");
+        assert_eq!(files.len(), 2);
+        verify_runtime_files(root.path(), &files).expect("intact runtime");
+
+        fs::write(bin.join("runtime.dll"), b"corrupt").expect("corrupt library");
+        let error = verify_runtime_files(root.path(), &files).expect_err("modified file");
+        assert!(error.contains("checksum mismatch"));
+
+        fs::write(bin.join("runtime.dll"), b"library").expect("restore library");
+        fs::remove_file(bin.join("server.exe")).expect("remove executable");
+        let error = verify_runtime_files(root.path(), &files).expect_err("missing file");
+        assert!(error.contains("missing"));
+    }
+
+    #[test]
+    fn legacy_manifest_without_hashes_requires_repair() {
+        let root = tempdir().expect("temporary directory");
+        let error = verify_runtime_files(root.path(), &[]).expect_err("legacy manifest");
+        assert!(error.contains("no per-file integrity"));
+    }
+
+    #[test]
+    fn executable_path_must_stay_inside_runtime_root() {
+        let root = tempdir().expect("temporary directory");
+        let outside = root.path().parent().expect("parent").join("outside.exe");
+        fs::write(&outside, b"outside").expect("outside executable");
+        fs::create_dir_all(root.path().join("bin")).expect("bin directory");
+        let manifest = RuntimeManifest {
+            runtime: "audio.cpp".to_string(),
+            version: "v0.9.5".to_string(),
+            acceleration: RuntimeAcceleration::Vulkan,
+            archives: Vec::new(),
+            executable: "../outside.exe".to_string(),
+            files: Vec::new(),
+            installed_at: "2026-11-16T00:00:00Z".to_string(),
+        };
+        assert!(manifest_executable(root.path(), &manifest).is_err());
+        let _ = fs::remove_file(outside);
     }
 }

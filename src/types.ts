@@ -216,8 +216,12 @@ export interface ReferenceAttachment {
 
 export interface InpaintMeta {
   sourceAssetId: string;
-  mode: "openai-edits";
+  mode:
+    | "openai-edits"
+    | "sdcpp-native-inpaint"
+    | "openai-edits-fallback";
   coverage: number;
+  featherPx?: number;
   seed: number;
   anchorLabel: string;
   fingerprint: string;

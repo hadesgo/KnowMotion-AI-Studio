@@ -158,3 +158,28 @@ test("mask keeps the source image aspect size even for tiny requests", async () 
   assert.equal(rgba.width, 16);
   assert.equal(rgba.height, 16);
 });
+
+test("explicit feather creates soft alpha and luminance edges", async () => {
+  const width = 128;
+  const height = 96;
+  const strokes: MaskStroke[] = [
+    { size: 0.32, points: [{ x: 0.5, y: 0.5 }] },
+  ];
+  const mask = buildMaskCanvases(strokes, width, height, 5);
+  assert.equal(mask.featherPx, 5);
+  const alpha = await decodeMask(mask.alphaMaskDataUrl, width, height);
+  let partial = 0;
+  for (let index = 3; index < alpha.data.length; index += 4) {
+    const value = alpha.data[index];
+    if (value > EDITABLE_ALPHA && value < LOCKED_ALPHA) partial += 1;
+  }
+  assert.ok(partial > 0, "feathered alpha must contain semi-transparent edge pixels");
+
+  const luminance = await decodeMask(mask.luminanceMaskDataUrl, width, height);
+  let gray = 0;
+  for (let index = 0; index < luminance.data.length; index += 4) {
+    const value = luminance.data[index];
+    if (value > 0 && value < 255) gray += 1;
+  }
+  assert.ok(gray > 0, "feathered luminance mask must contain gray edge pixels");
+});

@@ -1,8 +1,11 @@
 import {
   ArrowRight,
+  CircleAlert,
   Clock,
   Film,
+  LoaderCircle,
   Monitor,
+  RefreshCw,
   Scissors,
   Upload,
   Volume2,
@@ -19,6 +22,7 @@ import {
   Segmented,
 } from "../components/ui";
 import { useStudioStore } from "../store/studio";
+import { useMissingAssets } from "../hooks/useMissingAssets";
 import type { Asset, SceneLayer } from "../types";
 import { isTauriDesktop } from "../services/desktop";
 import {
@@ -47,6 +51,7 @@ export default function VideoAssets() {
   const [rate, setRate] = useState(1);
   const [targetSceneId, setTargetSceneId] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
+  const missing = useMissingAssets(project);
 
   const videos = useMemo(
     () => (project ? project.assets.filter((asset) => asset.kind === "video") : []),
@@ -100,7 +105,7 @@ export default function VideoAssets() {
     setSelectedId(asset.id);
     setInPoint(0);
     setOutPoint(asset.durationMs ? asset.durationMs / 1000 : 5);
-    if (!asset.durationMs) {
+    if (!asset.durationMs && !missing.missingIds.has(asset.id)) {
       void probeVideoSource(asset.src).then((probe) => {
         if (!probe.decodable || !probe.durationMs) return;
         patchAssetMetadata(asset.id, probe);
@@ -109,7 +114,7 @@ export default function VideoAssets() {
     }
   };
 
-  const importVideo = async () => {
+  const importVideo = async (replaceTarget?: Asset) => {
     if (!isTauriDesktop) {
       pushToast({
         type: "error",
@@ -124,19 +129,49 @@ export default function VideoAssets() {
       setImporting(true);
       const asset = await importProjectVideo(project.id, sourcePath);
       const probe = await probeVideoSource(asset.src);
-      addAsset(project.id, {
+      const imported: Asset = {
         ...asset,
         durationMs: probe.durationMs || asset.durationMs,
         width: probe.width || undefined,
         height: probe.height || undefined,
-      });
+      };
+      if (replaceTarget) {
+        updateProject(project.id, (current) => ({
+          ...current,
+          assets: current.assets.map((item) =>
+            item.id === replaceTarget.id ? imported : item,
+          ),
+          scenes: current.scenes.map((scene) => ({
+            ...scene,
+            assetId:
+              scene.assetId === replaceTarget.id ? imported.id : scene.assetId,
+            layers: scene.layers.map((layer) =>
+              layer.assetId === replaceTarget.id
+                ? { ...layer, assetId: imported.id }
+                : layer,
+            ),
+          })),
+          timeline: current.timeline.map((clip) =>
+            clip.assetId === replaceTarget.id
+              ? { ...clip, assetId: imported.id }
+              : clip,
+          ),
+        }));
+      } else {
+        addAsset(project.id, imported);
+      }
       setSelectedId(asset.id);
+      missing.markPresent(imported.id);
       setInPoint(0);
       setOutPoint(probe.durationMs ? probe.durationMs / 1000 : 5);
       setTargetSceneId(project.scenes[0]?.id ?? "");
       pushToast({
         type: probe.decodable ? "success" : "error",
-        title: probe.decodable ? "视频已导入项目" : "视频已复制，但无法解码",
+        title: probe.decodable
+          ? replaceTarget
+            ? "缺失视频已重新导入并替换"
+            : "视频已导入项目"
+          : "视频已复制，但无法解码",
         message: probe.decodable
           ? `${probe.width}×${probe.height} · ${formatClipTime(probe.durationMs / 1000)}`
           : "容器可能不受 Chrome/Remotion 支持，渲染前请转码为 H.264 MP4 或 WebM。",
@@ -221,6 +256,22 @@ export default function VideoAssets() {
         actions={
           <>
             <Button
+              variant="ghost"
+              icon={
+                missing.scanning ? (
+                  <LoaderCircle className="spin" size={15} />
+                ) : (
+                  <RefreshCw size={15} />
+                )
+              }
+              disabled={missing.scanning}
+              onClick={() => void missing.refresh()}
+            >
+              {missing.missingIds.size
+                ? `${missing.missingIds.size} 个缺失`
+                : "检查素材"}
+            </Button>
+            <Button
               variant="secondary"
               icon={<Scissors size={15} />}
               disabled={!videos.length}
@@ -264,12 +315,20 @@ export default function VideoAssets() {
                   className={`video-card ${selected?.id === asset.id ? "is-selected" : ""}`}
                   onClick={() => selectVideo(asset)}
                 >
-                  <video
-                    src={`${asset.src}#t=0.2`}
-                    muted
-                    playsInline
-                    preload="metadata"
-                  />
+                  {missing.missingIds.has(asset.id) ? (
+                    <span className="video-card__missing">
+                      <CircleAlert size={22} />
+                      源视频缺失
+                    </span>
+                  ) : (
+                    <video
+                      src={`${asset.src}#t=0.2`}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      onError={() => missing.markMissing(asset.id)}
+                    />
+                  )}
                   <span className="video-card__badge">
                     <Film size={11} />
                     {(asset.mimeType ?? "video").replace("video/", "").toUpperCase()}
@@ -320,27 +379,45 @@ export default function VideoAssets() {
               </header>
 
               <div className="video-preview">
-                <video
-                  ref={videoRef}
-                  src={selected.src}
-                  controls
-                  muted={muted}
-                  playsInline
-                  preload="metadata"
-                  onLoadedMetadata={(event) => {
-                    if (!selected.durationMs) {
-                      const duration = event.currentTarget.duration;
-                      if (Number.isFinite(duration) && duration > 0) {
-                        patchAssetMetadata(selected.id, {
-                          durationMs: Math.round(duration * 1000),
-                          width: event.currentTarget.videoWidth,
-                          height: event.currentTarget.videoHeight,
-                        });
-                        setOutPoint(duration);
+                {missing.missingIds.has(selected.id) ? (
+                  <div className="video-preview__missing">
+                    <CircleAlert size={24} />
+                    <strong>源视频文件缺失</strong>
+                    <span>项目片段引用仍保留，可重新导入并替换。</span>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      icon={<Upload size={14} />}
+                      disabled={importing}
+                      onClick={() => void importVideo(selected)}
+                    >
+                      {importing ? "正在导入…" : "重新导入当前资产"}
+                    </Button>
+                  </div>
+                ) : (
+                  <video
+                    ref={videoRef}
+                    src={selected.src}
+                    controls
+                    muted={muted}
+                    playsInline
+                    preload="metadata"
+                    onError={() => missing.markMissing(selected.id)}
+                    onLoadedMetadata={(event) => {
+                      if (!selected.durationMs) {
+                        const duration = event.currentTarget.duration;
+                        if (Number.isFinite(duration) && duration > 0) {
+                          patchAssetMetadata(selected.id, {
+                            durationMs: Math.round(duration * 1000),
+                            width: event.currentTarget.videoWidth,
+                            height: event.currentTarget.videoHeight,
+                          });
+                          setOutPoint(duration);
+                        }
                       }
-                    }
-                  }}
-                />
+                    }}
+                  />
+                )}
                 <div className="video-trim-bar" aria-hidden="true">
                   <span
                     className="video-trim-bar__active"

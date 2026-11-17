@@ -1,4 +1,5 @@
 mod agent;
+mod asset_protocol;
 mod capabilities;
 mod database;
 mod image_queue;
@@ -16,7 +17,6 @@ mod acceptance;
 
 use chrono::Utc;
 use database::open_database;
-use percent_encoding::percent_decode_str;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use serde_json::Value;
@@ -573,74 +573,8 @@ fn serve_project_asset(
     context: tauri::UriSchemeContext<'_, tauri::Wry>,
     request: tauri::http::Request<Vec<u8>>,
 ) -> tauri::http::Response<Vec<u8>> {
-    let bad_request = |message: &str| {
-        tauri::http::Response::builder()
-            .status(tauri::http::StatusCode::BAD_REQUEST)
-            .header(tauri::http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
-            .body(message.as_bytes().to_vec())
-            .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
-    };
-    let path = request.uri().path().trim_start_matches('/');
-    let Some((project_id, relative)) = path.split_once('/') else {
-        return bad_request("Invalid project asset path");
-    };
-    if !safe_identifier(project_id) {
-        return bad_request("Invalid project id");
-    }
-    let decoded = percent_decode_str(relative).decode_utf8_lossy();
-    let Some(relative) = storage::safe_relative_path(&decoded) else {
-        return bad_request("Invalid asset path");
-    };
-    if !relative.starts_with("assets/") {
-        return bad_request("Only registered project assets are served");
-    }
     let state = context.app_handle().state::<AppState>();
-    let project_root = state.projects_root.join(project_id);
-    let requested = project_root.join(&relative);
-    let Ok(root) = project_root.canonicalize() else {
-        return bad_request("Project directory is unavailable");
-    };
-    let Ok(requested) = requested.canonicalize() else {
-        return tauri::http::Response::builder()
-            .status(tauri::http::StatusCode::NOT_FOUND)
-            .header(tauri::http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
-            .body(b"Asset not found".to_vec())
-            .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()));
-    };
-    if !requested.starts_with(&root) || !requested.is_file() {
-        return bad_request("Asset path escapes the project directory");
-    }
-    let Ok(bytes) = fs::read(&requested) else {
-        return bad_request("Asset could not be read");
-    };
-    let mime = match requested
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "svg" => "image/svg+xml",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        "gif" => "image/gif",
-        "wav" => "audio/wav",
-        "mp3" => "audio/mpeg",
-        "mp4" => "video/mp4",
-        _ => "application/octet-stream",
-    };
-    tauri::http::Response::builder()
-        .status(tauri::http::StatusCode::OK)
-        .header(tauri::http::header::CONTENT_TYPE, mime)
-        // 身份验证需要在 canvas 里读取像素：显式允许跨源读取，避免画布被标记为 tainted。
-        .header(tauri::http::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-        .header(
-            tauri::http::header::CACHE_CONTROL,
-            "private, max-age=31536000, immutable",
-        )
-        .body(bytes)
-        .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+    asset_protocol::serve_project_asset(&state.projects_root, request)
 }
 
 #[tauri::command]

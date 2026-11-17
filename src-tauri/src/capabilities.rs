@@ -904,6 +904,8 @@ pub struct InpaintRequest {
     #[serde(default)]
     pub mask_coverage: f32,
     #[serde(default)]
+    pub mask_feather_px: f32,
+    #[serde(default)]
     pub seed: Option<i64>,
     #[serde(default)]
     pub anchor_label: String,
@@ -1247,6 +1249,7 @@ pub async fn inpaint_project_image(
             "sourceAssetId": request.source_asset_id,
             "mode": mode,
             "coverage": request.mask_coverage.clamp(0.0, 1.0),
+            "featherPx": request.mask_feather_px.clamp(0.0, 64.0),
             "seed": seed,
             "anchorLabel": request.anchor_label,
             "fingerprint": request.consistency_fingerprint
@@ -1278,6 +1281,7 @@ pub async fn inpaint_project_image(
             "mode": mode,
             "seed": seed,
             "coverage": request.mask_coverage,
+            "featherPx": request.mask_feather_px,
             "elapsedMs": started.elapsed().as_millis()
         })),
     );

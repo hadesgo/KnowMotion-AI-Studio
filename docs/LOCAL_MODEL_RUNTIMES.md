@@ -25,8 +25,16 @@ model runtime:
    matching CUDA runtime libraries.
 3. Otherwise download the portable Vulkan variant.
 4. Verify every archive with its pinned SHA-256 before extraction.
-5. Store the verified runtime and its manifest under
+5. Hash every extracted runtime file and store its relative path, byte count,
+   and SHA-256 in `manifest.json`.
+6. Store the verified runtime and its manifest under
    `%APPDATA%/com.knowmotion.studio/runtimes/`.
+
+Before a runtime is reported ready, the executable path is canonicalized
+inside its runtime root and the complete file tree is checked against the
+manifest. A missing, truncated, or replaced file, an unsafe path, or a legacy
+manifest without hashes triggers a fresh download of the pinned archives and
+an atomic staging-directory replacement.
 
 Downloading a runtime does not download model weights.
 
@@ -68,6 +76,10 @@ weights are still stored separately. Set the audio.cpp Provider's local model
 file/package directory in Models; KnowMotion generates a server configuration
 with `lazy_load: true`, `max_loaded_models: 1`, starts `audiocpp_server` on the
 Provider's loopback port, and waits for `/health` before the first request.
+For an app-started process it then performs one real TTS or ASR inference. TTS
+must return a non-empty RIFF/WAVE payload; ASR must process a generated 250 ms
+WAV and return a JSON `text` field. A failed probe stops the process instead of
+marking the model as ready.
 Models can also be installed ahead of time with audio.cpp's native manager:
 
 ```powershell
@@ -186,6 +198,12 @@ KnowMotion discovers the recommended Qwen components and starts `sd-server`
 with `--diffusion-model`, `--llm` and `--vae`, so no manual WebUI model selection
 is required. Explicit component paths can also be retained in Provider metadata
 for nonstandard model layouts.
+
+After an app-started `sd-server` reports its model as ready, KnowMotion runs a
+256×256, one-step native `/sdcpp/v1/img_gen` probe and requires a valid PNG.
+This makes model readiness depend on a real inference rather than `/health`
+alone. Providers connected to externally started services retain their existing
+health-check behavior and are never restarted by the app.
 
 ## Resource lifecycle
 

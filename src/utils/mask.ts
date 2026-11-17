@@ -16,6 +16,8 @@ export interface MaskCanvasPair {
   /** 亮度遮罩：白 = 重绘（stable-diffusion.cpp 原生 img_gen）。 */
   luminanceMaskDataUrl: string;
   coverage: number;
+  /** Effective source-pixel feather radius. */
+  featherPx: number;
 }
 
 export function clampUnit(value: number): number {
@@ -162,6 +164,7 @@ function drawStrokes(
  */
 export const EDITABLE_ALPHA = 0;
 export const LOCKED_ALPHA = 255;
+export const MAX_MASK_FEATHER_PX = 64;
 
 /**
  * 生成图片编辑接口所需的遮罩，两条通道约定不同，必须各给一份：
@@ -176,9 +179,14 @@ export function buildMaskCanvases(
   strokes: MaskStroke[],
   width: number,
   height: number,
+  featherPx = 0,
 ): MaskCanvasPair {
   const safeWidth = Math.max(16, Math.round(width));
   const safeHeight = Math.max(16, Math.round(height));
+  const feather = Math.min(
+    MAX_MASK_FEATHER_PX,
+    Math.max(0, Number.isFinite(featherPx) ? featherPx : 0),
+  );
   const alpha = document.createElement("canvas");
   alpha.width = safeWidth;
   alpha.height = safeHeight;
@@ -190,11 +198,28 @@ export function buildMaskCanvases(
   alphaContext.fillRect(0, 0, safeWidth, safeHeight);
   alphaContext.save();
   // 只在笔迹处把 alpha 擦成 0；不透明底色代表“保留原像素”。
+  // 非零羽化时，先在高分辨率 scratch 层绘制笔迹并模糊，再作为擦除蒙版。
+  // 这样内部仍完全透明，边缘则得到平滑的半透明过渡。
   alphaContext.globalCompositeOperation = "destination-out";
-  drawStrokes(alphaContext, strokes, safeWidth, safeHeight, "#000000");
+  if (feather > 0) {
+    const scratch = document.createElement("canvas");
+    scratch.width = safeWidth;
+    scratch.height = safeHeight;
+    const scratchContext = scratch.getContext("2d");
+    if (!scratchContext) throw new Error("Canvas 2D context is unavailable");
+    scratchContext.filter = `blur(${feather.toFixed(2)}px)`;
+    drawStrokes(scratchContext, strokes, safeWidth, safeHeight, "#FFFFFF");
+    alphaContext.drawImage(scratch, 0, 0);
+  } else {
+    drawStrokes(alphaContext, strokes, safeWidth, safeHeight, "#000000");
+  }
   alphaContext.restore();
   alphaContext.globalCompositeOperation = "source-over";
-  binarizeMaskAlpha(alphaContext, safeWidth, safeHeight);
+  // Provider 对无羽化遮罩的半透明抗锯齿解释不一致，因此保留原来的二值化。
+  // 用户显式选择羽化时，半透明边缘就是预期输出。
+  if (feather === 0) {
+    binarizeMaskAlpha(alphaContext, safeWidth, safeHeight);
+  }
 
   const luminance = document.createElement("canvas");
   luminance.width = safeWidth;
@@ -203,12 +228,16 @@ export function buildMaskCanvases(
   if (!luminanceContext) throw new Error("Canvas 2D context is unavailable");
   luminanceContext.fillStyle = "#000000";
   luminanceContext.fillRect(0, 0, safeWidth, safeHeight);
+  if (feather > 0) {
+    luminanceContext.filter = `blur(${feather.toFixed(2)}px)`;
+  }
   drawStrokes(luminanceContext, strokes, safeWidth, safeHeight, "#FFFFFF");
 
   return {
     alphaMaskDataUrl: alpha.toDataURL("image/png"),
     luminanceMaskDataUrl: luminance.toDataURL("image/png"),
     coverage: maskCoverage(strokes),
+    featherPx: feather,
   };
 }
 

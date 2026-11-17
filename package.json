@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
-    "test:frontend": "node --import tsx --test tests/*.test.ts",
+    "test:frontend": "node --require ./scripts/node-test-compat.cjs --import tsx --test tests/*.test.ts",
     "test:components": "vitest run --config vitest.config.ts",
     "e2e:driver": "node scripts/ensure-msedgedriver.mjs",
     "test:e2e:desktop": "node scripts/run-desktop-e2e.mjs",

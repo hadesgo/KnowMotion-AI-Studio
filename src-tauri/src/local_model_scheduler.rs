@@ -102,6 +102,7 @@ pub struct ManagedRuntimeStatus {
     pub model_loaded: bool,
     pub managed_process: bool,
     pub idle_seconds: u64,
+    pub gpu_smoke_tested: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -130,6 +131,7 @@ struct RuntimeRecord {
     managed_process: bool,
     idle_seconds: u64,
     last_used: Instant,
+    gpu_smoke_tested: bool,
 }
 
 #[derive(Clone)]
@@ -375,6 +377,7 @@ pub(crate) async fn acquire_gpu(
                 managed_process: false,
                 idle_seconds: idle_seconds(runtime, workload),
                 last_used: Instant::now(),
+                gpu_smoke_tested: false,
             },
         );
     }
@@ -651,6 +654,7 @@ impl LocalModelScheduler {
                 managed_process: runtime.managed_process
                     || process_keys.iter().any(|process| process == key),
                 idle_seconds: runtime.idle_seconds,
+                gpu_smoke_tested: runtime.gpu_smoke_tested,
             })
             .collect::<Vec<_>>();
         runtimes.sort_by(|left, right| left.key.cmp(&right.key));
@@ -746,6 +750,7 @@ pub(crate) async fn ensure_audio(
                 managed_process: false,
                 idle_seconds: idle_seconds(runtime, Workload::Audio),
                 last_used: Instant::now(),
+                gpu_smoke_tested: false,
             });
         record.last_used = Instant::now();
         record.idle_seconds = idle_seconds(runtime, Workload::Audio);
@@ -783,7 +788,7 @@ pub(crate) async fn ensure_audio(
             "audio.cpp is not running at {origin}. Choose a local model path in Models so KnowMotion can start it automatically."
         ));
     }
-    start_audio_server(&scheduler, &origin, &key).await?;
+    start_audio_server(&scheduler, &origin, &key, model, task).await?;
     if !audio_has_model(&origin, model).await {
         return Err(format!(
             "audio.cpp started, but model '{model}' was not registered by the generated config"
@@ -818,6 +823,8 @@ async fn start_audio_server(
     scheduler: &Arc<LocalModelScheduler>,
     origin: &str,
     key: &str,
+    model: &str,
+    task: &str,
 ) -> Result<(), String> {
     let data_root = scheduler_data_root()?;
     fs::create_dir_all(&data_root).map_err(|error| error.to_string())?;
@@ -833,6 +840,7 @@ async fn start_audio_server(
             .ok_or_else(|| "audio.cpp registration is missing".to_string())?;
         (registration, endpoint_port(origin)?)
     };
+    let smoke_on_gpu = registration.backend != "cpu";
     let models = registration
         .models
         .values()
@@ -861,9 +869,11 @@ async fn start_audio_server(
             .map_err(|error| error.to_string())?
             .as_slice(),
     )?;
-    let executable = crate::local_runtime::installed_executable("audio.cpp").ok_or_else(|| {
-        "audio.cpp runtime is not installed. Select audio.cpp in Models to download it.".to_string()
-    })?;
+    let executable = PathBuf::from(
+        crate::local_runtime::ensure_local_runtime("audio.cpp".to_string())
+            .await?
+            .executable_path,
+    );
     let signature = audio_signature(scheduler, origin)?;
     let process = spawn_managed_process(
         Workload::Audio,
@@ -883,6 +893,13 @@ async fn start_audio_server(
     if let Err(error) = wait_for_audio_ready(scheduler, key, origin).await {
         stop_managed_process(scheduler, key);
         return Err(error);
+    }
+    if let Err(error) = run_audio_gpu_smoke(origin, model, task).await {
+        stop_managed_process(scheduler, key);
+        return Err(format!("audio.cpp runtime smoke test failed: {error}"));
+    }
+    if smoke_on_gpu {
+        mark_runtime_smoke_tested(scheduler, key);
     }
     logging::log_event(
         LogLevel::Info,
@@ -928,6 +945,109 @@ async fn wait_for_audio_ready(
     ))
 }
 
+/// Execute one tiny inference after an app-managed audio.cpp process starts.
+/// A `/health` response only proves that the HTTP server exists; this verifies
+/// that the selected model can actually load and execute on the configured
+/// Vulkan/CUDA backend.
+async fn run_audio_gpu_smoke(origin: &str, model: &str, task: &str) -> Result<(), String> {
+    if task.eq_ignore_ascii_case("asr") {
+        run_audio_asr_smoke(origin, model).await
+    } else {
+        run_audio_tts_smoke(origin, model).await
+    }
+}
+
+async fn run_audio_tts_smoke(origin: &str, model: &str) -> Result<(), String> {
+    let response = scheduler_client()
+        .post(format!("{origin}/v1/audio/speech"))
+        .json(&json!({
+            "model": model,
+            "input": "测试",
+            "voice": "serena"
+        }))
+        .send()
+        .await
+        .map_err(|error| format!("TTS probe request failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("TTS probe returned {status}"));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("TTS probe response failed: {error}"))?;
+    if bytes.len() <= 44 || !bytes.starts_with(b"RIFF") || bytes.get(8..12) != Some(b"WAVE") {
+        return Err("TTS probe did not return a non-empty WAV file".to_string());
+    }
+    Ok(())
+}
+
+fn silent_wav() -> Vec<u8> {
+    const SAMPLE_RATE: u32 = 16_000;
+    const SAMPLE_COUNT: u32 = 4_000;
+    const CHANNELS: u16 = 1;
+    const BITS: u16 = 16;
+    let data_bytes = SAMPLE_COUNT * CHANNELS as u32 * (BITS as u32 / 8);
+    let byte_rate = SAMPLE_RATE * CHANNELS as u32 * (BITS as u32 / 8);
+    let mut wav = Vec::with_capacity(44 + data_bytes as usize);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data_bytes).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16_u32.to_le_bytes());
+    wav.extend_from_slice(&1_u16.to_le_bytes());
+    wav.extend_from_slice(&CHANNELS.to_le_bytes());
+    wav.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
+    wav.extend_from_slice(&byte_rate.to_le_bytes());
+    wav.extend_from_slice(&(CHANNELS * (BITS / 8)).to_le_bytes());
+    wav.extend_from_slice(&BITS.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_bytes.to_le_bytes());
+    wav.resize(44 + data_bytes as usize, 0);
+    wav
+}
+
+async fn run_audio_asr_smoke(origin: &str, model: &str) -> Result<(), String> {
+    let boundary = format!("knowmotion-smoke-{}", Uuid::new_v4().simple());
+    let audio = silent_wav();
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{model}\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"smoke.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(&audio);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let response = scheduler_client()
+        .post(format!("{origin}/v1/audio/transcriptions/details"))
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .map_err(|error| format!("ASR probe request failed: {error}"))?;
+    let status = response.status();
+    let payload: Value = response
+        .json()
+        .await
+        .map_err(|_| format!("ASR probe returned a non-JSON response ({status})"))?;
+    if !status.is_success() {
+        return Err(format!("ASR probe returned {status}"));
+    }
+    if payload.get("text").and_then(Value::as_str).is_none() {
+        return Err("ASR probe response has no text field".to_string());
+    }
+    Ok(())
+}
+
 pub(crate) async fn ensure_diffusion(
     _provider_id: &str,
     base_url: &str,
@@ -962,6 +1082,7 @@ pub(crate) async fn ensure_diffusion(
                 managed_process: false,
                 idle_seconds: idle,
                 last_used: Instant::now(),
+                gpu_smoke_tested: false,
             });
         record.last_used = Instant::now();
         record.idle_seconds = idle;
@@ -1024,6 +1145,15 @@ pub(crate) async fn ensure_diffusion(
     }
     start_diffusion_server(&scheduler, &origin, &key, &registration, &signature).await?;
     wait_for_diffusion_ready(&scheduler, &key, &origin).await?;
+    if let Err(error) = run_diffusion_gpu_smoke(&origin).await {
+        stop_managed_process(&scheduler, &key);
+        return Err(format!(
+            "stable-diffusion.cpp runtime smoke test failed: {error}"
+        ));
+    }
+    if registration.backend != "cpu" {
+        mark_runtime_smoke_tested(&scheduler, &key);
+    }
     mark_runtime_loaded(&scheduler, &key, true);
     Ok(())
 }
@@ -1194,11 +1324,11 @@ async fn start_diffusion_server(
     registration: &DiffusionRegistration,
     signature: &str,
 ) -> Result<(), String> {
-    let executable = crate::local_runtime::installed_executable("stable-diffusion.cpp")
-        .ok_or_else(|| {
-            "stable-diffusion.cpp runtime is not installed. Select it in Models to download it."
-                .to_string()
-        })?;
+    let executable = PathBuf::from(
+        crate::local_runtime::ensure_local_runtime("stable-diffusion.cpp".to_string())
+            .await?
+            .executable_path,
+    );
     let port = endpoint_port(origin)?;
     let mut arguments = vec![
         "--listen-ip".to_string(),
@@ -1298,6 +1428,93 @@ async fn wait_for_diffusion_ready(
     ))
 }
 
+async fn run_diffusion_gpu_smoke(origin: &str) -> Result<(), String> {
+    let client = scheduler_client();
+    let response = client
+        .post(format!("{origin}/sdcpp/v1/img_gen"))
+        .json(&json!({
+            "prompt": "A simple blue circle on a white background",
+            "negative_prompt": "text, watermark",
+            "width": 256,
+            "height": 256,
+            "batch_count": 1,
+            "sample_steps": 1,
+            "seed": 1,
+            "output_format": "png"
+        }))
+        .send()
+        .await
+        .map_err(|error| format!("image probe request failed: {error}"))?;
+    let status = response.status();
+    let mut payload: Value = response
+        .json()
+        .await
+        .map_err(|_| format!("image probe returned a non-JSON response ({status})"))?;
+    if !status.is_success() {
+        return Err(format!("image probe returned {status}"));
+    }
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        if let Some(images) = payload.pointer("/result/images").and_then(Value::as_array) {
+            if images.is_empty() {
+                return Err("image probe completed without an image".to_string());
+            }
+            let encoded = images[0]
+                .get("b64_json")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "image probe result has no b64_json".to_string())?;
+            use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+            let payload = encoded
+                .split_once(',')
+                .map(|(_, payload)| payload)
+                .unwrap_or(encoded);
+            let bytes = BASE64
+                .decode(payload)
+                .map_err(|error| format!("image probe returned invalid base64: {error}"))?;
+            if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+                return Err("image probe did not return a PNG".to_string());
+            }
+            return Ok(());
+        }
+        match payload.get("status").and_then(Value::as_str) {
+            Some("failed" | "cancelled" | "canceled") => {
+                let message = payload
+                    .pointer("/error/message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("image probe job failed");
+                return Err(message.to_string());
+            }
+            _ => {}
+        }
+        if Instant::now() >= deadline {
+            return Err("image probe did not complete within 120 seconds".to_string());
+        }
+        let poll_url = match payload.get("poll_url").and_then(Value::as_str) {
+            Some(path) if path.starts_with("http") => path.to_string(),
+            Some(path) => format!("{origin}{path}"),
+            None => payload
+                .get("id")
+                .and_then(Value::as_str)
+                .map(|id| format!("{origin}/sdcpp/v1/jobs/{id}"))
+                .ok_or_else(|| "image probe job has no id or poll URL".to_string())?,
+        };
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let response = client
+            .get(poll_url)
+            .send()
+            .await
+            .map_err(|error| format!("image probe poll failed: {error}"))?;
+        let status = response.status();
+        payload = response
+            .json()
+            .await
+            .map_err(|_| format!("image probe poll returned non-JSON ({status})"))?;
+        if !status.is_success() {
+            return Err(format!("image probe poll returned {status}"));
+        }
+    }
+}
+
 fn scheduler_data_root() -> Result<PathBuf, String> {
     SCHEDULER_DATA_ROOT
         .get()
@@ -1344,6 +1561,14 @@ fn mark_runtime_loaded(scheduler: &Arc<LocalModelScheduler>, key: &str, managed:
             runtime.model_loaded = true;
             runtime.managed_process |= managed;
             runtime.last_used = Instant::now();
+        }
+    }
+}
+
+fn mark_runtime_smoke_tested(scheduler: &Arc<LocalModelScheduler>, key: &str) {
+    if let Ok(mut state) = scheduler.state.lock() {
+        if let Some(runtime) = state.runtimes.get_mut(key) {
+            runtime.gpu_smoke_tested = true;
         }
     }
 }
@@ -1630,6 +1855,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gpu_smoke_wav_is_valid_for_asr_probe() {
+        let wav = silent_wav();
+        assert!(wav.starts_with(b"RIFF"));
+        assert_eq!(wav.get(8..12), Some(b"WAVE".as_slice()));
+        let reader = hound::WavReader::new(std::io::Cursor::new(wav)).expect("valid smoke WAV");
+        assert_eq!(reader.spec().sample_rate, 16_000);
+        assert_eq!(reader.duration(), 4_000);
+    }
+
+    #[test]
     fn accepts_only_plain_loopback_http_endpoints() {
         assert!(is_loopback_base_url("http://127.0.0.1:8080"));
         assert!(is_loopback_base_url("http://localhost:1234/v1"));
@@ -1736,6 +1971,7 @@ mod tests {
                 managed_process: true,
                 idle_seconds: 180,
                 last_used: Instant::now(),
+                gpu_smoke_tested: false,
             },
         );
         assert!(llm_runtime_is_resident(&runtimes, "acceptance-workflow-llm"));
