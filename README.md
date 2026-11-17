@@ -26,7 +26,7 @@ AI-powered knowledge animation studio. 用户从一个知识主题开始，在�
 - Windows Job Object 监管 Node/Chrome/FFmpeg 进程树，取消、崩溃或应用退出时不残留渲染子进程。
 - 结构化 JSONL 日志、5 MiB 轮转、7 份历史、30 天保留和统一 API Key/Authorization 脱敏。
 - 构建时打包固定 Node sidecar、Chrome Headless Shell、FFmpeg/FFprobe，并校验 runtime manifest。
-- OpenAI Compatible / stable-diffusion.cpp 图片，audio.cpp 本地 TTS/ASR，OpenAI Compatible TTS/ASR，Embedding/RAG 和网页来源正文抓取。
+- OpenAI Compatible / stable-diffusion.cpp 图片，audio.cpp 本地 TTS/ASR，OpenAI Compatible TTS/ASR，Embedding/RAG（云端 OpenAI Compatible 或本地 GGUF，后者由 llama.cpp `--embeddings` 托管、无需 API Key）和网页来源正文抓取。
 - 真实本地服务端到端验收：Qwen3.8-27B、EmbeddingGemma、Qwen3-TTS/ASR、Qwen Image 2.1 在 RTX 5070 上经真实运行时进程（llama.cpp / audio.cpp / stable-diffusion.cpp）完成 LLM / Embedding / TTS / ASR / Image 五项验收，判定基于可解析 JSON、语义排序、WAV 时长、TTS→ASR 闭环与 PNG 尺寸哈希，见 [docs/REAL_SERVICE_ACCEPTANCE.md](docs/REAL_SERVICE_ACCEPTANCE.md)。
 - 公网 URL 安全抓取：研究网页与远程图片统一执行 DNS/IP 分类、解析地址固定、逐跳重定向校验、HTTPS 降级阻断、响应大小与内容类型限制。
 - 项目文件锁、素材落盘、缺失扫描、可恢复归档删除及含素材的 ZIP 项目包导入导出。

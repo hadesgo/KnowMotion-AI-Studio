@@ -165,6 +165,7 @@ export interface ImageJobView {
 export interface ImageProviderConfig {
   baseUrl: string;
   capabilities?: Array<string>;
+  contextSize?: null | number;
   enabled?: boolean;
   id: string;
   inferenceBackend?: null | string;

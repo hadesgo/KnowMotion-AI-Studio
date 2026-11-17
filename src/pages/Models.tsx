@@ -78,6 +78,18 @@ function runtimeForProtocol(
   return null;
 }
 
+/**
+ * GGUF 既接受具体模型文件，也接受模型目录（目录里只有一份可加载模型时由后端
+ * 自动挑选，`mmproj-*.gguf` 投影器会被排除）。
+ */
+function isGgufModelPath(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.toLowerCase().endsWith(".gguf")) return true;
+  const lastSegment = trimmed.split(/[\\/]/).filter(Boolean).pop() ?? "";
+  return lastSegment.length > 0 && !lastSegment.includes(".");
+}
+
 const localProtocolDefaults: Partial<
   Record<ProviderProfile["protocol"], { baseUrl: string; model: string }>
 > = {
@@ -214,6 +226,8 @@ export default function Models() {
 
   const installRuntimeForProtocol = async (
     protocol: ProviderProfile["protocol"],
+    force = false,
+    acceleration: "auto" | "vulkan" | "cuda" | "cuda13" = "auto",
   ) => {
     const runtime = runtimeForProtocol(protocol);
     if (!runtime) return;
@@ -228,30 +242,38 @@ export default function Models() {
     setRuntimeInstall({
       runtime,
       status: "downloading",
-      message: `正在检测 CUDA 并获取 ${runtime}，首次使用需要下载。`,
+      message: force
+        ? `正在重新下载 ${runtime}（${acceleration === "auto" ? "自动选择后端" : acceleration}，忽略已安装副本）并逐文件校验。`
+        : `正在检测 CUDA 并获取 ${runtime}，首次使用需要下载。`,
     });
     try {
-      const result = await ensureLocalRuntime(runtime);
+      const result = await ensureLocalRuntime(runtime, force, acceleration);
       setRuntimeInstall({
         runtime,
         status: "ready",
-        message: result.repairPerformed
-          ? `${runtime} · ${result.acceleration} 检测到文件损坏，已自动修复`
-          : result.alreadyInstalled
-            ? `${runtime} · ${result.acceleration} 已安装，关键文件哈希通过`
-            : `${runtime} · ${result.acceleration} 已下载并完成逐文件校验`,
+        message: force
+          ? `${runtime} · ${result.acceleration} 已重新安装并完成逐文件校验`
+          : result.repairPerformed
+            ? `${runtime} · ${result.acceleration} 检测到文件损坏，已自动修复`
+            : result.alreadyInstalled
+              ? `${runtime} · ${result.acceleration} 已安装，关键文件哈希通过`
+              : `${runtime} · ${result.acceleration} 已下载并完成逐文件校验`,
       });
-      if (!result.alreadyInstalled || result.repairPerformed) {
+      if (force || !result.alreadyInstalled || result.repairPerformed) {
         pushToast({
           type: "success",
-          title: result.repairPerformed
-            ? "本地运行时已自动修复"
-            : "本地运行时已就绪",
+          title: force
+            ? "本地运行时已重新安装"
+            : result.repairPerformed
+              ? "本地运行时已自动修复"
+              : "本地运行时已就绪",
           message: `${runtime} · ${result.acceleration} · ${result.version} · 关键文件哈希通过`,
         });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const detail = error instanceof Error ? error.message : String(error);
+      // 模型文件与运行时是两件事：这里点名「运行时」，避免看起来像模型下载失败。
+      const message = `本地运行时 ${runtime} 不可用：${detail}`;
       setRuntimeInstall({
         runtime,
         status: "error",
@@ -259,7 +281,7 @@ export default function Models() {
       });
       pushToast({
         type: "error",
-        title: "本地运行时下载失败",
+        title: force ? "运行时重新下载失败" : "本地运行时不可用",
         message,
       });
     }
@@ -300,8 +322,8 @@ export default function Models() {
     }
     const isGguf = draft.protocol === "GGUF";
     if (isGguf) {
-      if (!draft.baseUrl.trim().toLowerCase().endsWith(".gguf")) {
-        setFormError("请选择或填写完整的 .gguf 模型文件路径。");
+      if (!isGgufModelPath(draft.baseUrl)) {
+        setFormError("请选择 .gguf 模型文件，或填写包含模型的目录路径。");
         return;
       }
     } else {
@@ -339,9 +361,9 @@ export default function Models() {
     if (
       draft.protocol === "GGUF" &&
       (draft.capabilities.length !== 1 ||
-        draft.capabilities[0] !== "LLM")
+        !["LLM", "Embedding"].includes(draft.capabilities[0]))
     ) {
-      setFormError("GGUF 本地模型当前只配置 LLM 能力。");
+      setFormError("GGUF 本地模型只能配置 LLM 或 Embedding 其中一种能力。");
       return;
     }
     const providerId = draft.id ?? makeId("provider");
@@ -434,7 +456,7 @@ export default function Models() {
     }
     const validEndpoint =
       provider.protocol === "GGUF"
-        ? provider.baseUrl.trim().toLowerCase().endsWith(".gguf")
+        ? isGgufModelPath(provider.baseUrl)
         : provider.baseUrl.startsWith("http");
     const checks = [
       validEndpoint,
@@ -480,6 +502,33 @@ export default function Models() {
     } catch (error) {
       setFormError(
         error instanceof Error ? error.message : `模型文件选择失败：${String(error)}`,
+      );
+    }
+  };
+
+  const pickGgufDirectory = async () => {
+    if (!isTauriDesktop) {
+      setFormError("浏览器预览无法读取本地路径，请运行桌面版选择模型目录。");
+      return;
+    }
+    try {
+      const selected = await open({
+        multiple: false,
+        directory: true,
+      });
+      if (typeof selected !== "string") return;
+      const folderName =
+        selected.split(/[\\/]/).filter(Boolean).pop() ?? "local-model";
+      setDraft((current) => ({
+        ...current,
+        baseUrl: selected,
+        model: current.model.trim() || folderName,
+        name: current.name.trim() || folderName,
+      }));
+      setFormError("");
+    } catch (error) {
+      setFormError(
+        error instanceof Error ? error.message : `模型目录选择失败：${String(error)}`,
       );
     }
   };
@@ -668,7 +717,7 @@ export default function Models() {
               </header>
               <div className="provider-card__endpoint">
                 <span>
-                  {provider.protocol === "GGUF" ? "MODEL FILE" : "ENDPOINT"}
+                  {provider.protocol === "GGUF" ? "MODEL PATH" : "ENDPOINT"}
                 </span>
                 <code>{provider.baseUrl}</code>
               </div>
@@ -718,6 +767,19 @@ export default function Models() {
                       : "未检测"}
                 </div>
                 <div className="provider-card__actions">
+                  {provider.health === "error" &&
+                    runtimeForProtocol(provider.protocol) && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={<Download size={14} />}
+                        onClick={() =>
+                          void installRuntimeForProtocol(provider.protocol, true)
+                        }
+                      >
+                        重装运行时
+                      </Button>
+                    )}
                   <Button
                     variant="ghost"
                     size="sm"
@@ -952,11 +1014,39 @@ export default function Models() {
                   {runtimeInstall.message}
                 </span>
               )}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<Download size={14} />}
+                  disabled={runtimeInstall?.status === "downloading"}
+                  onClick={() =>
+                    void installRuntimeForProtocol(draft.protocol, true)
+                  }
+                >
+                  重新下载运行时
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<Download size={14} />}
+                  disabled={runtimeInstall?.status === "downloading"}
+                  onClick={() =>
+                    void installRuntimeForProtocol(draft.protocol, true, "vulkan")
+                  }
+                >
+                  改用 Vulkan 重装
+                </Button>
+              </div>
+              <span className="text-[11px] leading-[1.5] text-[var(--faint)]">
+                手工放入 runtimes 目录的副本会被自动接管；CUDA 构建若缺少 cudart64_*.dll
+                会在启动时以 0xc0000135 退出，此时用 Vulkan 版本体积更小、驱动兼容更好。
+              </span>
             </Field>
           )}
           <div className="field flex flex-col gap-[7px]">
             <span className="text-[12px] font-medium text-[var(--subtext)]">
-              {draft.protocol === "GGUF" ? "GGUF 模型文件" : "API Base URL"}
+              {draft.protocol === "GGUF" ? "GGUF 模型文件或目录" : "API Base URL"}
             </span>
             <TextInput
               value={draft.baseUrl}
@@ -965,23 +1055,34 @@ export default function Models() {
               }
               placeholder={
                 draft.protocol === "GGUF"
-                  ? "D:\\models\\qwen2.5-0.5b-instruct-q4_k_m.gguf"
+                  ? "D:\\code\\models\\embeddinggemma-2\\embeddinggemma-2-Q8_0.gguf"
                   : undefined
               }
             />
             {draft.protocol === "GGUF" && (
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<FolderOpen size={14} />}
-                onClick={() => void pickGgufModel()}
-              >
-                选择 .gguf 文件
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<FolderOpen size={14} />}
+                  onClick={() => void pickGgufModel()}
+                >
+                  选择 .gguf 文件
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<HardDrive size={14} />}
+                  onClick={() => void pickGgufDirectory()}
+                >
+                  选择模型目录
+                </Button>
+              </div>
             )}
             {draft.protocol === "GGUF" && (
               <span className="flex items-center gap-1 text-[11px] leading-[1.5] text-[var(--faint)]">
-                模型只在当前电脑本地加载和推理，不上传到外部服务。
+                模型只在当前电脑本地加载和推理，不上传到外部服务。目录输入会挑出其中唯一的
+                .gguf（自动排除 mmproj 投影器）；目录内有多份模型时请直接填目标文件路径。
               </span>
             )}
           </div>
@@ -1100,7 +1201,11 @@ export default function Models() {
           {draft.protocol === "GGUF" && (
             <Field
               label="上下文长度"
-              hint="Token 数。更高的上下文占用更多内存；默认 8192。"
+              hint={
+                draft.capabilities.includes("Embedding")
+                  ? "嵌入模型的训练上下文通常只有 512–2048；默认 2048。"
+                  : "Token 数。更高的上下文占用更多内存；默认 8192。"
+              }
             >
               <TextInput
                 type="number"
@@ -1171,7 +1276,7 @@ export default function Models() {
                     return capability === "Image";
                   }
                   if (draft.protocol === "GGUF") {
-                    return capability === "LLM";
+                    return capability === "LLM" || capability === "Embedding";
                   }
                   return true;
                 })
@@ -1204,9 +1309,16 @@ export default function Models() {
                           return;
                         }
                         if (draft.protocol === "GGUF") {
+                          const switching =
+                            draft.capabilities[0] !== capability;
                           setDraft({
                             ...draft,
-                            capabilities: ["LLM"],
+                            capabilities: [capability],
+                            contextSize: switching
+                              ? capability === "Embedding"
+                                ? 2048
+                                : 8192
+                              : draft.contextSize,
                           });
                           return;
                         }

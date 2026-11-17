@@ -579,7 +579,7 @@ type ProviderErrorCode =
 - `OpenAiCompatibleImage` / `StableDiffusionCppImage`。
 - `OpenAiCompatibleTts` / 可插拔本地 TTS。
 - `WhisperCompatibleAsr`。
-- `OpenAiCompatibleEmbedding`。
+- `OpenAiCompatibleEmbedding` / `GgufLocalEmbedding`：后者把 `GGUF` Provider 的模型路径交给同一个 llama.cpp 运行时，以 `--embeddings` 模式启动独立回环服务（缓存键为「模型文件 + 用途」，不会复用聊天服务），上下文默认 2048，GPU 租约与聊天模型共用调度器。
 
 Provider 注册表按 `(capability, providerId, model)` 解析。业务任务可配置“默认 LLM”“研究专用 LLM”“图片模型”，但始终通过相同能力接口调用。
 

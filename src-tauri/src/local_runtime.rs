@@ -3,11 +3,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashSet,
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::OnceLock,
+    sync::{Mutex as StdMutex, OnceLock},
     time::Duration,
 };
 use tokio::sync::Mutex;
@@ -203,12 +204,24 @@ const RUNTIMES: [RuntimeSpec; 3] = [
     },
 ];
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ManifestSource {
+    /// 由应用从固定归档安装：归档 SHA-256 已校验，可信来源。
+    #[default]
+    Pinned,
+    /// 用户手工放进 `runtimes/<id>/` 的副本：只记录逐文件哈希，归档来源未校验。
+    HandPlaced,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RuntimeManifest {
     runtime: String,
     version: String,
     acceleration: RuntimeAcceleration,
+    /// 固定归档的 SHA-256。手工副本没有这一步，留空。
+    #[serde(default)]
     archives: Vec<String>,
     executable: String,
     /// SHA-256 for every installed runtime file except the manifest itself.
@@ -216,6 +229,8 @@ struct RuntimeManifest {
     #[serde(default)]
     files: Vec<RuntimeFileHash>,
     installed_at: String,
+    #[serde(default)]
+    source: ManifestSource,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -420,22 +435,25 @@ fn load_installed_manifest(
 ) -> Result<Option<(RuntimeManifest, PathBuf)>, String> {
     let target = install_root()?.join(spec.id);
     let manifest_path = target.join("manifest.json");
-    let text = match fs::read_to_string(manifest_path) {
+    let text = match fs::read_to_string(&manifest_path) {
         Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return adopt_hand_placed_runtime(spec, &target, acceleration);
+        }
         Err(error) => return Err(format!("Runtime manifest could not be read: {error}")),
     };
     let manifest: RuntimeManifest = serde_json::from_str(&text)
         .map_err(|error| format!("Runtime manifest is invalid: {error}"))?;
+    let pinned = manifest.source == ManifestSource::Pinned;
     if manifest.runtime != spec.id
         || manifest.version != spec.version
-        || manifest.acceleration != acceleration
-        || manifest.archives != archive_hashes(archives_for(spec, acceleration))
+        || (pinned && manifest.acceleration != acceleration)
+        || (pinned && manifest.archives != archive_hashes(archives_for(spec, acceleration)))
     {
         return Ok(None);
     }
     let executable = manifest_executable(&target, &manifest)?;
-    verify_runtime_files(&target, &manifest.files)?;
+    let manifest = verify_or_adopt(&target, manifest)?;
     Ok(Some((manifest, executable)))
 }
 
@@ -445,7 +463,9 @@ fn load_any_installed_manifest(
     let target = install_root()?.join(spec.id);
     let text = match fs::read_to_string(target.join("manifest.json")) {
         Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return adopt_hand_placed_runtime(spec, &target, choose_acceleration(spec));
+        }
         Err(error) => return Err(format!("Runtime manifest could not be read: {error}")),
     };
     let manifest: RuntimeManifest = serde_json::from_str(&text)
@@ -454,8 +474,178 @@ fn load_any_installed_manifest(
         return Ok(None);
     }
     let executable = manifest_executable(&target, &manifest)?;
-    verify_runtime_files(&target, &manifest.files)?;
+    let manifest = verify_or_adopt(&target, manifest)?;
     Ok(Some((manifest, executable)))
+}
+
+/// 用户把运行时压缩包手工解到 `runtimes/<id>/` 时目录里没有 manifest.json。
+/// 以前这种情况一律被当成「未安装」→ 重新下载整包（网络受限就永远装不上）。
+/// 这里把手工副本接管下来：找不到期望的可执行文件就继续当作未安装，否则补算逐文件
+/// 哈希并写一份 `source: hand-placed` 的清单。归档来源无法校验，日志会明确记录这一点；
+/// 想要可验证来源请用 `ensure_local_runtime(force = true)` 重新下载固定归档。
+fn adopt_hand_placed_runtime(
+    spec: RuntimeSpec,
+    target: &Path,
+    acceleration: RuntimeAcceleration,
+) -> Result<Option<(RuntimeManifest, PathBuf)>, String> {
+    if !target.is_dir() {
+        return Ok(None);
+    }
+    let Some(executable) = find_named_file(target, spec.executable_name, 8) else {
+        return Ok(None);
+    };
+    let relative = executable
+        .strip_prefix(target)
+        .map_err(|error| error.to_string())?
+        .to_path_buf();
+    let files = runtime_files(target)?;
+    let manifest = RuntimeManifest {
+        runtime: spec.id.to_string(),
+        version: spec.version.to_string(),
+        acceleration: detect_acceleration(target).unwrap_or(acceleration),
+        archives: Vec::new(),
+        executable: relative.to_string_lossy().to_string(),
+        files,
+        installed_at: chrono::Utc::now().to_rfc3339(),
+        source: ManifestSource::HandPlaced,
+    };
+    crate::write_atomic(
+        &target.join("manifest.json"),
+        &serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?,
+    )?;
+    crate::logging::log_event(
+        crate::logging::LogLevel::Warn,
+        "runtime",
+        "Adopted a hand-placed runtime; per-file hashes recorded, archive provenance unverified",
+        Some(json!({
+            "runtime": spec.id,
+            "acceleration": manifest.acceleration.manifest_label(),
+            "files": manifest.files.len(),
+            "path": target.to_string_lossy()
+        })),
+    );
+    if let Ok(mut verified) = verified_runtimes().lock() {
+        verified.insert(verification_key(&manifest));
+    }
+    Ok(Some((manifest, executable)))
+}
+
+/// 从文件名推断这份手工副本是哪个加速后端：Vulkan 包带 `ggml-vulkan.dll`，CUDA 包带
+/// `ggml-cuda.dll` 与 `cudart64_*.dll`。推断不出来时返回 `None`，由调用方回退到按硬件
+/// 选择的结果。
+fn detect_acceleration(target: &Path) -> Option<RuntimeAcceleration> {
+    let mut has_vulkan = false;
+    let mut has_cuda = false;
+    let mut has_cuda13 = false;
+    let mut stack = vec![(target.to_path_buf(), 0usize)];
+    while let Some((directory, depth)) = stack.pop() {
+        if depth > 2 {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push((path, depth + 1));
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let name = name.to_ascii_lowercase();
+            if name.contains("vulkan") {
+                has_vulkan = true;
+            }
+            if name.contains("ggml-cuda") || name.contains("cudart") {
+                has_cuda = true;
+                if name.contains("cudart") && name.contains('_') && name.contains("13") {
+                    has_cuda13 = true;
+                }
+            }
+        }
+    }
+    if has_vulkan {
+        Some(RuntimeAcceleration::Vulkan)
+    } else if has_cuda && has_cuda13 {
+        Some(RuntimeAcceleration::Cuda13)
+    } else if has_cuda {
+        Some(RuntimeAcceleration::Cuda)
+    } else {
+        None
+    }
+}
+
+/// 已在本进程内通过逐文件校验的运行时（键为 `runtime@version@installedAt`）。
+///
+/// 每次解析运行时都要把几百 MB 文件全量哈希一遍（实测 llama.cpp 53 个文件 / 101 MiB、
+/// audio.cpp 283 个文件 / 241 MiB），而 `installed_executable` 在每次本地请求前都会调用，
+/// 逐次重算会把每个 Agent 步骤拖慢数秒。因此同一进程内只校验一次；重装会写入新的
+/// `installedAt`，键不同自然重新校验。跨进程（重启应用）仍然重新校验，所以磁盘上被
+/// 替换的文件最迟在下次启动时会被检出。
+fn verified_runtimes() -> &'static StdMutex<HashSet<String>> {
+    static VERIFIED: OnceLock<StdMutex<HashSet<String>>> = OnceLock::new();
+    VERIFIED.get_or_init(|| StdMutex::new(HashSet::new()))
+}
+
+#[cfg(test)]
+fn reset_verification_cache() {
+    if let Ok(mut verified) = verified_runtimes().lock() {
+        verified.clear();
+    }
+}
+
+fn verification_key(manifest: &RuntimeManifest) -> String {
+    format!(
+        "{}@{}@{}",
+        manifest.runtime, manifest.version, manifest.installed_at
+    )
+}
+
+/// 旧版安装路径（`scripts/acceptance/install-local-runtimes.mjs`）只记录归档 SHA-256，
+/// 不写逐文件哈希。这类清单会被当成「损坏」，于是每次使用都触发一整包重新下载 ——
+/// 网络受限时表现为「模型都下好了，运行时却一直检测失败」。
+///
+/// 归档哈希在解压前已逐字节校验过，磁盘上的文件就是那批归档的内容，所以这里一次性补算
+/// 逐文件哈希并写回清单；此后每次加载都按逐文件哈希严格校验，真正被替换或截断的文件
+/// 仍然会报 checksum/size mismatch。需要强制回到归档内容时走 `ensure_local_runtime(force)`。
+fn verify_or_adopt(target: &Path, manifest: RuntimeManifest) -> Result<RuntimeManifest, String> {
+    let key = verification_key(&manifest);
+    let already_verified = verified_runtimes()
+        .lock()
+        .map(|verified| verified.contains(&key))
+        .unwrap_or(false);
+    if already_verified && !manifest.files.is_empty() {
+        return Ok(manifest);
+    }
+    if !manifest.files.is_empty() {
+        verify_runtime_files(target, &manifest.files)?;
+        if let Ok(mut verified) = verified_runtimes().lock() {
+            verified.insert(key);
+        }
+        return Ok(manifest);
+    }
+    let files = runtime_files(target)?;
+    let upgraded = RuntimeManifest { files, ..manifest };
+    crate::write_atomic(
+        &target.join("manifest.json"),
+        &serde_json::to_vec_pretty(&upgraded).map_err(|error| error.to_string())?,
+    )?;
+    crate::logging::log_event(
+        crate::logging::LogLevel::Warn,
+        "runtime",
+        "Legacy runtime manifest upgraded with per-file hashes",
+        Some(json!({
+            "runtime": upgraded.runtime,
+            "files": upgraded.files.len(),
+            "path": target.to_string_lossy()
+        })),
+    );
+    if let Ok(mut verified) = verified_runtimes().lock() {
+        verified.insert(verification_key(&upgraded));
+    }
+    Ok(upgraded)
 }
 
 pub(crate) fn installed_executable(runtime: &str) -> Option<PathBuf> {
@@ -464,6 +654,22 @@ pub(crate) fn installed_executable(runtime: &str) -> Option<PathBuf> {
         .ok()
         .flatten()
         .map(|(_, executable)| executable)
+}
+
+/// 运行时「为什么用不了」的可读原因。`installed_executable` 只返回 `Option`，调用方
+/// 会把「没装」和「装了但校验不过」都写成「未安装」，这里补上具体原因供错误信息使用。
+pub(crate) fn installed_executable_diagnostic(runtime: &str) -> Option<String> {
+    let spec = runtime_spec(runtime).ok()?;
+    match load_any_installed_manifest(spec) {
+        Ok(Some(_)) => runtime_health_issue(runtime),
+        Ok(None) => install_root().ok().map(|root| {
+            format!(
+                "no installed manifest at {}",
+                root.join(spec.id).join("manifest.json").display()
+            )
+        }),
+        Err(error) => Some(error),
+    }
 }
 
 pub(crate) fn installed_acceleration(runtime: &str) -> Option<String> {
@@ -622,7 +828,96 @@ fn select_acceleration(has_cuda13: bool, gpus: &[(u32, f32)]) -> RuntimeAccelera
 }
 
 fn choose_acceleration(spec: RuntimeSpec) -> RuntimeAcceleration {
+    // 已经装好的副本优先沿用它的后端：否则每次按硬件重算都可能选到另一种归档，
+    // 把可用安装判成「版本不符」再触发一整包重新下载。
+    installed_acceleration_preference(spec).unwrap_or_else(|| hardware_acceleration(spec))
+}
+
+fn hardware_acceleration(spec: RuntimeSpec) -> RuntimeAcceleration {
     select_acceleration(!spec.cuda13.is_empty(), &detected_gpus())
+}
+
+/// 直接读清单里的后端，不做接管、不做校验（`choose_acceleration` 会在接管流程里被调用，
+/// 走完整加载会形成递归）。
+fn installed_acceleration_preference(spec: RuntimeSpec) -> Option<RuntimeAcceleration> {
+    let target = install_root().ok()?.join(spec.id);
+    let text = fs::read_to_string(target.join("manifest.json")).ok()?;
+    let manifest: RuntimeManifest = serde_json::from_str(&text).ok()?;
+    (manifest.runtime == spec.id && manifest.version == spec.version)
+        .then_some(manifest.acceleration)
+}
+
+/// 安装时显式指定后端（界面「改用 Vulkan 重装」）。
+fn parse_acceleration(
+    spec: RuntimeSpec,
+    value: Option<&str>,
+) -> Result<RuntimeAcceleration, String> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(choose_acceleration(spec));
+    };
+    match value.to_ascii_lowercase().as_str() {
+        "auto" => Ok(choose_acceleration(spec)),
+        "vulkan" => Ok(RuntimeAcceleration::Vulkan),
+        "cuda" | "cuda12" | "cuda-12.4" => Ok(RuntimeAcceleration::Cuda),
+        "cuda13" | "cuda-13" => Ok(RuntimeAcceleration::Cuda13),
+        other => Err(format!(
+            "Unsupported runtime acceleration: {other} (expected auto, vulkan, cuda or cuda13)"
+        )),
+    }
+}
+
+/// 目录是不是 CUDA 构建，以及是否缺了 CUDA 运行时 DLL。缺 `cudart64_*.dll` 时进程会在
+/// 启动阶段以 `0xc0000135`（STATUS_DLL_NOT_FOUND）退出，只报退出码看不出原因。
+pub(crate) fn runtime_health_issue(runtime: &str) -> Option<String> {
+    let spec = runtime_spec(runtime).ok()?;
+    let target = install_root().ok()?.join(spec.id);
+    if !target.is_dir() {
+        return None;
+    }
+    let acceleration = detect_acceleration(&target)?;
+    if acceleration == RuntimeAcceleration::Vulkan {
+        return None;
+    }
+    let has_cudart = directory_contains(&target, "cudart64");
+    if has_cudart {
+        return None;
+    }
+    // llama.cpp 在 CUDA 后端不可用时会退回 CPU 继续跑；audio.cpp / stable-diffusion.cpp
+    // 是静态链接 cudart 的，缺 DLL 直接在启动阶段以 0xc0000135 退出。
+    let outcome = if spec.id == "llama.cpp" {
+        "CUDA 加速不可用，llama.cpp 会退回 CPU 运行（明显更慢）"
+    } else {
+        "进程会在启动时以 0xc0000135（缺少 DLL）退出"
+    };
+    Some(format!(
+        "{runtime} 是 CUDA 构建，但目录里没有 cudart64_*.dll（CUDA 运行时归档没有解压进来），{outcome}。\
+         用「改用 Vulkan 重装」装体积更小的 Vulkan 版本，或把固定归档里的 cudart 压缩包补齐到同一目录。"
+    ))
+}
+
+fn directory_contains(root: &Path, needle: &str) -> bool {
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    while let Some((directory, depth)) = stack.pop() {
+        if depth > 2 {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push((path, depth + 1));
+            } else if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.to_ascii_lowercase().contains(needle))
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn extract_zip(archive: &Path, destination: &Path) -> Result<(), String> {
@@ -683,47 +978,65 @@ fn installed_result(
 }
 
 #[tauri::command]
-pub async fn ensure_local_runtime(runtime: String) -> Result<RuntimeInstallResult, String> {
-    let spec = runtime_spec(&runtime)?;
-    let acceleration = choose_acceleration(spec);
-    let mut repair_performed = false;
-    match load_installed_manifest(spec, acceleration) {
-        Ok(Some((manifest, executable))) => {
-            return Ok(installed_result(spec, manifest, executable, true, false));
-        }
-        Ok(None) => {}
-        Err(error) => {
-            repair_performed = true;
-            crate::logging::log_event(
-                crate::logging::LogLevel::Warn,
-                "runtime",
-                "Local runtime integrity check failed; automatic repair scheduled",
-                Some(json!({ "runtime": spec.id, "error": error })),
-            );
-        }
+pub async fn ensure_local_runtime(
+    runtime: String,
+    force: Option<bool>,
+    acceleration: Option<String>,
+) -> Result<RuntimeInstallResult, String> {
+    let force = force.unwrap_or(false);
+    let result = install_runtime(&runtime, force, acceleration.as_deref()).await;
+    if let Err(error) = &result {
+        crate::logging::log_event(
+            crate::logging::LogLevel::Error,
+            "runtime",
+            "Local runtime installation failed",
+            Some(json!({
+                "runtime": runtime,
+                "force": force,
+                "acceleration": acceleration,
+                "error": error
+            })),
+        );
+    }
+    result
+}
+
+async fn install_runtime(
+    runtime: &str,
+    force: bool,
+    acceleration: Option<&str>,
+) -> Result<RuntimeInstallResult, String> {
+    let spec = runtime_spec(runtime)?;
+    let acceleration = parse_acceleration(spec, acceleration)?;
+    let mut repair_performed = force;
+    if force {
+        crate::logging::log_event(
+            crate::logging::LogLevel::Info,
+            "runtime",
+            "Forced runtime reinstall requested; ignoring the installed copy",
+            Some(json!({ "runtime": spec.id })),
+        );
+    } else if let Ok(Some((manifest, executable))) = load_installed_manifest(spec, acceleration) {
+        return Ok(installed_result(spec, manifest, executable, true, false));
     }
 
     let lock = INSTALL_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().await;
-    match load_installed_manifest(spec, acceleration) {
-        Ok(Some((manifest, executable))) => {
-            return Ok(installed_result(
-                spec,
-                manifest,
-                executable,
-                true,
-                repair_performed,
-            ));
-        }
-        Ok(None) => {}
-        Err(error) => {
-            repair_performed = true;
-            crate::logging::log_event(
-                crate::logging::LogLevel::Warn,
-                "runtime",
-                "Local runtime is damaged; reinstalling from the pinned archive",
-                Some(json!({ "runtime": spec.id, "error": error })),
-            );
+    if !force {
+        match load_installed_manifest(spec, acceleration) {
+            Ok(Some((manifest, executable))) => {
+                return Ok(installed_result(spec, manifest, executable, true, false));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                repair_performed = true;
+                crate::logging::log_event(
+                    crate::logging::LogLevel::Warn,
+                    "runtime",
+                    "Local runtime is damaged; reinstalling from the pinned archive",
+                    Some(json!({ "runtime": spec.id, "error": error })),
+                );
+            }
         }
     }
 
@@ -814,6 +1127,7 @@ pub async fn ensure_local_runtime(runtime: String) -> Result<RuntimeInstallResul
         executable: executable_relative.to_string_lossy().to_string(),
         files,
         installed_at: chrono::Utc::now().to_rfc3339(),
+        source: ManifestSource::Pinned,
     };
     crate::write_atomic(
         &staging.join("manifest.json"),
@@ -1007,6 +1321,7 @@ mod tests {
             executable: "bin/audiocpp_server.exe".to_string(),
             files: vec![file.clone()],
             installed_at: "2026-11-16T00:00:00Z".to_string(),
+            source: ManifestSource::Pinned,
         };
         let value: serde_json::Value = serde_json::to_value(manifest).expect("manifest");
         assert_eq!(
@@ -1041,10 +1356,207 @@ mod tests {
     }
 
     #[test]
-    fn legacy_manifest_without_hashes_requires_repair() {
+    #[ignore = "requires KNOWMOTION_RUNTIME_ROOT pointing at an existing runtimes directory"]
+    fn adopts_legacy_manifests_of_installed_runtimes() {
+        let root = std::env::var("KNOWMOTION_RUNTIME_ROOT").expect("runtime root");
+        configure(PathBuf::from(&root));
+        for runtime in ["llama.cpp", "audio.cpp", "stable-diffusion.cpp"] {
+            let executable = installed_executable(runtime).unwrap_or_else(|| {
+                panic!(
+                    "{runtime} is unusable: {:?}",
+                    installed_executable_diagnostic(runtime)
+                )
+            });
+            assert!(
+                executable.is_file(),
+                "{runtime} executable is missing: {}",
+                executable.display()
+            );
+            // 这三份是手工放进去的 CUDA 构建，缺 cudart：诊断必须点出原因，而不是笼统说未安装。
+            let diagnostic = installed_executable_diagnostic(runtime).unwrap_or_default();
+            assert!(
+                diagnostic.contains("cudart64"),
+                "{runtime} diagnostic should mention cudart: {diagnostic}"
+            );
+            println!("{runtime} -> {} | {diagnostic}", executable.display());
+        }
+        // 已经装好的运行时不能再去下载：第二次 ensure 必须命中「已安装」，且不带 repair。
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        for id in ["audio.cpp", "stable-diffusion.cpp"] {
+            let result = runtime
+                .block_on(ensure_local_runtime(id.to_string(), None, None))
+                .expect("ensure installed runtime");
+            assert!(result.already_installed, "{id} should be already installed");
+            assert!(!result.repair_performed, "{id} should not need a repair");
+            println!("{id} ensure -> {}", result.executable_path);
+        }
+    }
+
+    #[test]
+    fn adopts_a_hand_placed_runtime_without_a_manifest() {
+        // 用户手工解压运行时到 runtimes/<id>/：没有 manifest.json，只有一堆文件。
         let root = tempdir().expect("temporary directory");
-        let error = verify_runtime_files(root.path(), &[]).expect_err("legacy manifest");
+        fs::write(root.path().join("llama-server.exe"), b"server").expect("executable");
+        fs::write(root.path().join("ggml-vulkan.dll"), b"vulkan").expect("vulkan library");
+        let spec = runtime_spec("llama.cpp").expect("llama spec");
+        let adopted = adopt_hand_placed_runtime(spec, root.path(), RuntimeAcceleration::Cuda)
+            .expect("adoption")
+            .expect("runtime adopted");
+        assert_eq!(adopted.0.source, ManifestSource::HandPlaced);
+        assert_eq!(adopted.0.acceleration, RuntimeAcceleration::Vulkan);
+        assert!(adopted.0.archives.is_empty());
+        assert_eq!(adopted.0.files.len(), 2);
+        assert_eq!(adopted.1, root.path().join("llama-server.exe"));
+        let persisted = root.path().join("manifest.json");
+        assert!(persisted.is_file(), "manifest should be written");
+        // 接管后的副本走逐文件校验，篡改仍会被发现。
+        reset_verification_cache();
+        fs::write(root.path().join("ggml-vulkan.dll"), b"tampered").expect("tamper");
+        let error = verify_or_adopt(root.path(), adopted.0).expect_err("tampered copy");
+        assert!(error.contains("mismatch"), "{error}");
+    }
+
+    #[test]
+    fn ignores_directories_without_the_expected_executable() {
+        let root = tempdir().expect("temporary directory");
+        fs::write(root.path().join("readme.txt"), b"nothing here").expect("readme");
+        let spec = runtime_spec("audio.cpp").expect("audio spec");
+        assert!(
+            adopt_hand_placed_runtime(spec, root.path(), RuntimeAcceleration::Vulkan)
+                .expect("no error")
+                .is_none(),
+            "a directory without audiocpp_server.exe must stay uninstalled"
+        );
+    }
+
+    #[test]
+    fn detects_the_acceleration_of_a_hand_placed_runtime() {
+        let vulkan = tempdir().expect("temporary directory");
+        fs::write(vulkan.path().join("ggml-vulkan.dll"), b"v").expect("vulkan");
+        assert_eq!(
+            detect_acceleration(vulkan.path()),
+            Some(RuntimeAcceleration::Vulkan)
+        );
+
+        let cuda13 = tempdir().expect("temporary directory");
+        fs::write(cuda13.path().join("ggml-cuda.dll"), b"c").expect("cuda");
+        fs::write(cuda13.path().join("cudart64_13.dll"), b"r").expect("cudart");
+        assert_eq!(
+            detect_acceleration(cuda13.path()),
+            Some(RuntimeAcceleration::Cuda13)
+        );
+
+        let cuda = tempdir().expect("temporary directory");
+        fs::write(cuda.path().join("ggml-cuda.dll"), b"c").expect("cuda");
+        fs::write(cuda.path().join("cudart64_12.dll"), b"r").expect("cudart");
+        assert_eq!(
+            detect_acceleration(cuda.path()),
+            Some(RuntimeAcceleration::Cuda)
+        );
+
+        let unknown = tempdir().expect("temporary directory");
+        fs::write(unknown.path().join("ggml-base.dll"), b"b").expect("base");
+        assert_eq!(detect_acceleration(unknown.path()), None);
+    }
+
+    #[test]
+    fn parses_explicit_runtime_acceleration() {
+        let spec = runtime_spec("llama.cpp").expect("llama spec");
+        assert_eq!(
+            parse_acceleration(spec, Some("vulkan")).expect("vulkan"),
+            RuntimeAcceleration::Vulkan
+        );
+        assert_eq!(
+            parse_acceleration(spec, Some("CUDA13")).expect("cuda13"),
+            RuntimeAcceleration::Cuda13
+        );
+        assert_eq!(
+            parse_acceleration(spec, Some("cuda-12.4")).expect("cuda"),
+            RuntimeAcceleration::Cuda
+        );
+        assert!(parse_acceleration(spec, Some("opencl")).is_err());
+    }
+
+    #[test]
+    fn finds_runtime_dependencies_by_file_name() {
+        let root = tempdir().expect("temporary directory");
+        fs::write(root.path().join("cudart64_13.dll"), b"runtime").expect("cudart");
+        assert!(directory_contains(root.path(), "cudart64"));
+        assert!(!directory_contains(root.path(), "cublas"));
+    }
+
+    #[test]
+    fn verify_rejects_an_empty_file_list() {
+        // verify_runtime_files 自身仍然拒绝空列表：只有在 verify_or_adopt 里才会先补算哈希。
+        let root = tempdir().expect("temporary directory");
+        let error = verify_runtime_files(root.path(), &[]).expect_err("empty list");
         assert!(error.contains("no per-file integrity"));
+    }
+
+    #[test]
+    fn legacy_manifest_is_upgraded_without_reinstalling() {
+        let root = tempdir().expect("temporary directory");
+        let bin = root.path().join("bin");
+        fs::create_dir_all(&bin).expect("bin directory");
+        fs::write(bin.join("server.exe"), b"server").expect("executable");
+        fs::write(bin.join("runtime.dll"), b"library").expect("library");
+        let manifest = RuntimeManifest {
+            runtime: "audio.cpp".to_string(),
+            version: "v0.9.5".to_string(),
+            acceleration: RuntimeAcceleration::Vulkan,
+            archives: vec!["a".repeat(64)],
+            executable: "bin/server.exe".to_string(),
+            files: Vec::new(),
+            installed_at: "2026-11-16T00:00:00Z".to_string(),
+            source: ManifestSource::Pinned,
+        };
+        let upgraded = verify_or_adopt(root.path(), manifest).expect("adoption");
+        assert_eq!(upgraded.files.len(), 2);
+        assert!(upgraded
+            .files
+            .iter()
+            .any(|file| file.path == "bin/server.exe"));
+        let persisted: RuntimeManifest = serde_json::from_str(
+            &fs::read_to_string(root.path().join("manifest.json")).expect("manifest on disk"),
+        )
+        .expect("valid manifest");
+        assert_eq!(persisted.files, upgraded.files);
+        // 重启应用后（缓存清空）升级后的清单立刻进入严格校验路径。
+        reset_verification_cache();
+        verify_or_adopt(root.path(), persisted).expect("strict verification");
+    }
+
+    #[test]
+    fn adopted_manifests_still_detect_changed_files() {
+        let root = tempdir().expect("temporary directory");
+        let bin = root.path().join("bin");
+        fs::create_dir_all(&bin).expect("bin directory");
+        fs::write(bin.join("server.exe"), b"server").expect("executable");
+        fs::write(bin.join("runtime.dll"), b"library").expect("library");
+        let manifest = RuntimeManifest {
+            runtime: "llama.cpp".to_string(),
+            version: "b12359".to_string(),
+            acceleration: RuntimeAcceleration::Vulkan,
+            archives: vec!["b".repeat(64)],
+            executable: "bin/server.exe".to_string(),
+            files: Vec::new(),
+            installed_at: "2026-11-16T00:00:00Z".to_string(),
+            source: ManifestSource::Pinned,
+        };
+        let upgraded = verify_or_adopt(root.path(), manifest).expect("adoption");
+        fs::write(bin.join("runtime.dll"), b"corrupted").expect("corrupt library");
+        // 同进程内命中校验缓存，必须模拟重启（清缓存）才会重新哈希磁盘文件。
+        reset_verification_cache();
+        let error = verify_or_adopt(root.path(), upgraded).expect_err("tampered runtime");
+        assert!(
+            error.contains("size mismatch") || error.contains("checksum mismatch"),
+            "{error}"
+        );
+        // 清空文件列表的旧行为（直接下结论“没有完整性数据”）不再出现。
+        assert!(!error.contains("no per-file integrity"));
     }
 
     #[test]
@@ -1061,6 +1573,7 @@ mod tests {
             executable: "../outside.exe".to_string(),
             files: Vec::new(),
             installed_at: "2026-11-16T00:00:00Z".to_string(),
+            source: ManifestSource::Pinned,
         };
         assert!(manifest_executable(root.path(), &manifest).is_err());
         let _ = fs::remove_file(outside);

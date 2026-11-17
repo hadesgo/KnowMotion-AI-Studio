@@ -1,7 +1,7 @@
 use super::model::ProviderConfig;
 use super::provider::{LlmProvider, LlmRequest, LlmResponse};
 use crate::job_object::ProcessJobObject;
-use crate::local_model_scheduler::GpuLease;
+use crate::local_model_scheduler::{acquire_gpu, GpuLease, Workload};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::{json, Value};
@@ -19,12 +19,60 @@ use std::{
 use uuid::Uuid;
 
 const DEFAULT_CONTEXT_SIZE: u32 = 8192;
+/// 嵌入模型（EmbeddingGemma / bge-m3 一类）的训练上下文通常只有 512–2048，
+/// 用聊天模型的 8192 会白占 KV 缓存。
+const DEFAULT_EMBEDDING_CONTEXT_SIZE: u32 = 2048;
 const MIN_CONTEXT_SIZE: u32 = 512;
+const MIN_EMBEDDING_CONTEXT_SIZE: u32 = 128;
 const MAX_CONTEXT_SIZE: u32 = 1_048_576;
+const MAX_EMBEDDING_CONTEXT_SIZE: u32 = 32_768;
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(300);
+const EMBEDDING_REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_SERVER_LOG_BYTES: usize = 64 * 1024;
 
-static SERVER_CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<LlamaServer>>>> = OnceLock::new();
+/// 同一个 GGUF 文件按用途需要两套互不兼容的启动参数：聊天要 `--jinja` 模板渲染，
+/// 嵌入要 `--embeddings` 打开向量端点。缓存键必须带上模式，否则先跑的聊天服务会被
+/// 当成嵌入服务复用，`/v1/embeddings` 直接 501。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ServerMode {
+    Chat,
+    Embedding,
+}
+
+impl ServerMode {
+    fn extra_args(self) -> &'static [&'static str] {
+        match self {
+            Self::Chat => &["--jinja"],
+            Self::Embedding => &["--embeddings"],
+        }
+    }
+
+    fn default_context_size(self) -> u32 {
+        match self {
+            Self::Chat => DEFAULT_CONTEXT_SIZE,
+            Self::Embedding => DEFAULT_EMBEDDING_CONTEXT_SIZE,
+        }
+    }
+
+    fn context_bounds(self) -> (u32, u32) {
+        match self {
+            Self::Chat => (MIN_CONTEXT_SIZE, MAX_CONTEXT_SIZE),
+            Self::Embedding => (MIN_EMBEDDING_CONTEXT_SIZE, MAX_EMBEDDING_CONTEXT_SIZE),
+        }
+    }
+
+    fn display_label(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Embedding => "embedding",
+        }
+    }
+}
+
+/// 缓存键必须是 `(模型文件, 用途)`：同一份 GGUF 的聊天服务与嵌入服务参数不同。
+type ServerCache = Mutex<HashMap<(PathBuf, ServerMode), Arc<LlamaServer>>>;
+
+static SERVER_CACHE: OnceLock<ServerCache> = OnceLock::new();
 static RUNTIME_RESOURCE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 pub struct GgufLlmProvider {
@@ -160,6 +208,111 @@ impl LlmProvider for GgufLlmProvider {
     }
 }
 
+pub(crate) struct LocalEmbeddingOutcome {
+    pub vectors: Vec<Vec<f32>>,
+    pub backend: String,
+    pub model: String,
+}
+
+/// 用本地 llama.cpp 加载 GGUF 嵌入模型取向量。GPU 租约在这里申请，函数返回时释放，
+/// 空闲回收由调度器的 LRU 定时器负责，和聊天模型共用同一套运行时与进程管理。
+pub(crate) async fn embed_with_local_runtime(
+    config: &ProviderConfig,
+    texts: Vec<String>,
+) -> Result<LocalEmbeddingOutcome, String> {
+    if texts.is_empty() {
+        return Err("Embedding request contains no text".to_string());
+    }
+    let lease = acquire_gpu(
+        Workload::Llm,
+        &config.id,
+        &config.base_url,
+        config.runtime.as_ref(),
+        config.inference_backend.as_deref(),
+    )
+    .await?;
+    let owned = config.clone();
+    let server =
+        tokio::task::spawn_blocking(move || load_cached_server_mode(&owned, ServerMode::Embedding))
+            .await
+            .map_err(|error| format!("GGUF embedding model loading task failed: {error}"))??;
+    // 租约要活到请求结束：加载与推理都占显存，提前释放会让调度器把进程回收掉。
+    let _lease = lease;
+    let _activity = ServerActivity(&server.last_used);
+    let client = Client::builder()
+        .timeout(EMBEDDING_REQUEST_TIMEOUT)
+        .connect_timeout(Duration::from_secs(2))
+        .user_agent("KnowMotion-AI-Studio/0.1")
+        .build()
+        .map_err(|error| format!("Unable to create llama.cpp client: {error}"))?;
+    let response = client
+        .post(format!("{}/v1/embeddings", server.base_url))
+        .bearer_auth(&server.api_key)
+        .json(&json!({ "model": server.model_alias, "input": texts }))
+        .send()
+        .await
+        .map_err(|error| {
+            if error.is_timeout() {
+                format!(
+                    "llama.cpp {} request timed out",
+                    server.mode.display_label()
+                )
+            } else {
+                format!(
+                    "llama.cpp {} request failed: {}",
+                    server.mode.display_label(),
+                    redact_error(&error.to_string())
+                )
+            }
+        })?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!(
+            "llama.cpp {} returned {status}: {}",
+            server.mode.display_label(),
+            sanitize_server_error(&body)
+        ));
+    }
+    let payload: Value = serde_json::from_str(&body)
+        .map_err(|error| format!("Invalid llama.cpp embedding response: {error}"))?;
+    Ok(LocalEmbeddingOutcome {
+        vectors: embedding_vectors_from_payload(&payload)?,
+        backend: server.backend_label.clone(),
+        model: server.model_alias.clone(),
+    })
+}
+
+/// 云端 `OpenAI Compatible` 与本地 llama.cpp 的 `/v1/embeddings` 返回同一形状：
+/// `{"data":[{"embedding":[...]}]}`。llama.cpp 的 legacy `/embeddings` 裸数组形态必须
+/// 判成错误，否则会静默拿到空向量、把检索质量算成零。
+pub(crate) fn embedding_vectors_from_payload(payload: &Value) -> Result<Vec<Vec<f32>>, String> {
+    let data = payload
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Embedding response has no data array".to_string())?;
+    if data.is_empty() {
+        return Err("Embedding response returned no vectors".to_string());
+    }
+    data.iter()
+        .map(|item| {
+            let vector = item
+                .get("embedding")
+                .and_then(Value::as_array)
+                .ok_or_else(|| "Embedding item has no vector".to_string())?;
+            vector
+                .iter()
+                .map(|value| {
+                    value
+                        .as_f64()
+                        .map(|value| value as f32)
+                        .ok_or_else(|| "Embedding vector contains a non-number".to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BackendPreference {
     Auto,
@@ -187,6 +340,7 @@ struct LlamaServer {
     model_alias: String,
     context_size: u32,
     preference: BackendPreference,
+    mode: ServerMode,
     log: Arc<Mutex<String>>,
     last_used: Mutex<Instant>,
 }
@@ -256,18 +410,18 @@ pub(crate) fn unload_idle(max_idle: Duration) -> usize {
     };
     let stale = cache
         .iter()
-        .filter_map(|(path, server)| {
+        .filter_map(|(key, server)| {
             let idle = server
                 .last_used
                 .lock()
                 .map(|last_used| last_used.elapsed() >= max_idle)
                 .unwrap_or(false);
-            (idle || server.exit_status().is_some()).then(|| path.clone())
+            (idle || server.exit_status().is_some()).then(|| key.clone())
         })
         .collect::<Vec<_>>();
     let count = stale.len();
-    for path in stale {
-        if let Some(server) = cache.remove(&path) {
+    for key in stale {
+        if let Some(server) = cache.remove(&key) {
             server.stop();
         }
     }
@@ -275,11 +429,19 @@ pub(crate) fn unload_idle(max_idle: Duration) -> usize {
 }
 
 fn load_cached_server(config: &ProviderConfig) -> Result<Arc<LlamaServer>, String> {
+    load_cached_server_mode(config, ServerMode::Chat)
+}
+
+fn load_cached_server_mode(
+    config: &ProviderConfig,
+    mode: ServerMode,
+) -> Result<Arc<LlamaServer>, String> {
     let model_path = validate_model_path(&config.base_url)?;
+    let (min_context, max_context) = mode.context_bounds();
     let context_size = config
         .context_size
-        .unwrap_or(DEFAULT_CONTEXT_SIZE)
-        .clamp(MIN_CONTEXT_SIZE, MAX_CONTEXT_SIZE);
+        .unwrap_or(mode.default_context_size())
+        .clamp(min_context, max_context);
     let preference = BackendPreference::from_config(config.inference_backend.as_deref())?;
     let model_alias = configured_model_name(config);
     let cache = SERVER_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
@@ -287,7 +449,8 @@ fn load_cached_server(config: &ProviderConfig) -> Result<Arc<LlamaServer>, Strin
         .lock()
         .map_err(|_| "llama.cpp server cache is unavailable".to_string())?;
 
-    if let Some(cached) = cache.get(&model_path) {
+    let cache_key = (model_path.clone(), mode);
+    if let Some(cached) = cache.get(&cache_key) {
         if cached.context_size == context_size
             && cached.preference == preference
             && cached.model_alias == model_alias
@@ -295,7 +458,7 @@ fn load_cached_server(config: &ProviderConfig) -> Result<Arc<LlamaServer>, Strin
             return Ok(Arc::clone(cached));
         }
     }
-    if let Some(stale) = cache.remove(&model_path) {
+    if let Some(stale) = cache.remove(&cache_key) {
         stale.stop();
     }
 
@@ -320,6 +483,7 @@ fn load_cached_server(config: &ProviderConfig) -> Result<Arc<LlamaServer>, Strin
         preference,
         use_gpu,
         gpu_devices.first(),
+        mode,
     ) {
         Ok(server) => server,
         Err(gpu_error) if preference == BackendPreference::Auto && use_gpu => start_server(
@@ -330,6 +494,7 @@ fn load_cached_server(config: &ProviderConfig) -> Result<Arc<LlamaServer>, Strin
             preference,
             false,
             None,
+            mode,
         )
         .map_err(|cpu_error| {
             format!("Unable to start llama.cpp with GPU ({gpu_error}) or CPU ({cpu_error})")
@@ -337,7 +502,7 @@ fn load_cached_server(config: &ProviderConfig) -> Result<Arc<LlamaServer>, Strin
         Err(error) => return Err(error),
     };
     let server = Arc::new(server);
-    cache.insert(model_path, Arc::clone(&server));
+    cache.insert(cache_key, Arc::clone(&server));
     Ok(server)
 }
 
@@ -350,6 +515,7 @@ fn start_server(
     preference: BackendPreference,
     use_gpu: bool,
     gpu_device: Option<&GpuDevice>,
+    mode: ServerMode,
 ) -> Result<LlamaServer, String> {
     let port = reserve_loopback_port()?;
     let api_key = Uuid::new_v4().to_string();
@@ -366,7 +532,6 @@ fn start_server(
         .arg("127.0.0.1")
         .arg("--port")
         .arg(port.to_string())
-        .arg("--jinja")
         .arg("--no-webui")
         .current_dir(executable.parent().unwrap_or_else(|| Path::new(".")))
         .stdin(Stdio::null())
@@ -374,6 +539,9 @@ fn start_server(
         .stderr(Stdio::piped())
         .env("LLAMA_LOG_COLORS", "0")
         .env("LLAMA_API_KEY", &api_key);
+    for argument in mode.extra_args() {
+        command.arg(argument);
+    }
     if use_gpu {
         command.arg("--n-gpu-layers").arg("auto");
     } else {
@@ -423,6 +591,7 @@ fn start_server(
         model_alias: model_alias.to_string(),
         context_size,
         preference,
+        mode,
         log,
         last_used: Mutex::new(Instant::now()),
     };
@@ -553,10 +722,12 @@ fn find_server_executable() -> Result<PathBuf, String> {
                 .map_err(|error| format!("Unable to resolve llama.cpp server: {error}"));
         }
     }
-    Err(
-        "llama.cpp runtime is not installed. Select a local GGUF model in Models to download it."
-            .to_string(),
-    )
+    let diagnostic = crate::local_runtime::installed_executable_diagnostic("llama.cpp")
+        .map(|reason| format!(" ({reason})"))
+        .unwrap_or_default();
+    Err(format!(
+        "llama.cpp runtime is not usable{diagnostic}. Reinstall it from Models, or set KNOWMOTION_LLAMA_SERVER to an existing llama-server.exe."
+    ))
 }
 
 fn list_gpu_devices(executable: &Path) -> Vec<GpuDevice> {
@@ -612,6 +783,9 @@ fn validate_model_path(value: &str) -> Result<PathBuf, String> {
         return Err("GGUF model file path is empty".to_string());
     }
     let path = Path::new(trimmed);
+    if path.is_dir() {
+        return pick_model_from_directory(path);
+    }
     if !path
         .extension()
         .and_then(|extension| extension.to_str())
@@ -632,6 +806,66 @@ fn validate_model_path(value: &str) -> Result<PathBuf, String> {
         return Err("GGUF model file is empty".to_string());
     }
     path.canonicalize()
+        .map_err(|error| format!("Unable to resolve GGUF model path: {error}"))
+}
+
+/// 允许直接填模型目录（例如 `models/embeddinggemma-2`）：目录里常同时放着主模型和
+/// `mmproj-*.gguf` 多模态投影器，投影器不能单独加载，必须先排除，否则 llama.cpp 会
+/// 以「不支持该架构」启动失败。
+fn pick_model_from_directory(directory: &Path) -> Result<PathBuf, String> {
+    let entries = std::fs::read_dir(directory)
+        .map_err(|error| format!("Unable to read GGUF model directory: {error}"))?;
+    let mut candidates = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("gguf"))
+        })
+        .filter(|path| {
+            !path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.to_ascii_lowercase().contains("mmproj"))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return Err(format!(
+            "No loadable .gguf model found in {}",
+            directory.display()
+        ));
+    }
+    if candidates.len() > 1 {
+        // 目录里有多份可加载模型时不做猜测：猜错会把聊天模型当嵌入模型起服务，
+        // 或者只加载到一个分片。把候选列出来，让用户直接填目标文件的完整路径。
+        let names = candidates
+            .iter()
+            .filter_map(|path| path.file_name().and_then(|name| name.to_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(format!(
+            "Model directory {} contains several .gguf files ({names}); pass the exact model file path instead",
+            directory.display()
+        ));
+    }
+    let chosen = candidates.remove(0);
+    crate::logging::info(
+        "agent.gguf",
+        &format!(
+            "Resolved GGUF model directory {} to {}",
+            directory.display(),
+            chosen
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+        ),
+    );
+    chosen
+        .canonicalize()
         .map_err(|error| format!("Unable to resolve GGUF model path: {error}"))
 }
 
@@ -767,6 +1001,47 @@ mod tests {
     }
 
     #[test]
+    fn resolves_a_model_directory_and_skips_the_multimodal_projector() {
+        // 真实目录形状：embeddinggemma-2/{embeddinggemma-2-Q8_0.gguf, mmproj-Q8_0.gguf}
+        let directory = tempfile::tempdir().expect("temp directory");
+        let model = directory.path().join("embeddinggemma-2-Q8_0.gguf");
+        let projector = directory.path().join("mmproj-Q8_0.gguf");
+        std::fs::write(&model, vec![0_u8; 4096]).expect("model");
+        std::fs::write(&projector, vec![0_u8; 8192]).expect("projector");
+        assert_eq!(
+            validate_model_path(directory.path().to_str().expect("utf-8 path")).expect("model"),
+            model.canonicalize().expect("canonical")
+        );
+    }
+
+    #[test]
+    fn rejects_ambiguous_model_directories() {
+        // 两份可加载模型时不做猜测，错误信息要列出候选文件名。
+        let directory = tempfile::tempdir().expect("temp directory");
+        std::fs::write(
+            directory.path().join("Qwen3-4B-Q4_K_M.gguf"),
+            vec![0_u8; 8192],
+        )
+        .expect("chat model");
+        std::fs::write(directory.path().join("bge-m3-f16.gguf"), vec![0_u8; 4096])
+            .expect("embedding model");
+        let error = validate_model_path(directory.path().to_str().expect("utf-8 path"))
+            .expect_err("ambiguous directory");
+        assert!(error.contains("several .gguf files"), "{error}");
+        assert!(error.contains("bge-m3-f16.gguf"), "{error}");
+        assert!(error.contains("Qwen3-4B-Q4_K_M.gguf"), "{error}");
+    }
+
+    #[test]
+    fn rejects_a_directory_without_gguf_models() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        std::fs::write(directory.path().join("readme.txt"), b"no models").expect("readme");
+        let error = validate_model_path(directory.path().to_str().expect("utf-8 path"))
+            .expect_err("no model");
+        assert!(error.contains("No loadable .gguf model"), "{error}");
+    }
+
+    #[test]
     fn parses_llama_cpp_openai_response() {
         let response = parse_completion_response(
             "qwen-local",
@@ -852,5 +1127,97 @@ mod tests {
         assert!(local_inference_timeout(6000) > LOCAL_INFERENCE_TIMEOUT_FLOOR);
         assert_eq!(local_inference_timeout(6000).as_secs(), 180 + 900);
         assert!(local_inference_timeout(8000) > local_inference_timeout(6000));
+    }
+
+    #[test]
+    fn embedding_mode_starts_the_server_with_the_embeddings_flag() {
+        assert_eq!(ServerMode::Embedding.extra_args(), ["--embeddings"]);
+        assert_eq!(ServerMode::Chat.extra_args(), ["--jinja"]);
+        assert_ne!(ServerMode::Chat, ServerMode::Embedding);
+    }
+
+    #[test]
+    fn embedding_mode_uses_a_smaller_default_context() {
+        assert_eq!(ServerMode::Chat.default_context_size(), 8192);
+        assert_eq!(ServerMode::Embedding.default_context_size(), 2048);
+        let (min, max) = ServerMode::Embedding.context_bounds();
+        assert!(min <= 2048 && max < ServerMode::Chat.context_bounds().1);
+    }
+
+    #[test]
+    fn parses_embedding_vectors_from_openai_shaped_payload() {
+        let vectors = embedding_vectors_from_payload(&json!({
+            "data": [
+                {"index": 0, "embedding": [0.5, -1.0]},
+                {"index": 1, "embedding": [0.0, 2.0]}
+            ]
+        }))
+        .expect("vectors");
+        assert_eq!(vectors, vec![vec![0.5, -1.0], vec![0.0, 2.0]]);
+    }
+
+    #[test]
+    fn rejects_legacy_embedding_payload_shapes() {
+        // llama.cpp 的 legacy `/embeddings` 返回裸对象数组：不能当成有效向量，
+        // 否则检索会拿到空结果还显示“成功”。
+        let error = embedding_vectors_from_payload(&json!([
+            {"embedding": [0.1, 0.2]}
+        ]))
+        .expect_err("legacy shape");
+        assert!(error.contains("no data array"), "{error}");
+        assert!(embedding_vectors_from_payload(&json!({"data": []}))
+            .unwrap_err()
+            .contains("no vectors"));
+    }
+
+    #[test]
+    #[ignore = "requires KNOWMOTION_GGUF_EMBEDDING_MODEL and the prepared llama.cpp runtime"]
+    fn embeds_with_the_packaged_llama_cpp_server() {
+        let model_path =
+            std::env::var("KNOWMOTION_GGUF_EMBEDDING_MODEL").expect("embedding GGUF model path");
+        let config = ProviderConfig {
+            id: "gguf-embedding-test".to_string(),
+            name: "GGUF embedding test".to_string(),
+            protocol: "GGUF".to_string(),
+            base_url: model_path,
+            model: "embeddinggemma".to_string(),
+            context_size: Some(2048),
+            inference_backend: Some("cpu".to_string()),
+            runtime: None,
+            enabled: true,
+            capabilities: vec!["Embedding".to_string()],
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        let outcome = runtime
+            .block_on(embed_with_local_runtime(
+                &config,
+                vec![
+                    "太阳为什么在傍晚变红".to_string(),
+                    "傍晚的阳光穿过更厚的大气层，蓝光被散射掉，只剩下红光。".to_string(),
+                    "Excel 透视表可以按季度汇总销售额。".to_string(),
+                ],
+            ))
+            .expect("local embeddings");
+        assert_eq!(outcome.vectors.len(), 3);
+        let dimensions = outcome.vectors[0].len();
+        assert!(dimensions > 0);
+        assert!(outcome
+            .vectors
+            .iter()
+            .all(|vector| vector.len() == dimensions));
+        let near = cosine(&outcome.vectors[0], &outcome.vectors[1]);
+        let far = cosine(&outcome.vectors[0], &outcome.vectors[2]);
+        assert!(near > far, "related {near} should beat unrelated {far}");
+        shutdown_runtime();
+    }
+
+    fn cosine(left: &[f32], right: &[f32]) -> f32 {
+        let dot: f32 = left.iter().zip(right).map(|(a, b)| a * b).sum();
+        let ln: f32 = left.iter().map(|value| value * value).sum::<f32>().sqrt();
+        let rn: f32 = right.iter().map(|value| value * value).sum::<f32>().sqrt();
+        dot / (ln * rn)
     }
 }

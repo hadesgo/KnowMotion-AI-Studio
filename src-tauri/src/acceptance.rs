@@ -386,6 +386,7 @@ async fn run_embedding(harness: &Harness) -> Value {
             // 否则 llama.cpp 会落到不兼容的 legacy `/embeddings` 形态。
             base_url: format!("{}/v1", server.base_url),
             model: "embeddinggemma".to_string(),
+            context_size: None,
             inference_backend: Some("gpu".to_string()),
             runtime: None,
             enabled: true,
@@ -482,6 +483,7 @@ fn audio_provider(
         protocol: "audio.cpp".to_string(),
         base_url: "http://127.0.0.1:8091".to_string(),
         model: model.to_string(),
+        context_size: None,
         inference_backend: Some("gpu".to_string()),
         runtime: Some(LocalRuntimeConfig {
             model_path: Some(harness.model(model_file).to_string_lossy().to_string()),
@@ -667,6 +669,7 @@ async fn run_image(harness: &Harness) -> Value {
         protocol: "stable-diffusion.cpp".to_string(),
         base_url: "http://127.0.0.1:1234".to_string(),
         model: "sd-cpp-local".to_string(),
+        context_size: None,
         inference_backend: Some("gpu".to_string()),
         runtime: Some(LocalRuntimeConfig {
             model_path: None,
@@ -949,6 +952,7 @@ fn inpaint_sd_provider(harness: &Harness) -> ImageProviderConfig {
         protocol: "stable-diffusion.cpp".to_string(),
         base_url: "http://127.0.0.1:1234".to_string(),
         model: "sd-cpp-local".to_string(),
+        context_size: None,
         inference_backend: Some("gpu".to_string()),
         runtime: Some(LocalRuntimeConfig {
             model_path: None,
@@ -995,6 +999,7 @@ fn cloud_inpaint_provider() -> Option<ImageProviderConfig> {
         model: env::var("KNOWMOTION_ACCEPTANCE_OPENAI_IMAGE_MODEL")
             .or_else(|_| env::var("OPENAI_IMAGE_MODEL"))
             .unwrap_or_else(|_| "gpt-image-1".to_string()),
+        context_size: None,
         inference_backend: None,
         runtime: None,
         enabled: true,
@@ -1433,6 +1438,7 @@ impl CloudConfig {
                 "ASR" => self.asr_model.clone(),
                 _ => self.embedding_model.clone(),
             },
+            context_size: None,
             inference_backend: None,
             runtime: None,
             enabled: true,

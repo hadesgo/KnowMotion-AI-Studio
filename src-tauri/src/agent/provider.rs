@@ -390,6 +390,14 @@ pub async fn test_provider(config: ProviderConfig) -> Result<ProviderTestResult,
         .iter()
         .any(|capability| capability == "LLM")
     {
+        if config.protocol == "GGUF"
+            && config
+                .capabilities
+                .iter()
+                .any(|capability| capability == "Embedding")
+        {
+            return test_local_embedding(config).await;
+        }
         let started = Instant::now();
         let mut _local_lease = None;
         if is_loopback_base_url(&config.base_url) {
@@ -518,6 +526,28 @@ pub async fn test_provider(config: ProviderConfig) -> Result<ProviderTestResult,
     })
 }
 
+/// 本地 GGUF 嵌入模型的连通性测试：真的起一次 llama.cpp 并取一条向量。
+/// `/models` 探测在本地通道没有意义 —— `base_url` 是模型文件路径，不是 HTTP 端点。
+async fn test_local_embedding(config: ProviderConfig) -> Result<ProviderTestResult, String> {
+    let started = Instant::now();
+    let outcome = super::gguf::embed_with_local_runtime(
+        &config,
+        vec!["KnowMotion embedding connection probe".to_string()],
+    )
+    .await?;
+    let dimensions = outcome.vectors.first().map(Vec::len).unwrap_or(0);
+    if dimensions == 0 {
+        return Err("Local GGUF embedding model returned an empty vector".to_string());
+    }
+    Ok(ProviderTestResult {
+        ok: true,
+        message: format!("本地嵌入模型加载成功，向量维度 {dimensions}"),
+        latency_ms: started.elapsed().as_millis(),
+        model: outcome.model,
+        backend: outcome.backend,
+    })
+}
+
 pub async fn resolve_provider(
     provider: &ProviderConfig,
     model: Option<String>,
@@ -643,5 +673,164 @@ mod tests {
         assert_eq!(runtime.model_path.as_deref(), Some("D:\\models\\qwen3-tts"));
         assert_eq!(runtime.model_family.as_deref(), Some("qwen3_tts"));
         assert_eq!(runtime.idle_unload_seconds, Some(45));
+    }
+
+    #[test]
+    #[ignore = "requires KNOWMOTION_RUNTIME_ROOT and a local GGUF embedding model"]
+    fn local_gguf_embedding_provider_test_passes_with_the_installed_runtime() {
+        // 复现「模型都下好了但检测失败」的用户路径：不设 KNOWMOTION_LLAMA_SERVER，
+        // 只靠已安装运行时（清单里的逐文件哈希）解析 llama-server。
+        crate::local_runtime::configure(std::path::PathBuf::from(
+            std::env::var("KNOWMOTION_RUNTIME_ROOT").expect("runtime root"),
+        ));
+        let model = std::env::var("KNOWMOTION_GGUF_EMBEDDING_MODEL")
+            .unwrap_or_else(|_| "D:\\code\\KnowMotion-AI-Studio\\models\\embeddinggemma-2".into());
+        let config = ProviderConfig {
+            id: "local-embedding-provider-test".to_string(),
+            name: "Local embedding".to_string(),
+            protocol: "GGUF".to_string(),
+            base_url: model,
+            model: "embeddinggemma".to_string(),
+            context_size: Some(2048),
+            inference_backend: Some("cpu".to_string()),
+            runtime: None,
+            enabled: true,
+            capabilities: vec!["Embedding".to_string()],
+        };
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        let result = runtime
+            .block_on(test_provider(config))
+            .expect("provider test should succeed");
+        assert!(result.ok);
+        assert!(
+            result.backend.starts_with("llama.cpp"),
+            "{}",
+            result.backend
+        );
+        println!("{} | {} | {}", result.message, result.backend, result.model);
+        crate::agent::shutdown_llama_runtime();
+    }
+
+    #[test]
+    #[ignore = "runs every local protocol against real models and installed runtimes"]
+    fn every_local_provider_passes_the_connection_test() {
+        // 复现 Models 页「检测」按钮的完整链路：请求体带 runtime（模型路径），
+        // 运行时只靠 runtimes/ 目录解析，不设 KNOWMOTION_LLAMA_SERVER 之类的覆盖。
+        use crate::local_model_scheduler::LocalRuntimeConfig;
+        let runtime_root = std::env::var("KNOWMOTION_RUNTIME_ROOT").expect("runtime root");
+        crate::local_runtime::configure(std::path::PathBuf::from(&runtime_root));
+        let scratch = tempfile::tempdir().expect("scheduler scratch");
+        crate::local_model_scheduler::configure(scratch.path().to_path_buf());
+        let models = std::path::PathBuf::from(
+            std::env::var("KNOWMOTION_MODELS_ROOT")
+                .unwrap_or_else(|_| "D:\\code\\KnowMotion-AI-Studio\\models".to_string()),
+        );
+        let local = |path: std::path::PathBuf| Some(path.to_string_lossy().to_string());
+        let cases = vec![
+            ProviderConfig {
+                id: "smoke-llm".to_string(),
+                name: "Qwen3.8-27B".to_string(),
+                protocol: "GGUF".to_string(),
+                base_url: models
+                    .join("Qwen3.8-27B/Qwen3.8-27B-UD-IQ2_S.gguf")
+                    .to_string_lossy()
+                    .to_string(),
+                model: "Qwen3.8-27B-UD-IQ2_S".to_string(),
+                context_size: Some(4096),
+                inference_backend: Some("auto".to_string()),
+                runtime: None,
+                enabled: true,
+                capabilities: vec!["LLM".to_string()],
+            },
+            ProviderConfig {
+                id: "smoke-embedding".to_string(),
+                name: "EmbeddingGemma".to_string(),
+                protocol: "GGUF".to_string(),
+                base_url: models
+                    .join("embeddinggemma-2")
+                    .to_string_lossy()
+                    .to_string(),
+                model: "embeddinggemma-2".to_string(),
+                context_size: Some(2048),
+                inference_backend: Some("auto".to_string()),
+                runtime: None,
+                enabled: true,
+                capabilities: vec!["Embedding".to_string()],
+            },
+            ProviderConfig {
+                id: "smoke-tts".to_string(),
+                name: "qwen3-tts".to_string(),
+                protocol: "audio.cpp".to_string(),
+                base_url: "http://127.0.0.1:8080".to_string(),
+                model: "qwen3-tts".to_string(),
+                context_size: None,
+                inference_backend: Some("auto".to_string()),
+                runtime: Some(LocalRuntimeConfig {
+                    model_path: local(
+                        models.join("qwen3-tts/qwen3-tts-12hz-1.7b-customvoice-q8_0.gguf"),
+                    ),
+                    ..LocalRuntimeConfig::default()
+                }),
+                enabled: true,
+                capabilities: vec!["TTS".to_string()],
+            },
+            ProviderConfig {
+                id: "smoke-asr".to_string(),
+                name: "qwen3-asr".to_string(),
+                protocol: "audio.cpp".to_string(),
+                base_url: "http://127.0.0.1:8080".to_string(),
+                model: "qwen3-asr".to_string(),
+                context_size: None,
+                inference_backend: Some("auto".to_string()),
+                runtime: Some(LocalRuntimeConfig {
+                    model_path: local(models.join("qwen3-asr/qwen3-asr-1.7b-q8_0.gguf")),
+                    ..LocalRuntimeConfig::default()
+                }),
+                enabled: true,
+                capabilities: vec!["ASR".to_string()],
+            },
+            ProviderConfig {
+                id: "smoke-image".to_string(),
+                name: "Qwen Image 2.1".to_string(),
+                protocol: "stable-diffusion.cpp".to_string(),
+                base_url: "http://127.0.0.1:1234".to_string(),
+                model: "sd-cpp-local".to_string(),
+                context_size: None,
+                inference_backend: Some("auto".to_string()),
+                runtime: Some(LocalRuntimeConfig {
+                    model_directory: local(models.join("qwen-image-2.1")),
+                    ..LocalRuntimeConfig::default()
+                }),
+                enabled: true,
+                capabilities: vec!["Image".to_string()],
+            },
+        ];
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        // 收集全部失败再统一断言：只看第一条会把其它通道的原因藏起来。
+        let mut failures = Vec::new();
+        for config in cases {
+            let label = format!("{} ({})", config.id, config.protocol);
+            match runtime.block_on(test_provider(config)) {
+                Ok(result) if result.ok => println!(
+                    "{label} ok · {} ms · {} · {} · {}",
+                    result.latency_ms, result.backend, result.model, result.message
+                ),
+                Ok(result) => failures.push(format!("{label} ok=false: {}", result.message)),
+                Err(error) => failures.push(format!("{label}: {error}")),
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "local provider failures://n{}",
+            failures.join("\n")
+        );
+        crate::agent::shutdown_llama_runtime();
+        crate::local_model_scheduler::shutdown();
     }
 }

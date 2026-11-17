@@ -188,10 +188,10 @@
 - OpenAI Compatible Images 与 stable-diffusion.cpp 图片生成。
 - OpenAI Compatible TTS 与 Windows SAPI 双路径。
 - OpenAI Compatible ASR，使用 multipart 上传项目内音频，并保存时间片段。
-- OpenAI Compatible Embedding；知识片段按字符窗口切块并写入 `knowledge_chunks`。
+- Embedding 双通道：OpenAI Compatible `/v1/embeddings`，或本地 GGUF 模型（`GGUF` Provider 由 llama.cpp `--embeddings` 托管，`base_url` 可填模型文件或模型目录）；知识片段按字符窗口切块并写入 `knowledge_chunks`。
 - 项目内余弦相似度检索返回来源、片段和分数。
 - 网页来源抓取包含 URL 协议/私网校验、重定向上限、5 MB 限制、正文提取和浏览器式脚本标签剔除。
-- 图片、TTS、ASR、Embedding 的密钥仍只从系统凭据库读取。
+- 图片、TTS、ASR 与云端 Embedding 的密钥仍只从系统凭据库读取；本地 GGUF Embedding 不读凭据库，走回环服务自签密钥。
 
 ### 3.10 生产日志与脱敏
 
@@ -302,7 +302,7 @@
 - 实测结果（2026-11-16，RTX 5070 12 GB，全部五项一次通过）：LLM 35.9 s / 136 输入 token / 269 输出 token；Embedding 1.5 s / 768 维 / 相关 0.8213 vs 无关 0.6357；TTS 6.3 s / 8 800 ms WAV；ASR 5.6 s / 字符重合率 1.000；Image 62.7 s / 768×768 PNG 713 281 字节。
 - `scripts/acceptance/install-local-runtimes.mjs` 按 `local_runtime.rs` 的固定版本与 SHA-256 安装三个运行时，避免验收依赖手工解压。`npm run acceptance:runtimes` 与 `npm run acceptance:services` 是对外入口。
 - 本轮同时修掉一个真实缺陷：固定版本 CUDA 12.4 归档无法为 Blackwell（计算能力 10.x/12.x）生成 kernel，原 `cuda_available()` 只校验下限会在 RTX 50 系上选中不可用后端；当时改为按计算能力上限回退 Vulkan，并补了 `cuda_asset_selection_excludes_blackwell` 测试。第七轮后该缺陷已按根因解决：llama.cpp `b12359` 与 audio.cpp `v0.9.5` 都发布了 CUDA 13 归档（13.5 / 13.3），新增 `RuntimeAcceleration::Cuda13` 作为 12.4 与 Vulkan 之间的备选，Blackwell 且驱动 ≥ R620 时改用 CUDA 13，不再退回 Vulkan；stable-diffusion.cpp 没有发布 CUDA 13 归档，仍走 Vulkan。
-- 明确的边界：本地 Embedding 服务仍由验收脚本拉起，调度器没有托管这一类工作负载；ASR 无时间片段（模型只返回文本与推理耗时）；局部重绘两条通道和九 Agent 全流程不在本轮范围内。
+- 明确的边界：本轮验收脚本自行拉起本地 Embedding 服务；其后 Embedding 已由 `LocalModelScheduler` 托管（`GGUF` Provider + `--embeddings`，见 3.9）。ASR 无时间片段（模型只返回文本与推理耗时）；局部重绘两条通道和九 Agent 全流程不在本轮范围内。
 
 ### 3.18 像素级身份验证与角色锁
 
@@ -343,7 +343,11 @@
 
 ### 3.20 P1 可靠性与本地模型闭环
 
-- 运行时 manifest 现在记录除 manifest 自身外的逐文件大小与 SHA-256；`installed_executable`、加速后端探测和 `ensure_local_runtime` 都会复验文件树、路径边界和哈希。旧 manifest 或任一文件缺失、截断、替换都会触发固定归档重下与 staging 原子替换，`RuntimeInstallResult.repairPerformed` 会告知界面。
+- 运行时 manifest 现在记录除 manifest 自身外的逐文件大小与 SHA-256；`installed_executable`、加速后端探测和 `ensure_local_runtime` 都会复验文件树、路径边界和哈希。任一文件缺失、截断、替换都会触发固定归档重下与 staging 原子替换，`RuntimeInstallResult.repairPerformed` 会告知界面。
+- 手工放进 `runtimes/<id>/` 的副本（没有 manifest.json）也会被接管：找到期望的可执行文件后补算逐文件哈希，清单标记 `source: hand-placed`、`archives` 留空，归档来源未校验只记日志；之后仍按逐文件哈希严格校验。想要可验证来源用 `ensure_local_runtime(force = true)` 重下载固定归档。
+- CUDA 构建缺 `cudart64_*.dll` 时，`runtime_health_issue` 会在启动前给出可读原因（audio.cpp / stable-diffusion.cpp 以 `0xc0000135` 退出；llama.cpp 退回 CPU），不再只报退出码；安装命令新增 `acceleration` 参数，界面提供「改用 Vulkan 重装」绕开本机缺失的 CUDA 运行时。
+- 扩散组件发现新增平铺目录启发式：权重四件套直接放在模型目录里（没有 `diffusion_models/` 等子目录）时，按 `*vae*` / `*mmproj*` / `*t5|*clip|*vl*` 归类，剩下的最大权重当扩散主模型。
+- 旧版安装路径（`scripts/acceptance/install-local-runtimes.mjs`）写的 manifest 只有归档哈希、没有逐文件列表。这类清单以前被当成「损坏」，每次使用都触发整包重新下载，网络受限时就表现为「模型都装好了、运行时一直检测失败」。现在改为一次性补算逐文件哈希并写回清单（归档哈希原本已逐字节校验过），此后按逐文件哈希严格校验；只有确需回到归档内容时才走 `ensure_local_runtime(force = true)`（界面上的「重新下载运行时 / 重装运行时」）。校验结果按 `runtime@version@installedAt` 在进程内缓存，避免每次本地请求把 100–240 MiB 文件重算一遍。
 - audio.cpp 与 stable-diffusion.cpp 由应用自动拉起后不再只检查 `/health`：TTS 必须返回合法非空 WAV，ASR 必须实际处理一个 0.25 s WAV 并返回 JSON 文本字段，扩散服务必须以 256×256、1 step 完成一次 PNG 推理。smoke 只在应用自己启动进程时运行，失败会停止进程并拒绝报告模型就绪；GPU 模式通过后调度器状态显示 `gpuSmokeTested`。
 - 图片与视频素材页都会扫描项目清单中的本地文件。缺失图片提供“重新生成当前资产”，尽量复用原提示词、负向词、种子和参考图，创建新素材并替换镜头、角色、场景与风格锁中的旧 assetId；没有 Image Provider 时回退到本地 SVG 候选。缺失视频提供“重新导入当前资产”，替换场景图层与时间轴中的旧 assetId。
 - 局部重绘新增 0–64 px 羽化、基于本机像素的自动文字选区，以及跨面板重开的持久重绘谱系对比。历史记录由新素材的 `inpaint.sourceAssetId` 链恢复，可拖动前后分割线并继续编辑任意版本。

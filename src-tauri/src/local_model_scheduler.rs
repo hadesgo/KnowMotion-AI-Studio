@@ -868,10 +868,14 @@ async fn start_audio_server(
             .as_slice(),
     )?;
     let executable = PathBuf::from(
-        crate::local_runtime::ensure_local_runtime("audio.cpp".to_string())
+        crate::local_runtime::ensure_local_runtime("audio.cpp".to_string(), None, None)
             .await?
             .executable_path,
     );
+    // CUDA 构建缺 cudart 时进程只会以 0xc0000135 静默退出，先给出可读原因再启动。
+    if let Some(issue) = crate::local_runtime::runtime_health_issue("audio.cpp") {
+        return Err(issue);
+    }
     let signature = audio_signature(scheduler, origin)?;
     let process = spawn_managed_process(
         Workload::Audio,
@@ -927,8 +931,11 @@ async fn wait_for_audio_ready(
         }
         if let Some(status) = managed_exit_status(scheduler, key) {
             let log = managed_log_tail(scheduler, key);
+            let hint = crate::local_runtime::runtime_health_issue("audio.cpp")
+                .map(|issue| format!("；{issue}"))
+                .unwrap_or_default();
             return Err(format!(
-                "audio.cpp exited during startup ({status}){}",
+                "audio.cpp exited during startup ({status}){}{hint}",
                 if log.is_empty() {
                     String::new()
                 } else {
@@ -1220,7 +1227,89 @@ fn diffusion_registration(
         registration.model_directory.as_deref(),
         ModelRole::Vae,
     )?;
+    // 下载来的权重常常是「四件套平铺在一个目录」（没有 diffusion_models/ 之类子目录）。
+    // 结构化发现失败时按文件名补一次，否则扩散通道会一直报「请选择模型目录」——
+    // 即使目录里四个组件都在。
+    if (registration.diffusion_model.is_none()
+        || registration.text_encoder.is_none()
+        || registration.vae.is_none())
+        && registration.model_directory.is_some()
+    {
+        let flat = discover_flat_components(
+            registration
+                .model_directory
+                .as_deref()
+                .unwrap_or(Path::new(".")),
+        );
+        registration.diffusion_model = registration.diffusion_model.or(flat.diffusion);
+        registration.text_encoder = registration.text_encoder.or(flat.text_encoder);
+        registration.llm_vision = registration.llm_vision.or(flat.vision);
+        registration.vae = registration.vae.or(flat.vae);
+    }
     Ok(registration)
+}
+
+#[derive(Default)]
+struct FlatComponents {
+    diffusion: Option<PathBuf>,
+    text_encoder: Option<PathBuf>,
+    vision: Option<PathBuf>,
+    vae: Option<PathBuf>,
+}
+
+/// 平铺布局的文件名启发式：`*vae*` 归 VAE，`*mmproj*` 归视觉塔，`*t5* / *clip* /
+/// `*text_encoder* / *qwen3-vl*` 归文本编码器，剩下的最大权重当作扩散主模型。
+fn discover_flat_components(root: &Path) -> FlatComponents {
+    let mut files = Vec::new();
+    collect_model_files(root, 0, &mut files);
+    files.sort();
+    let file_name = |path: &Path| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+    };
+    let is_weight = |path: &Path| {
+        let name = file_name(path);
+        name.ends_with(".gguf") || name.ends_with(".safetensors") || name.ends_with(".sft")
+    };
+    let vae = files
+        .iter()
+        .find(|path| is_weight(path) && file_name(path).contains("vae"))
+        .cloned();
+    let vision = files
+        .iter()
+        .find(|path| file_name(path).contains("mmproj"))
+        .cloned();
+    let text_encoder = files
+        .iter()
+        .find(|path| {
+            let name = file_name(path);
+            !name.contains("mmproj")
+                && is_weight(path)
+                && (name.contains("text-encoder")
+                    || name.contains("text_encoder")
+                    || name.contains("textencoder")
+                    || name.contains("t5")
+                    || name.contains("clip")
+                    || name.contains("qwen3-vl")
+                    || name.contains("qwen2.5-vl"))
+        })
+        .cloned();
+    let diffusion = files
+        .iter()
+        .filter(|path| is_weight(path))
+        .filter(|path| Some(*path) != vae.as_ref())
+        .filter(|path| Some(*path) != vision.as_ref())
+        .filter(|path| Some(*path) != text_encoder.as_ref())
+        .max_by_key(|path| path.metadata().map(|metadata| metadata.len()).unwrap_or(0))
+        .cloned();
+    FlatComponents {
+        diffusion,
+        text_encoder,
+        vision,
+        vae,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1323,10 +1412,13 @@ async fn start_diffusion_server(
     signature: &str,
 ) -> Result<(), String> {
     let executable = PathBuf::from(
-        crate::local_runtime::ensure_local_runtime("stable-diffusion.cpp".to_string())
+        crate::local_runtime::ensure_local_runtime("stable-diffusion.cpp".to_string(), None, None)
             .await?
             .executable_path,
     );
+    if let Some(issue) = crate::local_runtime::runtime_health_issue("stable-diffusion.cpp") {
+        return Err(issue);
+    }
     let port = endpoint_port(origin)?;
     let mut arguments = vec![
         "--listen-ip".to_string(),
@@ -1410,8 +1502,11 @@ async fn wait_for_diffusion_ready(
         }
         if let Some(status) = managed_exit_status(scheduler, key) {
             let log = managed_log_tail(scheduler, key);
+            let hint = crate::local_runtime::runtime_health_issue("stable-diffusion.cpp")
+                .map(|issue| format!("；{issue}"))
+                .unwrap_or_default();
             return Err(format!(
-                "stable-diffusion.cpp exited during startup ({status}){}",
+                "stable-diffusion.cpp exited during startup ({status}){}{hint}",
                 if log.is_empty() {
                     String::new()
                 } else {
@@ -1985,5 +2080,53 @@ mod tests {
             "acceptance-workflow-llm"
         ));
         assert!(!llm_runtime_is_resident(&runtimes, "other-provider"));
+    }
+
+    #[test]
+    fn discovers_a_flat_diffusion_bundle_by_file_name() {
+        // 真实下载布局：四个组件平铺在 models/qwen-image-2.1/，没有 diffusion_models/ 子目录。
+        let root = tempfile::tempdir().expect("temporary directory");
+        for (name, bytes) in [
+            ("qwen-image-2.1-turbo-Q4_K_M.gguf", 4_000usize),
+            ("Qwen3-VL-8B-Instruct-Q4_K_M.gguf", 5_000),
+            ("mmproj-F16.gguf", 1_000),
+            ("qwen_image_2.1_vae_bf16.safetensors", 600),
+        ] {
+            let path = root.path().join(name);
+            fs::write(&path, vec![0_u8; bytes]).expect("weight file");
+        }
+        let components = discover_flat_components(root.path());
+        assert_eq!(
+            components
+                .diffusion
+                .as_ref()
+                .and_then(|path| path.file_name())
+                .and_then(|name| name.to_str()),
+            Some("qwen-image-2.1-turbo-Q4_K_M.gguf")
+        );
+        assert_eq!(
+            components
+                .text_encoder
+                .as_ref()
+                .and_then(|path| path.file_name())
+                .and_then(|name| name.to_str()),
+            Some("Qwen3-VL-8B-Instruct-Q4_K_M.gguf")
+        );
+        assert_eq!(
+            components
+                .vision
+                .as_ref()
+                .and_then(|path| path.file_name())
+                .and_then(|name| name.to_str()),
+            Some("mmproj-F16.gguf")
+        );
+        assert_eq!(
+            components
+                .vae
+                .as_ref()
+                .and_then(|path| path.file_name())
+                .and_then(|name| name.to_str()),
+            Some("qwen_image_2.1_vae_bf16.safetensors")
+        );
     }
 }

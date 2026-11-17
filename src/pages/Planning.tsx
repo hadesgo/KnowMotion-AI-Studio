@@ -84,7 +84,8 @@ export default function Planning() {
   const embeddingProvider = providers.find(
     (provider) =>
       provider.enabled &&
-      provider.protocol === "OpenAI Compatible" &&
+      (provider.protocol === "OpenAI Compatible" ||
+        provider.protocol === "GGUF") &&
       provider.capabilities.includes("Embedding") &&
       provider.id ===
         (taskRoutes.Embedding ??

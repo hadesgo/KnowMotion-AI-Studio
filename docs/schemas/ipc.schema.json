@@ -580,6 +580,15 @@
           },
           "type": "array"
         },
+        "contextSize": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "enabled": {
           "default": false,
           "type": "boolean"

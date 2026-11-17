@@ -9,6 +9,7 @@ use model::{ProviderTestRequest, ProviderTestResult, WorkflowDefinition, Workflo
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
+pub(crate) use gguf::{embed_with_local_runtime, embedding_vectors_from_payload};
 pub use model::workflow_definition;
 pub(crate) use model::WorkflowStartRequest;
 #[cfg(test)]
@@ -143,5 +144,25 @@ pub fn provider_clear_secret(provider_id: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn provider_test(request: ProviderTestRequest) -> Result<ProviderTestResult, String> {
-    provider::test_provider(request.provider).await
+    let provider = request.provider;
+    let started = std::time::Instant::now();
+    let result = provider::test_provider(provider.clone()).await;
+    if let Err(error) = &result {
+        // 失败原因以前只在 UI toast 里出现，关掉窗口就查不到了。这里落一条结构化日志，
+        // 让「模型都下好了为什么还检测失败」能直接从日志读出协议、能力与根因。
+        crate::logging::log_event(
+            crate::logging::LogLevel::Warn,
+            "provider.test",
+            "Provider connection test failed",
+            Some(serde_json::json!({
+                "providerId": provider.id,
+                "protocol": provider.protocol,
+                "model": provider.model,
+                "capabilities": provider.capabilities,
+                "elapsedMs": started.elapsed().as_millis(),
+                "error": error
+            })),
+        );
+    }
+    result
 }

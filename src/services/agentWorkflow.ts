@@ -94,6 +94,7 @@ export async function startWorkflow(
         model: provider.model,
         contextSize: provider.contextSize ?? null,
         inferenceBackend: provider.inferenceBackend ?? "auto",
+        runtime: provider.runtime ?? null,
         enabled: provider.enabled,
         capabilities: provider.capabilities,
       })),
@@ -203,6 +204,9 @@ export async function testProviderConnection(
         model: provider.model,
         contextSize: provider.contextSize ?? null,
         inferenceBackend: provider.inferenceBackend ?? "auto",
+        // runtime 必须带上：本地 audio.cpp / stable-diffusion.cpp 依赖里面的模型路径才能
+        // 自动拉起服务，丢掉它就会报「Choose a local model path in Models」。
+        runtime: provider.runtime ?? null,
         enabled: provider.enabled,
         capabilities: provider.capabilities,
       },

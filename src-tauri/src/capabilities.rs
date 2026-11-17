@@ -1,5 +1,6 @@
 use crate::{
     agent::get_provider_secret,
+    agent::model::ProviderConfig,
     local_model_scheduler::{
         acquire_gpu, ensure_audio, ensure_diffusion, is_loopback_base_url, GpuLease,
         LocalRuntimeConfig, Workload,
@@ -34,6 +35,8 @@ const MAX_RESEARCH_SOURCE_BYTES: usize = 5 * 1024 * 1024;
 const MAX_DOWNLOADED_IMAGE_BYTES: usize = 25 * 1024 * 1024;
 const AUDIO_CPP_PROTOCOL: &str = "audio.cpp";
 const STABLE_DIFFUSION_CPP_PROTOCOL: &str = "stable-diffusion.cpp";
+/// 本地 GGUF：`base_url` 是模型文件路径，由 llama.cpp 回环服务加载。
+const GGUF_PROTOCOL: &str = "GGUF";
 const RESEARCH_CONTENT_TYPES: &[&str] = &["text/html", "application/xhtml+xml", "text/plain"];
 const RESEARCH_HTTP_POLICY: PublicHttpPolicy = PublicHttpPolicy {
     max_bytes: MAX_RESEARCH_SOURCE_BYTES,
@@ -56,6 +59,8 @@ pub struct ImageProviderConfig {
     pub protocol: String,
     pub base_url: String,
     pub model: String,
+    #[serde(default)]
+    pub context_size: Option<u32>,
     #[serde(default)]
     pub inference_backend: Option<String>,
     #[serde(default)]
@@ -365,14 +370,11 @@ pub async fn embed_project_knowledge(
     if !safe_identifier(&request.project_id) {
         return Err("Invalid project id".to_string());
     }
-    if request.provider.protocol != "OpenAI Compatible"
-        || !request
-            .provider
-            .capabilities
-            .iter()
-            .any(|capability| capability == "Embedding")
-    {
-        return Err("Embedding requires an enabled OpenAI-compatible provider".to_string());
+    if !embedding_provider_supported(&request.provider) {
+        return Err(
+            "Embedding requires an enabled OpenAI-compatible or local GGUF provider with the Embedding capability"
+                .to_string(),
+        );
     }
     let chunks = chunk_knowledge(&request.texts);
     if chunks.is_empty() || chunks.len() > 500 {
@@ -448,6 +450,12 @@ pub async fn search_project_knowledge(
 ) -> Result<Vec<KnowledgeSearchResult>, String> {
     if request.query.trim().is_empty() {
         return Err("Knowledge query cannot be empty".to_string());
+    }
+    if !embedding_provider_supported(&request.provider) {
+        return Err(
+            "Knowledge search requires an enabled OpenAI-compatible or local GGUF provider with the Embedding capability"
+                .to_string(),
+        );
     }
     let query_embedding = request_embeddings(&request.provider, &[request.query])
         .await?
@@ -2304,10 +2312,68 @@ fn chunk_knowledge(texts: &[String]) -> Vec<String> {
     chunks
 }
 
+/// Embedding 只认两种来源：外部 OpenAI 兼容服务，或本地 GGUF 模型（llama.cpp
+/// `--embeddings`）。两条通道的差异全部收敛在 `request_embeddings` 内，调用方
+/// 只需要给出带 `Embedding` 能力的 Provider。
+fn embedding_provider_supported(provider: &ImageProviderConfig) -> bool {
+    matches!(
+        provider.protocol.as_str(),
+        "OpenAI Compatible" | GGUF_PROTOCOL
+    ) && provider
+        .capabilities
+        .iter()
+        .any(|capability| capability == "Embedding")
+}
+
+/// 本地 GGUF 嵌入：把 `base_url` 里的模型文件交给 llama.cpp 起一个带
+/// `--embeddings` 的回环服务，再走同一个 `/v1/embeddings` 契约取向量。
+async fn request_local_embeddings(
+    provider: &ImageProviderConfig,
+    texts: &[String],
+) -> Result<Vec<Vec<f32>>, String> {
+    if !provider.enabled {
+        return Err(format!("Provider {} is disabled", provider.name));
+    }
+    let started = Instant::now();
+    let outcome = crate::agent::embed_with_local_runtime(
+        &ProviderConfig {
+            id: provider.id.clone(),
+            name: provider.name.clone(),
+            protocol: provider.protocol.clone(),
+            base_url: provider.base_url.clone(),
+            model: provider.model.clone(),
+            context_size: provider.context_size,
+            inference_backend: provider.inference_backend.clone(),
+            runtime: provider.runtime.clone(),
+            enabled: provider.enabled,
+            capabilities: provider.capabilities.clone(),
+        },
+        texts.to_vec(),
+    )
+    .await?;
+    logging::log_event(
+        LogLevel::Info,
+        "provider.embedding",
+        "Local GGUF embeddings completed",
+        Some(json!({
+            "providerId": provider.id,
+            "model": outcome.model,
+            "backend": outcome.backend,
+            "texts": texts.len(),
+            "dimensions": outcome.vectors.first().map(Vec::len).unwrap_or(0),
+            "elapsedMs": started.elapsed().as_millis()
+        })),
+    );
+    Ok(outcome.vectors)
+}
+
 pub(crate) async fn request_embeddings(
     provider: &ImageProviderConfig,
     texts: &[String],
 ) -> Result<Vec<Vec<f32>>, String> {
+    if provider.protocol == GGUF_PROTOCOL {
+        return request_local_embeddings(provider, texts).await;
+    }
     let secret = get_provider_secret(&provider.id)
         .ok_or_else(|| "No API key is stored for the embedding provider".to_string())?;
     let response = http_client()?
@@ -2328,32 +2394,14 @@ pub(crate) async fn request_embeddings(
     if !status.is_success() {
         return Err(format!("Embedding provider returned {status}"));
     }
-    payload
-        .get("data")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            // 本地 llama.cpp 在缺少 `/v1` 前缀时会返回 legacy 数组形态，
-            // 这里把实际结构带回调用方，避免只看到一句「没有 data」。
-            format!(
-                "Embedding response has no data array; base URL must point at the versioned endpoint (got {})",
-                limit(&payload.to_string())
-            )
-        })?
-        .iter()
-        .map(|item| {
-            item.get("embedding")
-                .and_then(Value::as_array)
-                .ok_or_else(|| "Embedding item has no vector".to_string())?
-                .iter()
-                .map(|value| {
-                    value
-                        .as_f64()
-                        .map(|value| value as f32)
-                        .ok_or_else(|| "Embedding vector contains a non-number".to_string())
-                })
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .collect()
+    crate::agent::embedding_vectors_from_payload(&payload).map_err(|error| {
+        // 本地 llama.cpp 在缺少 `/v1` 前缀时会返回 legacy 数组形态，
+        // 这里把实际结构带回调用方，避免只看到一句「没有 data」。
+        format!(
+            "{error}; base URL must point at the versioned endpoint (got {})",
+            limit(&payload.to_string())
+        )
+    })
 }
 
 pub(crate) fn cosine_similarity(left: &[f32], right: &[f32]) -> Option<f64> {
@@ -2743,5 +2791,97 @@ mod tests {
         assert_eq!(clamp_conditioning_strength(-1.0), 0.55);
         assert_eq!(clamp_conditioning_strength(0.01), 0.05);
         assert_eq!(clamp_conditioning_strength(4.0), 0.95);
+    }
+
+    fn embedding_provider(protocol: &str, capabilities: &[&str]) -> ImageProviderConfig {
+        ImageProviderConfig {
+            id: "embedding-test".to_string(),
+            name: "Embedding test".to_string(),
+            protocol: protocol.to_string(),
+            base_url: "D:\\models\\embedding.gguf".to_string(),
+            model: "embedding".to_string(),
+            context_size: None,
+            inference_backend: Some("gpu".to_string()),
+            runtime: None,
+            enabled: true,
+            capabilities: capabilities.iter().map(|item| item.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn embedding_accepts_cloud_and_local_gguf_providers() {
+        assert!(embedding_provider_supported(&embedding_provider(
+            "OpenAI Compatible",
+            &["Embedding"]
+        )));
+        assert!(embedding_provider_supported(&embedding_provider(
+            "GGUF",
+            &["Embedding"]
+        )));
+    }
+
+    #[test]
+    fn embedding_rejects_providers_without_the_capability() {
+        // GGUF 聊天模型没有 `--embeddings`，拿它做向量会直接 501，必须提前拦住。
+        assert!(!embedding_provider_supported(&embedding_provider(
+            "GGUF",
+            &["LLM"]
+        )));
+        assert!(!embedding_provider_supported(&embedding_provider(
+            "OpenAI Compatible",
+            &["LLM"]
+        )));
+        assert!(!embedding_provider_supported(&embedding_provider(
+            "Anthropic",
+            &["Embedding"]
+        )));
+        assert!(!embedding_provider_supported(&embedding_provider(
+            "GGUF",
+            &[]
+        )));
+    }
+
+    #[test]
+    #[ignore = "requires KNOWMOTION_GGUF_EMBEDDING_MODEL and the prepared llama.cpp runtime"]
+    fn local_gguf_provider_embeds_without_an_api_key() {
+        // 关键差异：本地通道不读 keyring，没有 API Key 也必须成功。若 dispatch 写错，
+        // 这里会直接报 “No API key is stored for the embedding provider”。
+        let model_path =
+            std::env::var("KNOWMOTION_GGUF_EMBEDDING_MODEL").expect("embedding GGUF model path");
+        let provider = ImageProviderConfig {
+            id: "local-embedding-test".to_string(),
+            name: "Local embedding test".to_string(),
+            protocol: "GGUF".to_string(),
+            base_url: model_path,
+            model: "embeddinggemma".to_string(),
+            context_size: Some(2048),
+            inference_backend: Some("cpu".to_string()),
+            runtime: None,
+            enabled: true,
+            capabilities: vec!["Embedding".to_string()],
+        };
+        assert!(embedding_provider_supported(&provider));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        let vectors = runtime
+            .block_on(request_embeddings(
+                &provider,
+                &[
+                    "太阳为什么在傍晚变红".to_string(),
+                    "傍晚的阳光穿过更厚的大气层，蓝光被散射掉，只剩下红光。".to_string(),
+                    "Excel 透视表可以按季度汇总销售额。".to_string(),
+                ],
+            ))
+            .expect("local embeddings");
+        assert_eq!(vectors.len(), 3);
+        let dimensions = vectors[0].len();
+        assert!(vectors.iter().all(|vector| vector.len() == dimensions));
+        let near = cosine_similarity(&vectors[0], &vectors[1]).expect("near score");
+        let far = cosine_similarity(&vectors[0], &vectors[2]).expect("far score");
+        println!("[embedding] dimensions={dimensions} related={near:.4} unrelated={far:.4}");
+        assert!(near > far, "related {near} should beat unrelated {far}");
+        crate::agent::shutdown_llama_runtime();
     }
 }

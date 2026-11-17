@@ -1156,6 +1156,24 @@ fn find_optional_tool(variable: &str, candidates: &[PathBuf]) -> Option<PathBuf>
     candidates.iter().find(|path| path.is_file()).cloned()
 }
 
+/// A manifest without a `files` list means the offline renderer runtime was never
+/// prepared (`npm run renderer:prepare`), which is the normal state of a local dev
+/// checkout (the placeholder manifest is git-ignored and only exists so `cargo test`
+/// can see the resource path). Dev builds keep booting so the rest of the app stays
+/// usable, while a release bundle carrying such a manifest is broken and must fail.
+fn tolerate_unlisted_manifest(path: &Path) -> Result<(), String> {
+    if !cfg!(debug_assertions) {
+        return Err("Runtime manifest has no files list".to_string());
+    }
+    logging::log_event(
+        LogLevel::Warn,
+        "render",
+        "Runtime manifest has no files list; skipping bundled runtime integrity verification (dev build)",
+        Some(json!({ "manifest": path.to_string_lossy() })),
+    );
+    Ok(())
+}
+
 fn verify_runtime_manifest(resource_dir: &Path) -> Result<(), String> {
     let candidates = [
         resource_dir.join("runtime-manifest.json"),
@@ -1168,10 +1186,12 @@ fn verify_runtime_manifest(resource_dir: &Path) -> Result<(), String> {
         &fs::read(path).map_err(|error| format!("Unable to read runtime manifest: {error}"))?,
     )
     .map_err(|error| format!("Invalid runtime manifest: {error}"))?;
-    let files = manifest
-        .get("files")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "Runtime manifest has no files list".to_string())?;
+    let Some(files) = manifest.get("files").and_then(Value::as_array) else {
+        return tolerate_unlisted_manifest(path);
+    };
+    if files.is_empty() {
+        return tolerate_unlisted_manifest(path);
+    }
     let executable_parent = std::env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf));
@@ -1466,6 +1486,44 @@ mod tests {
         assert_eq!(
             file_sha256(&path).expect("hash"),
             "f5d2a48734b4c72d549d03b3001e519fadb76409914b528ba30848a46968c197"
+        );
+    }
+
+    #[test]
+    fn placeholder_runtime_manifest_only_passes_in_dev_builds() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        fs::write(
+            directory.path().join("runtime-manifest.json"),
+            br#"{"note":"local test build placeholder; run npm run renderer:prepare for real bundle"}"#,
+        )
+        .expect("manifest");
+        let result = verify_runtime_manifest(directory.path());
+        if cfg!(debug_assertions) {
+            assert!(
+                result.is_ok(),
+                "dev builds must tolerate a placeholder manifest: {result:?}"
+            );
+        } else {
+            assert_eq!(
+                result.expect_err("release builds must reject it"),
+                "Runtime manifest has no files list"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_manifest_rejects_hash_mismatch() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        fs::write(directory.path().join("node.exe"), b"binary").expect("runtime file");
+        fs::write(
+            directory.path().join("runtime-manifest.json"),
+            br#"{"files":[{"path":"node.exe","sha256":"deadbeef"}]}"#,
+        )
+        .expect("manifest");
+        let error = verify_runtime_manifest(directory.path()).expect_err("hash mismatch");
+        assert!(
+            error.contains("failed integrity verification"),
+            "unexpected error: {error}"
         );
     }
 }
