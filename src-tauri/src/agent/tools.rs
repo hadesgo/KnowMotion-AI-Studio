@@ -1,7 +1,7 @@
 use super::model::{AgentOutput, AssetBrief, ProjectToolCall, WorkflowRevision};
 use crate::{mirror_project_files, write_atomic};
-use chrono::Utc;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use chrono::Utc;
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -444,9 +444,7 @@ fn normalize_layer(
     if layer_type == "canvas" {
         let variant = text(layer, "canvasVariant", "particleFlow");
         normalized["canvasVariant"] = Value::String(
-            if ["particleFlow", "waveform", "network", "orbitTrails"]
-                .contains(&variant.as_str())
-            {
+            if ["particleFlow", "waveform", "network", "orbitTrails"].contains(&variant.as_str()) {
                 variant
             } else {
                 "particleFlow".to_string()
@@ -470,9 +468,7 @@ fn normalize_gsap_motion(value: Option<&Value>) -> Value {
     let preset = value
         .get("preset")
         .and_then(Value::as_str)
-        .filter(|preset| {
-            ["float", "breathe", "sway", "orbit", "elasticReveal"].contains(preset)
-        })
+        .filter(|preset| ["float", "breathe", "sway", "orbit", "elasticReveal"].contains(preset))
         .unwrap_or("float");
     json!({
         "preset": preset,
@@ -668,7 +664,10 @@ fn svg_asset(scene_id: &str, brief: &AssetBrief, index: usize) -> (Value, String
     );
     // 统一用 base64 载荷：存储层把 data URL 落盘成文件后靠它还原字节，
     // 百分号编码虽然也是合法 RFC 2397，但会让“草案 → 项目文件”这一步失败。
-    let src = format!("data:image/svg+xml;base64,{}", BASE64.encode(svg.as_bytes()));
+    let src = format!(
+        "data:image/svg+xml;base64,{}",
+        BASE64.encode(svg.as_bytes())
+    );
     (
         json!({
             "id": asset_id,
@@ -771,8 +770,7 @@ pub fn undo_revision(
         .map_err(|error| format!("Revision not found: {error}"))?;
     let before: Value = serde_json::from_str(&before_json).map_err(|error| error.to_string())?;
     let (project_root, before) = mirror_project_files(projects_root, &before)?;
-    let before_text = serde_json::to_string_pretty(&before)
-        .map_err(|error| error.to_string())?;
+    let before_text = serde_json::to_string_pretty(&before).map_err(|error| error.to_string())?;
     write_atomic(
         &Path::new(&project_root)
             .join("revisions")

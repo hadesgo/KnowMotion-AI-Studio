@@ -4,6 +4,7 @@ use crate::{
     write_atomic,
 };
 use reqwest::{Client, Url};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -31,9 +32,9 @@ const MAX_RUNTIME_LOG_BYTES: usize = 64 * 1024;
 static SCHEDULER: OnceLock<Arc<LocalModelScheduler>> = OnceLock::new();
 static SCHEDULER_DATA_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct LocalRuntimeConfig {
+pub struct LocalRuntimeConfig {
     /// audio.cpp model file/package directory. stable-diffusion.cpp may use this
     /// as a shorthand for a single diffusion model file.
     #[serde(default)]
@@ -83,7 +84,7 @@ impl Workload {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ActiveLeaseStatus {
     pub id: String,
@@ -93,7 +94,7 @@ pub struct ActiveLeaseStatus {
     pub elapsed_ms: u128,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ManagedRuntimeStatus {
     pub key: String,
@@ -105,7 +106,7 @@ pub struct ManagedRuntimeStatus {
     pub gpu_smoke_tested: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalModelSchedulerStatus {
     pub active_lease: Option<ActiveLeaseStatus>,
@@ -401,10 +402,7 @@ pub(crate) async fn acquire_gpu(
 
 /// LLM 运行时是否已常驻（对应 provider 的 `llama-server` 仍在运行且模型已加载）。
 /// 常驻时不需要再为新加载预留显存余量。
-fn llm_runtime_is_resident(
-    runtimes: &HashMap<String, RuntimeRecord>,
-    provider_id: &str,
-) -> bool {
+fn llm_runtime_is_resident(runtimes: &HashMap<String, RuntimeRecord>, provider_id: &str) -> bool {
     runtimes
         .get(&format!("llm:{provider_id}"))
         .is_some_and(|runtime| runtime.model_loaded)
@@ -561,7 +559,7 @@ impl LocalModelScheduler {
             let mut diffusion = Vec::new();
             for (url, registration) in &state.audio {
                 let key = runtime_key(Workload::Audio, url);
-                if state.runtimes.get(&key).map_or(true, |runtime| {
+                if state.runtimes.get(&key).is_none_or(|runtime| {
                     now.duration_since(runtime.last_used).as_secs() >= registration.idle_seconds
                 }) {
                     audio.push(url.clone());
@@ -569,7 +567,7 @@ impl LocalModelScheduler {
             }
             for (url, registration) in &state.diffusion {
                 let key = runtime_key(Workload::Diffusion, url);
-                if state.runtimes.get(&key).map_or(true, |runtime| {
+                if state.runtimes.get(&key).is_none_or(|runtime| {
                     now.duration_since(runtime.last_used).as_secs() >= registration.idle_seconds
                 }) {
                     diffusion.push(url.clone());
@@ -1476,15 +1474,14 @@ async fn run_diffusion_gpu_smoke(origin: &str) -> Result<(), String> {
             }
             return Ok(());
         }
-        match payload.get("status").and_then(Value::as_str) {
-            Some("failed" | "cancelled" | "canceled") => {
-                let message = payload
-                    .pointer("/error/message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("image probe job failed");
-                return Err(message.to_string());
-            }
-            _ => {}
+        if let Some("failed" | "cancelled" | "canceled") =
+            payload.get("status").and_then(Value::as_str)
+        {
+            let message = payload
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .unwrap_or("image probe job failed");
+            return Err(message.to_string());
         }
         if Instant::now() >= deadline {
             return Err("image probe did not complete within 120 seconds".to_string());
@@ -1538,9 +1535,9 @@ fn normalize_origin(value: &str) -> String {
     if url.scheme() != "http" {
         return String::new();
     }
-    let _ = url.set_path("");
-    let _ = url.set_query(None);
-    let _ = url.set_fragment(None);
+    url.set_path("");
+    url.set_query(None);
+    url.set_fragment(None);
     url.to_string().trim_end_matches('/').to_string()
 }
 
@@ -1974,13 +1971,19 @@ mod tests {
                 gpu_smoke_tested: false,
             },
         );
-        assert!(llm_runtime_is_resident(&runtimes, "acceptance-workflow-llm"));
+        assert!(llm_runtime_is_resident(
+            &runtimes,
+            "acceptance-workflow-llm"
+        ));
 
         runtimes
             .get_mut("llm:acceptance-workflow-llm")
             .expect("runtime record")
             .model_loaded = false;
-        assert!(!llm_runtime_is_resident(&runtimes, "acceptance-workflow-llm"));
+        assert!(!llm_runtime_is_resident(
+            &runtimes,
+            "acceptance-workflow-llm"
+        ));
         assert!(!llm_runtime_is_resident(&runtimes, "other-provider"));
     }
 }

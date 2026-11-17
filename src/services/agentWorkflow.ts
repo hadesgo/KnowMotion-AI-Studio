@@ -1,99 +1,23 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ProviderProfile, VideoProject } from "../types";
+import type {
+  AgentDescriptor,
+  AgentModelRoute,
+  ProviderTestResult,
+  WorkflowDefinition,
+  WorkflowEventPayload,
+  WorkflowRunView,
+  WorkflowStepView,
+} from "../generated/ipc";
 import { isTauriDesktop } from "./desktop";
 
-export interface AgentDescriptor {
-  key: string;
-  title: string;
-  description: string;
-  version: string;
-  capability: string;
-  dependencies: string[];
-  requiresApproval: boolean;
-  approvalLabel?: string;
-  inputSchema: Record<string, unknown>;
-  outputSchema: Record<string, unknown>;
-  allowedTools: string[];
-}
-
-export interface WorkflowDefinition {
-  key: string;
-  version: string;
-  title: string;
-  description: string;
-  agents: AgentDescriptor[];
-}
-
-export interface AgentModelRoute {
-  providerId: string;
-  model?: string;
-}
-
-export interface WorkflowStep {
-  id: string;
-  key: string;
-  title: string;
-  description: string;
-  status: string;
-  attempt: number;
-  maxAttempts: number;
-  dependencies: string[];
-  requiresApproval: boolean;
-  approvalLabel?: string;
-  approvalStatus: string;
-  providerId?: string;
-  model?: string;
-  summary?: string;
-  warnings: string[];
-  error?: string;
-  startedAt?: string;
-  finishedAt?: string;
-}
-
-export interface WorkflowRevision {
-  id: string;
-  runId: string;
-  stepKey: string;
-  projectId: string;
-  revision: number;
-  summary: string;
-  createdAt: string;
-  undoable: boolean;
-}
-
-export interface WorkflowRun {
-  id: string;
-  projectId: string;
-  workflowKey: string;
-  status: string;
-  currentStepKey?: string;
-  instruction?: string;
-  error?: string;
-  createdAt: string;
-  updatedAt: string;
+export type { AgentDescriptor, AgentModelRoute, ProviderTestResult, WorkflowDefinition };
+export type WorkflowStep = WorkflowStepView;
+export type WorkflowChangedEvent = WorkflowEventPayload;
+export type WorkflowRun = Omit<WorkflowRunView, "project"> & {
   project?: VideoProject & Record<string, unknown>;
-  steps: WorkflowStep[];
-  revisions: WorkflowRevision[];
-}
-
-export interface WorkflowChangedEvent {
-  eventId: string;
-  runId: string;
-  stepKey?: string;
-  kind: string;
-  message: string;
-  runStatus: string;
-  at: string;
-}
-
-export interface ProviderTestResult {
-  ok: boolean;
-  message: string;
-  latencyMs: number;
-  model: string;
-  backend: string;
-}
+};
 
 export const fallbackWorkflowDefinition: WorkflowDefinition = {
   key: "knowledge-animation-v1",

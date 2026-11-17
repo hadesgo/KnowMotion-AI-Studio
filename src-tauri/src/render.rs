@@ -4,6 +4,7 @@ use crate::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
+use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -26,14 +27,14 @@ use uuid::Uuid;
 pub const RENDER_PROGRESS_EVENT: &str = "render.progress";
 pub const RENDER_CHANGED_EVENT: &str = "render.changed";
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RenderStartResponse {
     pub job_id: String,
     pub task_id: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RenderJobView {
     pub id: String,
@@ -54,7 +55,7 @@ pub struct RenderJobView {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RenderProgressPayload {
     pub event_id: String,
@@ -412,14 +413,22 @@ impl RenderManager {
             )
             .map_err(|error| error.to_string())?;
         let jobs = statement
-            .query_map(params![project_id, limit.clamp(1, 100) as i64], job_from_row)
+            .query_map(
+                params![project_id, limit.clamp(1, 100) as i64],
+                job_from_row,
+            )
             .map_err(|error| error.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?;
         Ok(jobs)
     }
 
-    pub fn cancel(&self, app: &AppHandle, project_id: &str, job_id: &str) -> Result<RenderJobView, String> {
+    pub fn cancel(
+        &self,
+        app: &AppHandle,
+        project_id: &str,
+        job_id: &str,
+    ) -> Result<RenderJobView, String> {
         let job = self.get(project_id, job_id)?;
         if !matches!(job.status.as_str(), "queued" | "running" | "canceling") {
             return Ok(job);
@@ -470,7 +479,14 @@ impl RenderManager {
                 }
             }
         });
-        self.emit_progress(app, job_id, job.percent, job.rendered_frames as u64, job.encoded_frames as u64, "canceling");
+        self.emit_progress(
+            app,
+            job_id,
+            job.percent,
+            job.rendered_frames as u64,
+            job.encoded_frames as u64,
+            "canceling",
+        );
         self.get(project_id, job_id)
     }
 
@@ -733,7 +749,14 @@ impl RenderManager {
             None,
         );
         let _ = self.record_artifact(&job_id, &relative_path, bytes, &sha256, duration_ms);
-        self.emit_progress(&app, &job_id, 100.0, expected_duration_ms as u64, 0, "completed");
+        self.emit_progress(
+            &app,
+            &job_id,
+            100.0,
+            expected_duration_ms as u64,
+            0,
+            "completed",
+        );
         self.emit_changed(&app, &job_id, "updated", "succeeded");
         logging::log_event(
             LogLevel::Info,
@@ -1268,9 +1291,9 @@ fn probe_duration(ffprobe: Option<&Path>, path: &Path) -> Result<i64, String> {
         .get("streams")
         .and_then(Value::as_array)
         .is_some_and(|streams| {
-            streams.iter().any(|stream| {
-                stream.get("codec_type").and_then(Value::as_str) == Some("video")
-            })
+            streams
+                .iter()
+                .any(|stream| stream.get("codec_type").and_then(Value::as_str) == Some("video"))
         });
     if !has_video {
         return Err("Rendered MP4 contains no video stream".to_string());
@@ -1359,10 +1382,9 @@ fn hydrate_composition_assets(
                     ));
                 }
             }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("Unable to load render asset: {error}"))?;
-            let mime = match extension.as_str()
-            {
+            let bytes =
+                fs::read(&path).map_err(|error| format!("Unable to load render asset: {error}"))?;
+            let mime = match extension.as_str() {
                 "png" => "image/png",
                 "jpg" | "jpeg" => "image/jpeg",
                 "webp" => "image/webp",
@@ -1376,10 +1398,7 @@ fn hydrate_composition_assets(
                 "ogv" => "video/ogg",
                 _ => "application/octet-stream",
             };
-            asset["src"] = Value::String(format!(
-                "data:{mime};base64,{}",
-                BASE64.encode(bytes)
-            ));
+            asset["src"] = Value::String(format!("data:{mime};base64,{}", BASE64.encode(bytes)));
             if asset.get("mimeType").is_none() {
                 asset["mimeType"] = Value::String(mime.to_string());
             }

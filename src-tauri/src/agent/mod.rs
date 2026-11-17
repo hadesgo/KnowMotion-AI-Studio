@@ -1,6 +1,6 @@
 mod agents;
 mod gguf;
-mod model;
+pub(crate) mod model;
 mod provider;
 pub(crate) mod runtime;
 mod tools;
@@ -10,17 +10,17 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 
 pub use model::workflow_definition;
-pub(crate) use provider::get_provider_secret;
 pub(crate) use model::WorkflowStartRequest;
-pub(crate) use runtime::AgentRuntime;
-#[cfg(test)]
-pub(crate) use runtime::WorkflowEventSink;
 #[cfg(test)]
 pub(crate) use model::{AgentModelRoute, ProviderConfig};
+pub(crate) use provider::get_provider_secret;
 #[cfg(test)]
 pub(crate) use provider::{
     clear_provider_secret, resolve_provider, save_provider_secret, LlmRequest,
 };
+pub(crate) use runtime::AgentRuntime;
+#[cfg(test)]
+pub(crate) use runtime::WorkflowEventSink;
 
 pub(crate) fn configure_llama_runtime(resource_dir: std::path::PathBuf) {
     gguf::configure_runtime(resource_dir);
@@ -99,7 +99,9 @@ pub fn workflow_rerun_step(
     run_id: String,
     step_key: String,
 ) -> Result<WorkflowRunView, String> {
-    runtime.inner().rerun_step(Arc::new(app), &run_id, &step_key)
+    runtime
+        .inner()
+        .rerun_step(Arc::new(app), &run_id, &step_key)
 }
 
 #[tauri::command]

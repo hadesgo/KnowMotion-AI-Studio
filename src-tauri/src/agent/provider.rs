@@ -406,9 +406,7 @@ pub async fn test_provider(config: ProviderConfig) -> Result<ProviderTestResult,
                     let capability = config
                         .capabilities
                         .iter()
-                        .find(|capability| {
-                            matches!(capability.as_str(), "TTS" | "ASR")
-                        })
+                        .find(|capability| matches!(capability.as_str(), "TTS" | "ASR"))
                         .map(String::as_str)
                         .unwrap_or("TTS");
                     ensure_audio(
@@ -542,11 +540,10 @@ pub async fn resolve_provider(
             provider.inference_backend.as_deref(),
         )
         .await?;
-        let local = tokio::task::spawn_blocking(move || {
-            GgufLlmProvider::load_with_lease(&provider, lease)
-        })
-        .await
-        .map_err(|error| format!("GGUF model loading task failed: {error}"))??;
+        let local =
+            tokio::task::spawn_blocking(move || GgufLlmProvider::load_with_lease(&provider, lease))
+                .await
+                .map_err(|error| format!("GGUF model loading task failed: {error}"))??;
         return Ok(Box::new(local));
     }
     let secret = if provider.protocol == "Ollama" {

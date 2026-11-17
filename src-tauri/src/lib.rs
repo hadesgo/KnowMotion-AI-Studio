@@ -1,8 +1,11 @@
+#[cfg(test)]
+mod acceptance;
 mod agent;
 mod asset_protocol;
 mod capabilities;
 mod database;
 mod image_queue;
+pub mod ipc_contract;
 mod job_object;
 mod local_model_scheduler;
 mod local_runtime;
@@ -12,12 +15,11 @@ mod public_url;
 mod render;
 mod storage;
 mod video;
-#[cfg(test)]
-mod acceptance;
 
 use chrono::Utc;
 use database::open_database;
 use rusqlite::{params, Connection};
+use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
 use std::{
@@ -34,9 +36,9 @@ struct AppState {
     database_path: PathBuf,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-struct DesktopStatus {
+pub struct DesktopStatus {
     storage_path: String,
     database_path: String,
     log_directory: String,
@@ -162,8 +164,7 @@ fn project_to_webview(project: &mut Value, project_id: &str) {
             let relative = storage::client_url_to_relative(project_id, source)
                 .unwrap_or_else(|| source.to_string());
             if let Some(relative) = storage::safe_relative_path(&relative) {
-                asset["src"] =
-                    Value::String(storage::public_asset_source(project_id, &relative));
+                asset["src"] = Value::String(storage::public_asset_source(project_id, &relative));
             }
         }
     }
@@ -212,10 +213,7 @@ fn load_studio_state(
             if !safe_identifier(&project_id) {
                 continue;
             }
-            let manifest_path = state
-                .projects_root
-                .join(&project_id)
-                .join("project.json");
+            let manifest_path = state.projects_root.join(&project_id).join("project.json");
             if let Some(manifest) = fs::read_to_string(&manifest_path)
                 .ok()
                 .and_then(|text| serde_json::from_str::<Value>(&text).ok())
@@ -264,8 +262,7 @@ fn save_studio_state(
             if !safe_identifier(&id) {
                 continue;
             }
-            let (_, normalized) =
-                mirror_project_files(&state.projects_root, &project)?;
+            let (_, normalized) = mirror_project_files(&state.projects_root, &project)?;
             project = normalized;
             normalized_projects.push(project);
         }
@@ -300,26 +297,26 @@ fn save_studio_state(
 
     let mut live_project_ids = std::collections::HashSet::new();
     for project in &normalized_projects {
-            let Some(id) = project.get("id").and_then(Value::as_str) else {
-                continue;
-            };
-            if !safe_identifier(id) {
-                continue;
-            }
-            live_project_ids.insert(id.to_string());
-            let title = project
-                .get("title")
-                .and_then(Value::as_str)
-                .unwrap_or("Untitled project");
-            let project_path = state.projects_root.join(id).to_string_lossy().to_string();
-            let updated_at = project
-                .get("updatedAt")
-                .and_then(Value::as_str)
-                .unwrap_or(&now);
-            let project_json = serde_json::to_string(project).map_err(|error| error.to_string())?;
-            transaction
-                .execute(
-                    r#"
+        let Some(id) = project.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if !safe_identifier(id) {
+            continue;
+        }
+        live_project_ids.insert(id.to_string());
+        let title = project
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("Untitled project");
+        let project_path = state.projects_root.join(id).to_string_lossy().to_string();
+        let updated_at = project
+            .get("updatedAt")
+            .and_then(Value::as_str)
+            .unwrap_or(&now);
+        let project_json = serde_json::to_string(project).map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                r#"
                     INSERT INTO projects(id, title, project_path, data_json, updated_at)
                     VALUES (?1, ?2, ?3, ?4, ?5)
                     ON CONFLICT(id) DO UPDATE SET
@@ -328,9 +325,9 @@ fn save_studio_state(
                         data_json = excluded.data_json,
                         updated_at = excluded.updated_at
                     "#,
-                    params![id, title, project_path, project_json, updated_at],
-                )
-                .map_err(|error| error.to_string())?;
+                params![id, title, project_path, project_json, updated_at],
+            )
+            .map_err(|error| error.to_string())?;
     }
 
     if let Some(providers) = persisted_state.get("providers").and_then(Value::as_array) {
@@ -560,6 +557,81 @@ fn import_project_package(
 }
 
 #[tauri::command]
+fn export_diagnostics(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    logging::flush()?;
+    let (sqlite_check, migration_count) = {
+        let database = state
+            .database
+            .lock()
+            .map_err(|_| "Database lock is unavailable".to_string())?;
+        let check = database
+            .query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0))
+            .unwrap_or_else(|error| format!("unavailable: {error}"));
+        let migrations = database
+            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap_or_default();
+        (check, migrations)
+    };
+    let runtime_presence = ["llama.cpp", "audio.cpp", "stable-diffusion.cpp"]
+        .into_iter()
+        .map(|runtime| {
+            (
+                runtime.to_string(),
+                local_runtime::installed_executable(runtime)
+                    .map(|path| Value::String(path.to_string_lossy().to_string()))
+                    .unwrap_or(Value::Null),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    let diagnostic = serde_json::json!({
+        "schemaVersion": "1.0",
+        "generatedAt": Utc::now().to_rfc3339(),
+        "application": {
+            "name": app.package_info().name,
+            "version": app.package_info().version.to_string(),
+            "os": std::env::consts::OS,
+            "architecture": std::env::consts::ARCH
+        },
+        "paths": {
+            "projects": state.projects_root.to_string_lossy(),
+            "database": state.database_path.to_string_lossy(),
+            "logs": logging::directory().map(|path| path.to_string_lossy().to_string())
+        },
+        "database": {
+            "quickCheck": sqlite_check,
+            "migrations": migration_count
+        },
+        "localRuntimes": runtime_presence,
+        "notes": "Logs are recursively redacted. Project media, provider secrets, and project JSON are not included."
+    });
+    let downloads = app
+        .path()
+        .download_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&downloads).map_err(|error| error.to_string())?;
+    let output = downloads.join(format!(
+        "knowmotion-diagnostics-{}.zip",
+        Utc::now().format("%Y%m%d-%H%M%S")
+    ));
+    let mut files = vec![
+        (
+            "diagnostic.json".to_string(),
+            serde_json::to_vec_pretty(&diagnostic).map_err(|error| error.to_string())?,
+        ),
+        (
+            "README.txt".to_string(),
+            b"KnowMotion remote-support diagnostics. Review paths and logs before sharing."
+                .to_vec(),
+        ),
+    ];
+    files.extend(logging::diagnostic_log_files(24 * 1024 * 1024)?);
+    storage::create_diagnostic_zip(&output, files)?;
+    Ok(output.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 fn scan_project_missing_assets(
     state: State<'_, AppState>,
     project_json: String,
@@ -605,12 +677,14 @@ fn write_webview_log(
     message: String,
     fields_json: Option<String>,
 ) -> Result<(), String> {
-    if message.len() > 128 * 1024 || fields_json.as_ref().is_some_and(|value| value.len() > 128 * 1024)
+    if message.len() > 128 * 1024
+        || fields_json
+            .as_ref()
+            .is_some_and(|value| value.len() > 128 * 1024)
     {
         return Err("WebView log payload exceeds the 128 KB limit".to_string());
     }
-    let level =
-        logging::LogLevel::parse(&level).ok_or_else(|| "Unknown log level".to_string())?;
+    let level = logging::LogLevel::parse(&level).ok_or_else(|| "Unknown log level".to_string())?;
     let fields = fields_json
         .map(|value| {
             serde_json::from_str::<Value>(&value)
@@ -623,13 +697,13 @@ fn write_webview_log(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let automation = std::env::var("TAURI_WEBVIEW_AUTOMATION").as_deref() == Ok("true");
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .register_uri_scheme_protocol("kmasset", |context, request| {
             serve_project_asset(context, request)
         })
-        .setup(|app| {
-            let automation = std::env::var("TAURI_WEBVIEW_AUTOMATION").as_deref() == Ok("true");
+        .setup(move |app| {
             let app_data = if automation {
                 std::env::var_os("KNOWMOTION_E2E_DATA_DIR")
                     .map(PathBuf::from)
@@ -672,11 +746,8 @@ pub fn run() {
                 agent::runtime::AgentRuntime::new(&database_path, projects_root.clone())?;
             let media_service =
                 media::MediaService::new(projects_root.clone(), app_data.join("cache/media"))?;
-            let render_manager = render::RenderManager::new(
-                database.clone(),
-                projects_root.clone(),
-                app.handle(),
-            )?;
+            let render_manager =
+                render::RenderManager::new(database.clone(), projects_root.clone(), app.handle())?;
             let image_queue = image_queue::ImageQueue::new(
                 database.clone(),
                 projects_root.clone(),
@@ -707,6 +778,7 @@ pub fn run() {
             export_project_json,
             export_project_package,
             import_project_package,
+            export_diagnostics,
             scan_project_missing_assets,
             desktop_status,
             write_webview_log,

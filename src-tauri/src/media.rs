@@ -1,7 +1,8 @@
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use crate::{logging, logging::LogLevel};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
 use hound::{SampleFormat, WavSpec, WavWriter};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -12,7 +13,7 @@ use std::{
 };
 use tauri::State;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GeneratedMediaAsset {
     pub id: String,
@@ -26,7 +27,7 @@ pub struct GeneratedMediaAsset {
     pub duration_ms: u64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NarrationRequest {
     pub project_id: String,
@@ -35,7 +36,7 @@ pub struct NarrationRequest {
     pub rate: f32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MusicRequest {
     pub project_id: String,

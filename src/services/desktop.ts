@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { StateStorage } from "zustand/middleware";
+import type { MissingAsset } from "../generated/ipc";
 import type { VideoProject } from "../types";
 
 export const isTauriDesktop =
@@ -120,10 +121,7 @@ export async function exportDesktopProject(
   });
 }
 
-export interface MissingAsset {
-  assetId: string;
-  source: string;
-}
+export type { MissingAsset };
 
 export async function scanDesktopProjectMissingAssets(
   project: VideoProject,
@@ -139,6 +137,11 @@ export async function importDesktopProjectPackage(
 ): Promise<VideoProject | null> {
   if (!isTauriDesktop) return null;
   return invoke<VideoProject>("import_project_package", { packagePath });
+}
+
+export async function exportDesktopDiagnostics(): Promise<string | null> {
+  if (!isTauriDesktop) return null;
+  return invoke<string>("export_diagnostics");
 }
 
 export async function getDesktopStoragePath(): Promise<string | null> {

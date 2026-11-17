@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleAlert,
+  Download,
   FolderOpen,
   HardDrive,
   KeyRound,
@@ -34,7 +35,10 @@ import type {
   ProviderProfile,
 } from "../types";
 import { makeId } from "../utils";
-import { isTauriDesktop } from "../services/desktop";
+import {
+  exportDesktopDiagnostics,
+  isTauriDesktop,
+} from "../services/desktop";
 import {
   clearProviderSecret,
   saveProviderSecret,
@@ -143,6 +147,7 @@ export default function Models() {
   const [schedulerStatus, setSchedulerStatus] =
     useState<LocalModelSchedulerStatus | null>(null);
   const [unloadingModels, setUnloadingModels] = useState(false);
+  const [exportingDiagnostics, setExportingDiagnostics] = useState(false);
 
   useEffect(() => {
     if (!isTauriDesktop) return;
@@ -182,6 +187,28 @@ export default function Models() {
       });
     } finally {
       setUnloadingModels(false);
+    }
+  };
+
+  const exportDiagnostics = async () => {
+    setExportingDiagnostics(true);
+    try {
+      const output = await exportDesktopDiagnostics();
+      pushToast({
+        type: "success",
+        title: "诊断包已导出",
+        message: output
+          ? `已脱敏日志与运行状态保存到 ${output}`
+          : "诊断包仅支持桌面版导出。",
+      });
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: "诊断包导出失败",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setExportingDiagnostics(false);
     }
   };
 
@@ -567,6 +594,15 @@ export default function Models() {
             disabled={unloadingModels}
           >
             {unloadingModels ? "卸载中" : "卸载全部"}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void exportDiagnostics()}
+            disabled={exportingDiagnostics}
+          >
+            <Download size={15} />
+            {exportingDiagnostics ? "打包中" : "导出诊断"}
           </Button>
         </div>
       )}

@@ -1,42 +1,24 @@
 import { invoke } from "@tauri-apps/api/core";
+import type {
+  LocalModelSchedulerStatus,
+  LocalRuntimeConfig,
+  RuntimeInstallResult,
+} from "../generated/ipc";
 
 export type LocalRuntimeId =
   | "llama.cpp"
   | "audio.cpp"
   | "stable-diffusion.cpp";
 
-export interface LocalRuntimeInstallResult {
+export type LocalRuntimeInstallResult = Omit<
+  RuntimeInstallResult,
+  "runtime" | "acceleration"
+> & {
   runtime: LocalRuntimeId;
-  version: string;
   acceleration: "CUDA 12.4" | "Vulkan" | string;
-  installPath: string;
-  executablePath: string;
-  alreadyInstalled: boolean;
-  repairPerformed: boolean;
-}
+};
 
-export interface LocalModelSchedulerStatus {
-  activeLease: {
-    id: string;
-    providerId: string;
-    workload: string;
-    startedAt: string;
-    elapsedMs: number;
-  } | null;
-  waitingRequests: number;
-  vramReserveMib: number;
-  freeVramMib: number | null;
-  managedProcesses: number;
-  runtimes: Array<{
-    key: string;
-    runtime: string;
-    baseUrl: string;
-    modelLoaded: boolean;
-    managedProcess: boolean;
-    idleSeconds: number;
-    gpuSmokeTested: boolean;
-  }>;
-}
+export type { LocalModelSchedulerStatus, LocalRuntimeConfig };
 
 export async function ensureLocalRuntime(
   runtime: LocalRuntimeId,

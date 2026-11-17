@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createWriteStream, existsSync } from "node:fs";
+import { createWriteStream, existsSync, readdirSync } from "node:fs";
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -35,6 +35,31 @@ function edgeVersion(executable) {
   ).trim();
 }
 
+function webViewVersion() {
+  const explicit = process.env.KNOWMOTION_WEBVIEW2_VERSION?.trim();
+  if (explicit) return explicit;
+  const roots = [
+    "C:/Program Files (x86)/Microsoft/EdgeWebView/Application",
+    "C:/Program Files/Microsoft/EdgeWebView/Application",
+  ];
+  const versions = roots
+    .filter((root) => existsSync(root))
+    .flatMap((root) => readdirSync(root, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && /^\d+\.\d+\.\d+\.\d+$/.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((left, right) => {
+      const leftParts = left.split(".").map(Number);
+      const rightParts = right.split(".").map(Number);
+      for (let index = 0; index < 4; index += 1) {
+        if (leftParts[index] !== rightParts[index]) {
+          return leftParts[index] - rightParts[index];
+        }
+      }
+      return 0;
+    });
+  return versions.at(-1);
+}
+
 export async function ensureMsEdgeDriver() {
   if (process.platform !== "win32") {
     throw new Error("Desktop E2E currently requires Windows and msedgedriver.");
@@ -50,7 +75,7 @@ export async function ensureMsEdgeDriver() {
   }
 
   const edge = findEdge();
-  const version = edgeVersion(edge);
+  const version = webViewVersion() ?? edgeVersion(edge);
   const destination = path.join(
     projectRoot,
     "node_modules/.cache/knowmotion-e2e/msedgedriver",

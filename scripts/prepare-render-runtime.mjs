@@ -30,6 +30,14 @@ async function fileExists(filePath) {
   }
 }
 
+async function directoryExists(directoryPath) {
+  try {
+    return (await stat(directoryPath)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 async function sha256(filePath) {
   const hash = createHash("sha256");
   hash.update(await readFile(filePath));
@@ -59,7 +67,23 @@ async function findHeadlessShell() {
 }
 
 async function main() {
-  await rm(rendererRoot, { recursive: true, force: true });
+  const nodeModulesLock = await sha256(path.join(projectRoot, "package-lock.json"));
+  const nodeModulesMarker = path.join(rendererRoot, ".node-modules-lock-sha256");
+  let existingNodeModulesLock = "";
+  try {
+    existingNodeModulesLock = (await readFile(nodeModulesMarker, "utf8")).trim();
+  } catch {
+    // The first idempotent build can adopt an already prepared node_modules tree.
+  }
+  const rendererNodeModules = path.join(rendererRoot, "node_modules");
+  const reuseNodeModules = await directoryExists(rendererNodeModules);
+  for (const stale of [
+    path.join(rendererRoot, "src"),
+    path.join(rendererRoot, "scripts"),
+    path.join(rendererRoot, "package.json"),
+  ]) {
+    await rm(stale, { recursive: true, force: true });
+  }
   await rm(browserRoot, { recursive: true, force: true });
   await rm(ffmpegRoot, { recursive: true, force: true });
   await mkdir(rendererRoot, { recursive: true });
@@ -67,10 +91,13 @@ async function main() {
   await mkdir(ffmpegRoot, { recursive: true });
   await mkdir(binariesRoot, { recursive: true });
 
-  await cp(path.join(projectRoot, "node_modules"), path.join(rendererRoot, "node_modules"), {
-    recursive: true,
-    dereference: true,
-  });
+  if (!reuseNodeModules || (existingNodeModulesLock && existingNodeModulesLock !== nodeModulesLock)) {
+    await cp(path.join(projectRoot, "node_modules"), rendererNodeModules, {
+      recursive: true,
+      dereference: true,
+    });
+  }
+  await writeFile(nodeModulesMarker, `${nodeModulesLock}\n`, "utf8");
   await cp(path.join(projectRoot, "src"), path.join(rendererRoot, "src"), {
     recursive: true,
   });
@@ -131,6 +158,7 @@ async function main() {
     nodeVersion: process.version,
     browserVersion: "chrome-headless-shell-pinned",
     ffmpegVersion: "remotion-compositor-pinned",
+    nodeModulesLockSha256: nodeModulesLock,
     browserExecutable: "browser/chrome-headless-shell.exe",
     ffmpegExecutable: "ffmpeg/ffmpeg.exe",
     ffprobeExecutable: "ffmpeg/ffprobe.exe",

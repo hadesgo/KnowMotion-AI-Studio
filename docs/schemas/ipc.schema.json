@@ -1,0 +1,1913 @@
+{
+  "$id": "https://knowmotion.local/schemas/ipc.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ActiveLeaseStatus": {
+      "properties": {
+        "elapsedMs": {
+          "format": "uint128",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "workload": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "elapsedMs",
+        "id",
+        "providerId",
+        "startedAt",
+        "workload"
+      ],
+      "type": "object"
+    },
+    "AgentDescriptor": {
+      "properties": {
+        "allowedTools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "approvalLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capability": {
+          "type": "string"
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "description": {
+          "type": "string"
+        },
+        "inputSchema": true,
+        "key": {
+          "type": "string"
+        },
+        "outputSchema": true,
+        "requiresApproval": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowedTools",
+        "capability",
+        "dependencies",
+        "description",
+        "inputSchema",
+        "key",
+        "outputSchema",
+        "requiresApproval",
+        "title",
+        "version"
+      ],
+      "type": "object"
+    },
+    "AgentModelRoute": {
+      "properties": {
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "providerId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "providerId"
+      ],
+      "type": "object"
+    },
+    "AsrCue": {
+      "properties": {
+        "end": {
+          "format": "double",
+          "type": "number"
+        },
+        "start": {
+          "format": "double",
+          "type": "number"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "end",
+        "start",
+        "text"
+      ],
+      "type": "object"
+    },
+    "AsrRequest": {
+      "properties": {
+        "assetId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/definitions/ImageProviderConfig"
+        }
+      },
+      "required": [
+        "assetId",
+        "projectId",
+        "provider"
+      ],
+      "type": "object"
+    },
+    "AsrResult": {
+      "properties": {
+        "cues": {
+          "items": {
+            "$ref": "#/definitions/AsrCue"
+          },
+          "type": "array"
+        },
+        "elapsedMs": {
+          "format": "uint128",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cues",
+        "elapsedMs",
+        "model",
+        "providerId",
+        "text"
+      ],
+      "type": "object"
+    },
+    "DesktopStatus": {
+      "properties": {
+        "databasePath": {
+          "type": "string"
+        },
+        "logDirectory": {
+          "type": "string"
+        },
+        "loggingReady": {
+          "type": "boolean"
+        },
+        "projectCount": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "sqliteReady": {
+          "type": "boolean"
+        },
+        "storagePath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "databasePath",
+        "logDirectory",
+        "loggingReady",
+        "projectCount",
+        "sqliteReady",
+        "storagePath"
+      ],
+      "type": "object"
+    },
+    "EmbeddingRequest": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/definitions/ImageProviderConfig"
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "texts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "projectId",
+        "provider",
+        "sourceId",
+        "texts"
+      ],
+      "type": "object"
+    },
+    "EmbeddingResult": {
+      "properties": {
+        "chunks": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "dimensions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "chunks",
+        "dimensions",
+        "model",
+        "providerId"
+      ],
+      "type": "object"
+    },
+    "GeneratedMediaAsset": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "local": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "sceneId": {
+          "type": "string"
+        },
+        "src": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "createdAt",
+        "durationMs",
+        "id",
+        "kind",
+        "local",
+        "name",
+        "prompt",
+        "sceneId",
+        "src"
+      ],
+      "type": "object"
+    },
+    "ImageConditioningInput": {
+      "properties": {
+        "controlType": {
+          "default": "",
+          "type": "string"
+        },
+        "endAt": {
+          "default": 0.0,
+          "format": "float",
+          "type": "number"
+        },
+        "lockCount": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "mode": {
+          "default": "",
+          "description": "prompt | img2img-reference | ip-adapter | controlnet",
+          "type": "string"
+        },
+        "referenceAssetId": {
+          "default": "",
+          "type": "string"
+        },
+        "startAt": {
+          "default": 0.0,
+          "format": "float",
+          "type": "number"
+        },
+        "strength": {
+          "default": 0.0,
+          "description": "0–1：img2img 去噪强度 / ControlNet 与 IP-Adapter 强度。",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "ImageGenerationRequest": {
+      "properties": {
+        "anchorLabel": {
+          "default": "",
+          "type": "string"
+        },
+        "conditioning": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ImageConditioningInput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "consistencyFingerprint": {
+          "default": "",
+          "type": "string"
+        },
+        "count": {
+          "format": "uint8",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "negativePrompt": {
+          "default": "",
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/definitions/ImageProviderConfig"
+        },
+        "references": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ImageReferenceInput"
+          },
+          "type": "array"
+        },
+        "sceneId": {
+          "type": "string"
+        },
+        "seed": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "size": {
+          "type": "string"
+        },
+        "style": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "count",
+        "projectId",
+        "prompt",
+        "provider",
+        "sceneId",
+        "size",
+        "style"
+      ],
+      "type": "object"
+    },
+    "ImageGenerationResult": {
+      "properties": {
+        "anchorLabel": {
+          "type": "string"
+        },
+        "assets": {
+          "items": true,
+          "type": "array"
+        },
+        "conditioning": {
+          "description": "实际生效的像素条件通道。",
+          "type": "string"
+        },
+        "degradations": {
+          "description": "降级或其他需要注意的原因。",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "elapsedMs": {
+          "format": "uint128",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "referenceCount": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "referenceMode": {
+          "type": "string"
+        },
+        "requestedConditioning": {
+          "description": "前端请求的条件通道。",
+          "type": "string"
+        },
+        "seed": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "anchorLabel",
+        "assets",
+        "conditioning",
+        "degradations",
+        "elapsedMs",
+        "model",
+        "providerId",
+        "referenceCount",
+        "referenceMode",
+        "requestedConditioning",
+        "seed"
+      ],
+      "type": "object"
+    },
+    "ImageJobView": {
+      "properties": {
+        "anchorLabel": {
+          "type": "string"
+        },
+        "assets": {
+          "items": true,
+          "type": "array"
+        },
+        "attempt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "count": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finishedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "maxAttempts": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "promptExcerpt": {
+          "type": "string"
+        },
+        "providerName": {
+          "type": "string"
+        },
+        "sceneId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "anchorLabel",
+        "assets",
+        "attempt",
+        "count",
+        "createdAt",
+        "id",
+        "maxAttempts",
+        "projectId",
+        "promptExcerpt",
+        "providerName",
+        "sceneId",
+        "status",
+        "taskId",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ImageProviderConfig": {
+      "properties": {
+        "baseUrl": {
+          "type": "string"
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "inferenceBackend": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LocalRuntimeConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "baseUrl",
+        "id",
+        "model",
+        "name",
+        "protocol"
+      ],
+      "type": "object"
+    },
+    "ImageReferenceInput": {
+      "properties": {
+        "assetId": {
+          "default": "",
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "type": "string"
+        },
+        "role": {
+          "default": "",
+          "type": "string"
+        },
+        "source": {
+          "default": "",
+          "description": "项目内 kmasset URL 或 data URL；不接受任意外部 URL。",
+          "type": "string"
+        },
+        "weight": {
+          "default": 0.0,
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "InpaintRequest": {
+      "properties": {
+        "anchorLabel": {
+          "default": "",
+          "type": "string"
+        },
+        "consistencyFingerprint": {
+          "default": "",
+          "type": "string"
+        },
+        "maskAlphaDataUrl": {
+          "description": "alpha 遮罩（透明=重绘），供 OpenAI images/edits 使用。",
+          "type": "string"
+        },
+        "maskCoverage": {
+          "default": 0.0,
+          "format": "float",
+          "type": "number"
+        },
+        "maskFeatherPx": {
+          "default": 0.0,
+          "format": "float",
+          "type": "number"
+        },
+        "maskLuminanceDataUrl": {
+          "default": "",
+          "description": "亮度遮罩（白=重绘），供 stable-diffusion.cpp 原生 img_gen 使用。",
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/definitions/ImageProviderConfig"
+        },
+        "sceneId": {
+          "type": "string"
+        },
+        "seed": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "size": {
+          "type": "string"
+        },
+        "sourceAssetId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "maskAlphaDataUrl",
+        "projectId",
+        "prompt",
+        "provider",
+        "sceneId",
+        "size",
+        "sourceAssetId"
+      ],
+      "type": "object"
+    },
+    "InpaintResult": {
+      "properties": {
+        "asset": true,
+        "elapsedMs": {
+          "format": "uint128",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "seed": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "asset",
+        "elapsedMs",
+        "mode",
+        "model",
+        "providerId",
+        "seed"
+      ],
+      "type": "object"
+    },
+    "KnowledgeSearchRequest": {
+      "properties": {
+        "limit": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/definitions/ImageProviderConfig"
+        },
+        "query": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "provider",
+        "query"
+      ],
+      "type": "object"
+    },
+    "KnowledgeSearchResult": {
+      "properties": {
+        "chunkIndex": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "score": {
+          "format": "double",
+          "type": "number"
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "chunkIndex",
+        "score",
+        "sourceId",
+        "text"
+      ],
+      "type": "object"
+    },
+    "LocalModelSchedulerStatus": {
+      "properties": {
+        "activeLease": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ActiveLeaseStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "freeVramMib": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "managedProcesses": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "runtimes": {
+          "items": {
+            "$ref": "#/definitions/ManagedRuntimeStatus"
+          },
+          "type": "array"
+        },
+        "vramReserveMib": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "waitingRequests": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "managedProcesses",
+        "runtimes",
+        "vramReserveMib",
+        "waitingRequests"
+      ],
+      "type": "object"
+    },
+    "LocalRuntimeConfig": {
+      "properties": {
+        "diffusionModel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "idleUnloadSeconds": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "llmVision": {
+          "default": null,
+          "description": "Qwen3-VL 之类的视觉塔（`--llm_vision`）。Qwen Image 2.1 的编辑通道缺少它 会直接报 “editing requires Qwen3-VL vision weights”。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelDirectory": {
+          "default": null,
+          "description": "Model root passed to `sd-server --model-dir`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelFamily": {
+          "default": null,
+          "description": "Explicit audio.cpp family for models whose name is not self-describing.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelPath": {
+          "default": null,
+          "description": "audio.cpp model file/package directory. stable-diffusion.cpp may use this as a shorthand for a single diffusion model file.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "textEncoder": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vae": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ManagedRuntimeStatus": {
+      "properties": {
+        "baseUrl": {
+          "type": "string"
+        },
+        "gpuSmokeTested": {
+          "type": "boolean"
+        },
+        "idleSeconds": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "key": {
+          "type": "string"
+        },
+        "managedProcess": {
+          "type": "boolean"
+        },
+        "modelLoaded": {
+          "type": "boolean"
+        },
+        "runtime": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "baseUrl",
+        "gpuSmokeTested",
+        "idleSeconds",
+        "key",
+        "managedProcess",
+        "modelLoaded",
+        "runtime"
+      ],
+      "type": "object"
+    },
+    "MissingAsset": {
+      "properties": {
+        "assetId": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "assetId",
+        "source"
+      ],
+      "type": "object"
+    },
+    "MusicRequest": {
+      "properties": {
+        "durationSeconds": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "type": "object"
+    },
+    "NarrationRequest": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "rate": {
+          "format": "float",
+          "type": "number"
+        },
+        "scenes": {
+          "items": true,
+          "type": "array"
+        },
+        "voice": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "rate",
+        "scenes",
+        "voice"
+      ],
+      "type": "object"
+    },
+    "ProviderConfig": {
+      "properties": {
+        "baseUrl": {
+          "type": "string"
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "contextSize": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "inferenceBackend": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LocalRuntimeConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "baseUrl",
+        "id",
+        "model",
+        "name",
+        "protocol"
+      ],
+      "type": "object"
+    },
+    "ProviderTestRequest": {
+      "properties": {
+        "provider": {
+          "$ref": "#/definitions/ProviderConfig"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "type": "object"
+    },
+    "ProviderTestResult": {
+      "properties": {
+        "backend": {
+          "type": "string"
+        },
+        "latencyMs": {
+          "format": "uint128",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "backend",
+        "latencyMs",
+        "message",
+        "model",
+        "ok"
+      ],
+      "type": "object"
+    },
+    "RenderJobView": {
+      "properties": {
+        "bytes": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "durationMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "encodedFrames": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "outputPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "percent": {
+          "format": "double",
+          "type": "number"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "projectRevision": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "renderedFrames": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "createdAt",
+        "encodedFrames",
+        "id",
+        "percent",
+        "projectId",
+        "projectRevision",
+        "renderedFrames",
+        "stage",
+        "status",
+        "taskId",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "RenderProgressPayload": {
+      "properties": {
+        "at": {
+          "type": "string"
+        },
+        "encodedFrames": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "eventId": {
+          "type": "string"
+        },
+        "jobId": {
+          "type": "string"
+        },
+        "percent": {
+          "format": "double",
+          "type": "number"
+        },
+        "renderedFrames": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "stage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "at",
+        "encodedFrames",
+        "eventId",
+        "jobId",
+        "percent",
+        "renderedFrames",
+        "stage"
+      ],
+      "type": "object"
+    },
+    "RenderStartResponse": {
+      "properties": {
+        "jobId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "jobId",
+        "taskId"
+      ],
+      "type": "object"
+    },
+    "ResearchFetchRequest": {
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "ResearchFetchResult": {
+      "properties": {
+        "bytes": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bytes",
+        "text",
+        "title",
+        "url"
+      ],
+      "type": "object"
+    },
+    "RuntimeInstallResult": {
+      "properties": {
+        "acceleration": {
+          "type": "string"
+        },
+        "alreadyInstalled": {
+          "type": "boolean"
+        },
+        "executablePath": {
+          "type": "string"
+        },
+        "installPath": {
+          "type": "string"
+        },
+        "repairPerformed": {
+          "type": "boolean"
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "acceleration",
+        "alreadyInstalled",
+        "executablePath",
+        "installPath",
+        "repairPerformed",
+        "runtime",
+        "version"
+      ],
+      "type": "object"
+    },
+    "TtsGenerationRequest": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/definitions/ImageProviderConfig"
+        },
+        "rate": {
+          "format": "float",
+          "type": "number"
+        },
+        "scenes": {
+          "items": {
+            "$ref": "#/definitions/TtsScene"
+          },
+          "type": "array"
+        },
+        "voice": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "provider",
+        "rate",
+        "scenes",
+        "voice"
+      ],
+      "type": "object"
+    },
+    "TtsGenerationResult": {
+      "properties": {
+        "assets": {
+          "items": true,
+          "type": "array"
+        },
+        "elapsedMs": {
+          "format": "uint128",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "assets",
+        "elapsedMs",
+        "model",
+        "providerId"
+      ],
+      "type": "object"
+    },
+    "TtsScene": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "narration": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "narration",
+        "title"
+      ],
+      "type": "object"
+    },
+    "WorkflowDefinition": {
+      "properties": {
+        "agents": {
+          "items": {
+            "$ref": "#/definitions/AgentDescriptor"
+          },
+          "type": "array"
+        },
+        "description": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agents",
+        "description",
+        "key",
+        "title",
+        "version"
+      ],
+      "type": "object"
+    },
+    "WorkflowEventPayload": {
+      "properties": {
+        "at": {
+          "type": "string"
+        },
+        "eventId": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "runStatus": {
+          "type": "string"
+        },
+        "stepKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "at",
+        "eventId",
+        "kind",
+        "message",
+        "runId",
+        "runStatus"
+      ],
+      "type": "object"
+    },
+    "WorkflowRevision": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "stepKey": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "undoable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "createdAt",
+        "id",
+        "projectId",
+        "revision",
+        "runId",
+        "stepKey",
+        "summary",
+        "undoable"
+      ],
+      "type": "object"
+    },
+    "WorkflowRunView": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "currentStepKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "instruction": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project": true,
+        "projectId": {
+          "type": "string"
+        },
+        "revisions": {
+          "items": {
+            "$ref": "#/definitions/WorkflowRevision"
+          },
+          "type": "array"
+        },
+        "status": {
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/definitions/WorkflowStepView"
+          },
+          "type": "array"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "workflowKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "createdAt",
+        "id",
+        "projectId",
+        "revisions",
+        "status",
+        "steps",
+        "updatedAt",
+        "workflowKey"
+      ],
+      "type": "object"
+    },
+    "WorkflowStartRequest": {
+      "properties": {
+        "agentRoutes": {
+          "additionalProperties": {
+            "$ref": "#/definitions/AgentModelRoute"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "instruction": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maxAttempts": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "project": true,
+        "providers": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ProviderConfig"
+          },
+          "type": "array"
+        },
+        "targetAgent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "type": "object"
+    },
+    "WorkflowStepView": {
+      "properties": {
+        "approvalLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "approvalStatus": {
+          "type": "string"
+        },
+        "attempt": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "description": {
+          "type": "string"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finishedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "maxAttempts": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "providerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requiresApproval": {
+          "type": "boolean"
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "approvalStatus",
+        "attempt",
+        "dependencies",
+        "description",
+        "id",
+        "key",
+        "maxAttempts",
+        "requiresApproval",
+        "status",
+        "title",
+        "warnings"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Canonical root for the IPC contract generator.\n\nRuntime DTOs are the source of truth. Adding an IPC DTO must also add it here so both TypeScript and JSON Schema are regenerated from the same Rust definitions.",
+  "properties": {
+    "activeLeaseStatus": {
+      "$ref": "#/definitions/ActiveLeaseStatus"
+    },
+    "agentDescriptor": {
+      "$ref": "#/definitions/AgentDescriptor"
+    },
+    "agentModelRoute": {
+      "$ref": "#/definitions/AgentModelRoute"
+    },
+    "asrCue": {
+      "$ref": "#/definitions/AsrCue"
+    },
+    "asrRequest": {
+      "$ref": "#/definitions/AsrRequest"
+    },
+    "asrResult": {
+      "$ref": "#/definitions/AsrResult"
+    },
+    "desktopStatus": {
+      "$ref": "#/definitions/DesktopStatus"
+    },
+    "embeddingRequest": {
+      "$ref": "#/definitions/EmbeddingRequest"
+    },
+    "embeddingResult": {
+      "$ref": "#/definitions/EmbeddingResult"
+    },
+    "generatedMediaAsset": {
+      "$ref": "#/definitions/GeneratedMediaAsset"
+    },
+    "imageConditioningInput": {
+      "$ref": "#/definitions/ImageConditioningInput"
+    },
+    "imageGenerationRequest": {
+      "$ref": "#/definitions/ImageGenerationRequest"
+    },
+    "imageGenerationResult": {
+      "$ref": "#/definitions/ImageGenerationResult"
+    },
+    "imageJob": {
+      "$ref": "#/definitions/ImageJobView"
+    },
+    "imageProviderConfig": {
+      "$ref": "#/definitions/ImageProviderConfig"
+    },
+    "imageReferenceInput": {
+      "$ref": "#/definitions/ImageReferenceInput"
+    },
+    "inpaintRequest": {
+      "$ref": "#/definitions/InpaintRequest"
+    },
+    "inpaintResult": {
+      "$ref": "#/definitions/InpaintResult"
+    },
+    "knowledgeSearchRequest": {
+      "$ref": "#/definitions/KnowledgeSearchRequest"
+    },
+    "knowledgeSearchResult": {
+      "$ref": "#/definitions/KnowledgeSearchResult"
+    },
+    "localModelSchedulerStatus": {
+      "$ref": "#/definitions/LocalModelSchedulerStatus"
+    },
+    "localRuntimeConfig": {
+      "$ref": "#/definitions/LocalRuntimeConfig"
+    },
+    "managedRuntimeStatus": {
+      "$ref": "#/definitions/ManagedRuntimeStatus"
+    },
+    "missingAsset": {
+      "$ref": "#/definitions/MissingAsset"
+    },
+    "musicRequest": {
+      "$ref": "#/definitions/MusicRequest"
+    },
+    "narrationRequest": {
+      "$ref": "#/definitions/NarrationRequest"
+    },
+    "providerConfig": {
+      "$ref": "#/definitions/ProviderConfig"
+    },
+    "providerTestRequest": {
+      "$ref": "#/definitions/ProviderTestRequest"
+    },
+    "providerTestResult": {
+      "$ref": "#/definitions/ProviderTestResult"
+    },
+    "renderJob": {
+      "$ref": "#/definitions/RenderJobView"
+    },
+    "renderProgress": {
+      "$ref": "#/definitions/RenderProgressPayload"
+    },
+    "renderStartResponse": {
+      "$ref": "#/definitions/RenderStartResponse"
+    },
+    "researchFetchRequest": {
+      "$ref": "#/definitions/ResearchFetchRequest"
+    },
+    "researchFetchResult": {
+      "$ref": "#/definitions/ResearchFetchResult"
+    },
+    "runtimeInstallResult": {
+      "$ref": "#/definitions/RuntimeInstallResult"
+    },
+    "ttsGenerationRequest": {
+      "$ref": "#/definitions/TtsGenerationRequest"
+    },
+    "ttsGenerationResult": {
+      "$ref": "#/definitions/TtsGenerationResult"
+    },
+    "ttsScene": {
+      "$ref": "#/definitions/TtsScene"
+    },
+    "workflowChangedEvent": {
+      "$ref": "#/definitions/WorkflowEventPayload"
+    },
+    "workflowDefinition": {
+      "$ref": "#/definitions/WorkflowDefinition"
+    },
+    "workflowRevision": {
+      "$ref": "#/definitions/WorkflowRevision"
+    },
+    "workflowRun": {
+      "$ref": "#/definitions/WorkflowRunView"
+    },
+    "workflowStartRequest": {
+      "$ref": "#/definitions/WorkflowStartRequest"
+    },
+    "workflowStep": {
+      "$ref": "#/definitions/WorkflowStepView"
+    }
+  },
+  "required": [
+    "activeLeaseStatus",
+    "agentDescriptor",
+    "agentModelRoute",
+    "asrCue",
+    "asrRequest",
+    "asrResult",
+    "desktopStatus",
+    "embeddingRequest",
+    "embeddingResult",
+    "generatedMediaAsset",
+    "imageConditioningInput",
+    "imageGenerationRequest",
+    "imageGenerationResult",
+    "imageJob",
+    "imageProviderConfig",
+    "imageReferenceInput",
+    "inpaintRequest",
+    "inpaintResult",
+    "knowledgeSearchRequest",
+    "knowledgeSearchResult",
+    "localModelSchedulerStatus",
+    "localRuntimeConfig",
+    "managedRuntimeStatus",
+    "missingAsset",
+    "musicRequest",
+    "narrationRequest",
+    "providerConfig",
+    "providerTestRequest",
+    "providerTestResult",
+    "renderJob",
+    "renderProgress",
+    "renderStartResponse",
+    "researchFetchRequest",
+    "researchFetchResult",
+    "runtimeInstallResult",
+    "ttsGenerationRequest",
+    "ttsGenerationResult",
+    "ttsScene",
+    "workflowChangedEvent",
+    "workflowDefinition",
+    "workflowRevision",
+    "workflowRun",
+    "workflowStartRequest",
+    "workflowStep"
+  ],
+  "title": "KnowMotion IPC Contract",
+  "type": "object"
+}

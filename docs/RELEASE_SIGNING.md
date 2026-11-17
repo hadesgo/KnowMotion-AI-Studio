@@ -3,7 +3,8 @@
 本文说明如何产出**带 Authenticode 签名**的安装包和**带签名的 updater 清单**，以及如何在干净
 Windows VM 上重新执行安装 / 卸载 / 离线渲染验收。
 
-> 当前状态：代码与脚本已就绪，但仓库里没有证书和私钥，所以**尚未执行过一次真实签名构建**。
+> 当前状态：签名构建、updater 清单、SBOM、日志聚合和干净 runner 发布 workflow 已就绪。仓库里没有证书和私钥，
+> 因此真实签名发布仍需在 GitHub Secrets 中配置凭据后才能执行。
 > 具体缺口见文末「当前缺口」。
 
 ## 1. 需要准备什么
@@ -60,6 +61,19 @@ npm run desktop:build:signed
    - `bundle.createUpdaterArtifacts: true` 生成签名 updater 产物；
 3. 重新验签每个产物（含时间戳）并写出 `src-tauri/target/release/signed-release.json`（含 SHA-256）。
 
+GitHub Actions 使用 `.github/workflows/release.yml` 自动完成：
+
+```text
+质量门禁
+→ CycloneDX Rust + npm SBOM
+→ Authenticode + RFC3161 时间戳签名
+→ signed updater artifacts
+→ 签名后干净 runner 安装/离线渲染/卸载 smoke
+→ latest.json
+→ 日志与哈希清单聚合
+→ GitHub Release
+```
+
 单独验签：
 
 ```bash
@@ -95,10 +109,26 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-vm/run-insta
 2. 在应用内接入 `tauri-plugin-updater`（Rust + JS）并配置 `plugins.updater.pubkey` 与 `endpoints`；
 3. 用同一把私钥在 CI 中签名，发布前校验公钥与私钥匹配。
 
-第 1、2 步属于发布通道决策（更新服务器地址、灰度策略），本轮只落地了构建期签名，
-没有接入运行时检查更新入口——避免在没有更新服务器的情况下留下“看起来能更新其实不能”的假功能。
+CI 会生成静态 updater 清单 `release-evidence/artifacts/latest.json`，其中 URL 指向同一
+GitHub Release 的 NSIS 安装包，`signature` 取自 Tauri 生成的 `*.sig`。应用内是否启用自动检查更新
+仍需发布方配置 updater endpoint 和公钥；未配置时不会显示假的“已自动更新”状态。
 
-## 6. 当前缺口
+## 6. SBOM、诊断与证据
+
+```powershell
+./scripts/release/generate-sbom.ps1
+./scripts/release/aggregate-release.ps1
+```
+
+`generate-sbom.ps1` 生成并验证 `rust.cdx.json` 与 `npm.cdx.json`。`aggregate-release.ps1`
+把安装包、updater 签名、SBOM、E2E 结果和 release 报告复制到 `release-evidence/artifacts`，
+并生成包含 SHA-256 的 `release-manifest.json`。完整构建/VM 日志通过 PowerShell transcript
+保留在 `release-evidence/ci`。
+
+应用内“模型与连接 → 导出诊断”会生成脱敏 ZIP，包含运行版本、SQLite `quick_check`、
+本地运行时状态和递归脱敏日志；不包含项目媒体、Provider 密钥或项目 JSON。
+
+## 7. 当前缺口
 
 | 缺口 | 影响 | 解封条件 |
 |---|---|---|

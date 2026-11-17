@@ -1,16 +1,20 @@
 use crate::{
-    agent::get_provider_secret, logging, logging::LogLevel, safe_identifier,
+    agent::get_provider_secret,
     local_model_scheduler::{
         acquire_gpu, ensure_audio, ensure_diffusion, is_loopback_base_url, GpuLease,
         LocalRuntimeConfig, Workload,
     },
+    logging,
+    logging::LogLevel,
     public_url::{fetch_public_http, PublicHttpPolicy},
+    safe_identifier,
     storage::persist_generated_image,
     AppState,
 };
 use chrono::Utc;
 use reqwest::Client;
 use rusqlite::Connection;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -30,11 +34,7 @@ const MAX_RESEARCH_SOURCE_BYTES: usize = 5 * 1024 * 1024;
 const MAX_DOWNLOADED_IMAGE_BYTES: usize = 25 * 1024 * 1024;
 const AUDIO_CPP_PROTOCOL: &str = "audio.cpp";
 const STABLE_DIFFUSION_CPP_PROTOCOL: &str = "stable-diffusion.cpp";
-const RESEARCH_CONTENT_TYPES: &[&str] = &[
-    "text/html",
-    "application/xhtml+xml",
-    "text/plain",
-];
+const RESEARCH_CONTENT_TYPES: &[&str] = &["text/html", "application/xhtml+xml", "text/plain"];
 const RESEARCH_HTTP_POLICY: PublicHttpPolicy = PublicHttpPolicy {
     max_bytes: MAX_RESEARCH_SOURCE_BYTES,
     max_redirects: 5,
@@ -48,7 +48,7 @@ const IMAGE_HTTP_POLICY: PublicHttpPolicy = PublicHttpPolicy {
     allowed_content_types: &[],
 };
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageProviderConfig {
     pub id: String,
@@ -66,7 +66,7 @@ pub struct ImageProviderConfig {
     pub capabilities: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageReferenceInput {
     #[serde(default)]
@@ -82,7 +82,7 @@ pub struct ImageReferenceInput {
     pub source: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageConditioningInput {
     /// prompt | img2img-reference | ip-adapter | controlnet
@@ -103,7 +103,7 @@ pub struct ImageConditioningInput {
     pub lock_count: usize,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageGenerationRequest {
     pub project_id: String,
@@ -127,7 +127,7 @@ pub struct ImageGenerationRequest {
     pub conditioning: Option<ImageConditioningInput>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageGenerationResult {
     pub assets: Vec<Value>,
@@ -146,7 +146,7 @@ pub struct ImageGenerationResult {
     pub degradations: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TtsScene {
     pub id: String,
@@ -154,7 +154,7 @@ pub struct TtsScene {
     pub narration: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TtsGenerationRequest {
     pub project_id: String,
@@ -164,7 +164,7 @@ pub struct TtsGenerationRequest {
     pub rate: f32,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TtsGenerationResult {
     pub assets: Vec<Value>,
@@ -173,7 +173,7 @@ pub struct TtsGenerationResult {
     pub elapsed_ms: u128,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AsrRequest {
     pub project_id: String,
@@ -181,7 +181,7 @@ pub struct AsrRequest {
     pub provider: ImageProviderConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AsrCue {
     pub start: f64,
@@ -189,7 +189,7 @@ pub struct AsrCue {
     pub text: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AsrResult {
     pub text: String,
@@ -199,7 +199,7 @@ pub struct AsrResult {
     pub elapsed_ms: u128,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EmbeddingRequest {
     pub project_id: String,
@@ -208,7 +208,7 @@ pub struct EmbeddingRequest {
     pub provider: ImageProviderConfig,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EmbeddingResult {
     pub chunks: usize,
@@ -217,7 +217,7 @@ pub struct EmbeddingResult {
     pub model: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct KnowledgeSearchRequest {
     pub project_id: String,
@@ -226,7 +226,7 @@ pub struct KnowledgeSearchRequest {
     pub provider: ImageProviderConfig,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct KnowledgeSearchResult {
     pub source_id: String,
@@ -235,13 +235,13 @@ pub struct KnowledgeSearchResult {
     pub score: f64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ResearchFetchRequest {
     pub url: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ResearchFetchResult {
     pub title: String,
@@ -332,7 +332,8 @@ pub async fn transcribe_project_audio(
         .and_then(|name| name.to_str())
         .unwrap_or("audio.wav");
     let started = Instant::now();
-    let (text, cues) = transcribe_audio(&request.provider, secret.as_deref(), filename, &audio).await?;
+    let (text, cues) =
+        transcribe_audio(&request.provider, secret.as_deref(), filename, &audio).await?;
     logging::log_event(
         LogLevel::Info,
         "provider.asr",
@@ -887,7 +888,7 @@ async fn prepare_local_diffusion(
     Ok(Some(lease))
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct InpaintRequest {
     pub project_id: String,
@@ -913,7 +914,7 @@ pub struct InpaintRequest {
     pub consistency_fingerprint: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct InpaintResult {
     pub asset: Value,
@@ -968,7 +969,7 @@ pub(crate) async fn execute_image_generation(
     };
     let seed = request
         .seed
-        .unwrap_or_else(|| (Utc::now().timestamp_millis() as i64).rem_euclid(2_000_000_000));
+        .unwrap_or_else(|| Utc::now().timestamp_millis().rem_euclid(2_000_000_000));
     let mut reference_images: Vec<(&ImageReferenceInput, Vec<u8>)> = Vec::new();
     for reference in request.references.iter().take(MAX_REFERENCE_IMAGES) {
         match read_reference_bytes(projects_root, &request.project_id, &reference.source) {
@@ -1203,7 +1204,7 @@ pub async fn inpaint_project_image(
     )?;
     let seed = request
         .seed
-        .unwrap_or_else(|| (Utc::now().timestamp_millis() as i64).rem_euclid(2_000_000_000));
+        .unwrap_or_else(|| Utc::now().timestamp_millis().rem_euclid(2_000_000_000));
     let started = Instant::now();
     let alpha_mask = decode_png_data_url(&request.mask_alpha_data_url, "alpha mask")?;
     let luminance_mask = if request.mask_luminance_data_url.trim().is_empty() {
@@ -1357,12 +1358,14 @@ pub(crate) async fn execute_inpaint(
     match provider.protocol.as_str() {
         STABLE_DIFFUSION_CPP_PROTOCOL => {
             let luminance_mask = luminance_mask.ok_or_else(|| {
-                "stable-diffusion.cpp inpainting needs a luminance mask (white = repaint)".to_string()
+                "stable-diffusion.cpp inpainting needs a luminance mask (white = repaint)"
+                    .to_string()
             })?;
             validate_inpaint_mask(source, luminance_mask, false)?;
             let _local_lease = prepare_local_diffusion(provider).await?;
-            let seed = (Utc::now().timestamp_millis() as i64).rem_euclid(2_000_000_000);
-            match generate_sd_cpp_inpaint(provider, prompt, size, source, luminance_mask, seed).await
+            let seed = Utc::now().timestamp_millis().rem_euclid(2_000_000_000);
+            match generate_sd_cpp_inpaint(provider, prompt, size, source, luminance_mask, seed)
+                .await
             {
                 Ok(bytes) => Ok((bytes, "sdcpp-native-inpaint")),
                 Err(NativeFailure::Unsupported(reason)) => {
@@ -1435,7 +1438,9 @@ async fn generate_sd_cpp_inpaint(
     let secret = optional_provider_secret(provider).map_err(NativeFailure::Failed)?;
     let base = provider.base_url.trim_end_matches('/').to_string();
     let client = http_client().map_err(NativeFailure::Failed)?;
-    let mut request = client.post(format!("{base}/sdcpp/v1/img_gen")).json(&payload);
+    let mut request = client
+        .post(format!("{base}/sdcpp/v1/img_gen"))
+        .json(&payload);
     if let Some(secret) = secret {
         request = request.bearer_auth(secret);
     }
@@ -1444,8 +1449,7 @@ async fn generate_sd_cpp_inpaint(
         .await
         .map_err(|error| NativeFailure::Failed(provider_network_error(error)))?;
     let status = response.status();
-    if status == reqwest::StatusCode::NOT_FOUND
-        || status == reqwest::StatusCode::METHOD_NOT_ALLOWED
+    if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::METHOD_NOT_ALLOWED
     {
         return Err(NativeFailure::Unsupported(
             "当前 stable-diffusion.cpp 运行时没有 /sdcpp/v1/img_gen 原生接口".to_string(),
@@ -1530,9 +1534,7 @@ fn probe_image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
                 continue;
             }
             let marker = bytes[index + 1];
-            if (0xc0..=0xcf).contains(&marker)
-                && !matches!(marker, 0xc4 | 0xc8 | 0xcc)
-            {
+            if (0xc0..=0xcf).contains(&marker) && !matches!(marker, 0xc4 | 0xc8 | 0xcc) {
                 let height = u16::from_be_bytes([bytes[index + 5], bytes[index + 6]]) as u32;
                 let width = u16::from_be_bytes([bytes[index + 7], bytes[index + 8]]) as u32;
                 return Some((width, height));
@@ -1701,25 +1703,21 @@ fn plan_conditioning(
     plan.lock_count = input.lock_count;
 
     let primary = if input.reference_asset_id.trim().is_empty() {
-        references
-            .iter()
-            .max_by(|left, right| {
-                reference_priority(left.0)
-                    .partial_cmp(&reference_priority(right.0))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+        references.iter().max_by(|left, right| {
+            reference_priority(left.0)
+                .partial_cmp(&reference_priority(right.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     } else {
         references
             .iter()
             .find(|(reference, _)| reference.asset_id == input.reference_asset_id)
             .or_else(|| {
-                references
-                    .iter()
-                    .max_by(|left, right| {
-                        reference_priority(left.0)
-                            .partial_cmp(&reference_priority(right.0))
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
+                references.iter().max_by(|left, right| {
+                    reference_priority(left.0)
+                        .partial_cmp(&reference_priority(right.0))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
             })
     };
     if let Some((reference, bytes)) = primary {
@@ -1769,7 +1767,11 @@ fn clamp_conditioning_strength(strength: f32) -> f32 {
 }
 
 fn reference_priority(reference: &ImageReferenceInput) -> f32 {
-    let role_bonus = if reference.role == "character" { 1.0 } else { 0.0 };
+    let role_bonus = if reference.role == "character" {
+        1.0
+    } else {
+        0.0
+    };
     role_bonus + reference.weight.clamp(0.0, 1.0)
 }
 
@@ -1793,6 +1795,7 @@ fn parse_image_size(size: &str) -> (u32, u32) {
 /// 申请 GPU 租约、启动或复用 `sd-server`。
 ///
 /// 命令层、批量队列与真实服务验收共用这一实现。
+#[cfg(test)]
 pub(crate) async fn generate_images_for_provider(
     provider: &ImageProviderConfig,
     prompt: &str,
@@ -1833,8 +1836,16 @@ async fn generate_images_with_conditioning(
             let mut degradations = Vec::new();
             let mut effective = plan.effective;
             if matches!(effective, "prompt+controlnet" | "prompt+ip-adapter") {
-                match generate_sd_cpp_native(provider, prompt, negative_prompt, size, count, seed, plan)
-                    .await
+                match generate_sd_cpp_native(
+                    provider,
+                    prompt,
+                    negative_prompt,
+                    size,
+                    count,
+                    seed,
+                    plan,
+                )
+                .await
                 {
                     Ok(images) => return Ok((images, effective.to_string(), degradations)),
                     Err(NativeFailure::Unsupported(reason)) => {
@@ -1901,8 +1912,7 @@ async fn generate_sd_cpp_native(
         .await
         .map_err(|error| NativeFailure::Failed(provider_network_error(error)))?;
     let status = response.status();
-    if status == reqwest::StatusCode::NOT_FOUND
-        || status == reqwest::StatusCode::METHOD_NOT_ALLOWED
+    if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::METHOD_NOT_ALLOWED
     {
         return Err(NativeFailure::Unsupported(format!(
             "当前 stable-diffusion.cpp 运行时没有 /sdcpp/v1/img_gen 原生接口，{} 通道不可用",
@@ -1962,7 +1972,10 @@ fn native_conditioning_payload(
     if plan.effective == "prompt+controlnet" {
         payload["control_image"] = json!(reference);
         payload["control_strength"] = json!(plan.strength);
-        if matches!(plan.control_type.as_str(), "pose" | "depth" | "canny" | "lineart") {
+        if matches!(
+            plan.control_type.as_str(),
+            "pose" | "depth" | "canny" | "lineart"
+        ) {
             payload["control_type"] = json!(plan.control_type);
         }
     } else if plan.effective == "prompt+ip-adapter" {
@@ -2036,7 +2049,11 @@ async fn await_sd_cpp_job(
         if !status.is_success() {
             return Err(format!("stable-diffusion.cpp 任务查询失败：{status}"));
         }
-        match state.get("status").and_then(Value::as_str).unwrap_or_default() {
+        match state
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+        {
             "completed" => {
                 return job_images(&state)
                     .unwrap_or_else(|| Err("图像任务完成但没有返回图像".to_string()));
@@ -2046,7 +2063,10 @@ async fn await_sd_cpp_job(
                     .pointer("/error/message")
                     .and_then(Value::as_str)
                     .unwrap_or("图像任务失败");
-                return Err(format!("stable-diffusion.cpp 图像任务失败：{}", limit(message)));
+                return Err(format!(
+                    "stable-diffusion.cpp 图像任务失败：{}",
+                    limit(message)
+                ));
             }
             _ => continue,
         }
@@ -2054,6 +2074,7 @@ async fn await_sd_cpp_job(
 }
 
 /// img2img 参考锁定：以角色参考图为初始图重绘，`denoising_strength` 由锁定权重决定。
+#[allow(clippy::too_many_arguments)]
 async fn generate_sd_cpp_img2img(
     provider: &ImageProviderConfig,
     prompt: &str,
@@ -2656,7 +2677,8 @@ mod tests {
             Some(&input),
             &[(&reference, b"\x89PNG\r\n\x1a\npayload".to_vec())],
         );
-        let payload = native_conditioning_payload(&plan, "a scientist", "blurry", "1536x1024", 2, 42);
+        let payload =
+            native_conditioning_payload(&plan, "a scientist", "blurry", "1536x1024", 2, 42);
         assert_eq!(payload["width"], 1536);
         assert_eq!(payload["height"], 1024);
         assert_eq!(payload["batch_count"], 2);

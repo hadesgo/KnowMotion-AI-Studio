@@ -8,7 +8,7 @@
 | 组件 | Vitest + Testing Library + jsdom | 受控控件、Modal 键盘与焦点、进度可访问性、新建项目流程 |
 | Rust | cargo test | 存储、迁移、Agent、Provider、Canvas/GSAP 归一化、日志脱敏、轮转、Job Object 进程树 |
 | 真实服务验收 | cargo test --ignored + 本地模型 | LLM / Embedding / TTS / ASR / Image 五项真实运行时端到端 |
-| 桌面 E2E | tauri-driver + WebDriverIO + msedgedriver | 真实 Tauri release 应用、页面导航、Canvas 操作与重启持久化 |
+| 桌面 E2E | tauri-driver + WebDriverIO + msedgedriver | release 应用、三道审批、真实 WAV、运行时损坏修复、渲染取消与重启持久化 |
 
 ## 组件测试
 
@@ -53,11 +53,15 @@ npm run test:e2e:desktop:full
 完整命令执行：
 
 1. 构建前端、离线渲染运行目录和 Tauri release EXE。
-2. 读取本机 Edge `ProductVersion`。
+2. 读取 Tauri 实际使用的 WebView2 Runtime 版本，缺失时才回退到 Edge 版本。
 3. 使用匹配版本的 `msedgedriver`，缓存于 `node_modules/.cache`。
 4. 启动 `tauri-driver`。
 5. 在临时 `KNOWMOTION_E2E_DATA_DIR` 中运行测试。
-6. 删除 WebDriver 会话并重新启动应用，验证 SQLite 项目恢复。
+6. 使用本机 mock Ollama 协议完成九 Agent 工作流，并逐一批准大纲、分镜和质量节点。
+7. 生成本地旁白 WAV 与背景音乐，检查项目 `assets/audio` 的实际文件。
+8. 通过临时 HTTP 运行时归档安装 llama.cpp fixture，篡改可执行文件后再次安装，断言自动修复。
+9. 启动持久 MP4 渲染后取消，导出脱敏诊断包。
+10. 删除 WebDriver 会话并重新启动应用，验证 SQLite 项目恢复。
 
 已有最新 release EXE 时，可直接运行：
 
@@ -74,11 +78,23 @@ $env:KNOWMOTION_EDGE_BINARY = "C:\Program Files (x86)\Microsoft\Edge\Application
 npm run test:e2e:desktop
 ```
 
-失败时 `e2e-artifacts/desktop-e2e-failure.png` 和 `.html` 会保留页面现场；每次运行会先清理上次诊断文件。
+成功时写入 `e2e-artifacts/desktop-e2e-result.json`。失败时保留截图、DOM、WebDriver 日志和隔离应用数据，便于定位 WebView2/运行时问题。
 
 ## CI
 
-`.github/workflows/test.yml` 在 Windows runner 上安装 Node 24、Rust、npm 依赖和 `tauri-driver`，随后依次运行 Rust 测试、前端与组件测试、Lint 和完整桌面 E2E。失败时上传 E2E 截图和 DOM。
+`.github/workflows/test.yml` 在 Windows runner 上安装 Node 24、Rust、npm 依赖和 `tauri-driver`，并且必须通过：
+
+```text
+npm run ipc:check
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo audit
+npm audit --audit-level=high
+```
+
+通过后再运行全部单元/组件测试与桌面 E2E。所有结果会聚合上传，E2E 无论成功或失败都会保留证据。
+
+`.github/workflows/release.yml` 要求代码签名证书与 updater 私钥 Secrets，生成 Authenticode + 时间戳签名、签名 updater、NSIS、CycloneDX SBOM、`latest.json`、日志聚合和 release manifest；随后在干净 runner 上执行签名与离线渲染 smoke，并发布 GitHub Release。
 
 ## Windows 干净 VM smoke
 

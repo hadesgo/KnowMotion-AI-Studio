@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -176,7 +177,7 @@ struct RuntimeFileHash {
     sha256: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeInstallResult {
     pub runtime: String,
@@ -215,10 +216,28 @@ fn archives_for(spec: RuntimeSpec, acceleration: RuntimeAcceleration) -> &'stati
 }
 
 fn archive_hashes(archives: &[RuntimeArchive]) -> Vec<String> {
-    archives
-        .iter()
-        .map(|archive| archive.sha256.to_string())
-        .collect()
+    archives.iter().map(archive_sha256).collect()
+}
+
+fn automation_runtime_override() -> Option<(String, String)> {
+    if std::env::var("TAURI_WEBVIEW_AUTOMATION").as_deref() != Ok("true") {
+        return None;
+    }
+    let base = std::env::var("KNOWMOTION_E2E_RUNTIME_BASE_URL").ok()?;
+    let sha256 = std::env::var("KNOWMOTION_E2E_RUNTIME_SHA256").ok()?;
+    Some((base.trim_end_matches('/').to_string(), sha256))
+}
+
+fn archive_download_url(archive: &RuntimeArchive) -> String {
+    automation_runtime_override()
+        .map(|(base, _)| format!("{base}/{}", archive.name))
+        .unwrap_or_else(|| archive.download_url.to_string())
+}
+
+fn archive_sha256(archive: &RuntimeArchive) -> String {
+    automation_runtime_override()
+        .map(|(_, sha256)| sha256)
+        .unwrap_or_else(|| archive.sha256.to_string())
 }
 
 fn manifest_executable(target: &Path, manifest: &RuntimeManifest) -> Result<PathBuf, String> {
@@ -635,7 +654,7 @@ pub async fn ensure_local_runtime(runtime: String) -> Result<RuntimeInstallResul
         let archive_path = downloads.join(archive.name);
         remove_if_present(&archive_path)?;
         let mut response = client
-            .get(archive.download_url)
+            .get(archive_download_url(archive))
             .send()
             .await
             .map_err(|error| format!("Runtime download failed: {error}"))?;
@@ -671,11 +690,12 @@ pub async fn ensure_local_runtime(runtime: String) -> Result<RuntimeInstallResul
         file.sync_all().map_err(|error| error.to_string())?;
         drop(file);
         let actual_sha256 = hex::encode(hasher.finalize());
-        if actual_sha256 != archive.sha256 {
+        let expected_sha256 = archive_sha256(archive);
+        if actual_sha256 != expected_sha256 {
             remove_if_present(&archive_path)?;
             return Err(format!(
                 "Runtime checksum mismatch for {}: expected {}, got {}",
-                archive.name, archive.sha256, actual_sha256
+                archive.name, expected_sha256, actual_sha256
             ));
         }
         extract_zip(&archive_path, &staging)?;

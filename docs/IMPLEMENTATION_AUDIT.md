@@ -1,6 +1,6 @@
 # KnowMotion AI Studio 实现审计
 
-> 审计更新：2026-11-16（第三轮重新审计 + 第四轮真实服务验收，基线提交 `c327fd7`；第五轮补充像素级身份验证与角色锁，基线提交 `9df7669`）
+> 审计更新：2026-11-17（第六轮平台完整性收口；修订保留、ZIP 预算、IPC 契约、CI 门禁、SBOM、诊断包与签名发布链路已接入）
 >
 > 基线：原始《项目开发总提示词》、`docs/ARCHITECTURE.md`、`docs/AGENT_WORKFLOW.md`、`docs/REMOTION_ENGINE.md`、`docs/MVP_ACCEPTANCE.md`、`docs/LOCAL_MODEL_RUNTIMES.md` 及最新运行时代码。
 > 判定原则：代码、持久化数据、自动化测试或真实产物可证明的，才算已实现；只有 UI、提示词或设计文档的不算。
@@ -413,21 +413,21 @@ manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对�
 
 修复状态：`asset_protocol.rs` 支持单段 closed/open/suffix Range、HEAD、206、416、完整媒体 MIME 与恢复友好的缺失缓存。请求有 Range 时只读取所需字节；无 Range 仍由 Tauri 协议回调返回 Vec，但播放器拖动与元数据探测不再整文件读取。
 
-### 4.6 P2：修订快照与项目导出持续膨胀
+### 4.6 P2：修订快照与项目导出持续膨胀（已修复）
 
 每次项目保存都会在 `revisions/` 下创建毫秒时间戳快照，没有内容去重或清理策略。ZIP 导出会包含全部修订，长期编辑后本地磁盘占用和项目包体积会持续增长。
 
-建议按内容哈希去重，并增加按数量、时间或总容量的保留策略；项目包可以选择只携带最近若干修订。
+修复状态：保存快照改为按项目内容 SHA-256 去重，排除只改变 `updatedAt` 的无效重复；默认保留最近 40 份、90 天且总量不超过 128 MiB，同时兼容并清理旧时间戳目录。回归覆盖无内容变化的重复保存、内容变化和数量/容量裁剪。
 
-### 4.7 P2：ZIP 导入缺少资源预算
+### 4.7 P2：ZIP 导入缺少资源预算（已修复）
 
 `import_project_zip` 一次性读取整个包，再把每个条目的数据复制到内存；当前没有压缩包总大小、解压总大小、单文件大小或总条目预算。路径穿越和 CRC 校验已经存在，但异常包仍可能造成高内存占用。
 
-建议在读取前检查元数据，在解压过程中累计限制压缩大小、解压大小和条目数，并在失败时清理 staging 目录。
+修复状态：导入前限制压缩包为 512 MiB，读取中央目录时限制解压总量 1 GiB、单文件 256 MiB、条目数 4096；同时拒绝 ZIP64、重复/大小写碰撞路径、加密条目和声明尺寸不一致。回归使用缩小预算覆盖全部三个累计边界，失败仍会清理 staging 目录。
 
-### 4.8 P3：Rust 质量门禁尚未闭合
+### 4.8 P3：Rust 质量门禁尚未闭合（已修复）
 
-本轮执行 `cargo fmt --all -- --check` 失败，`cargo clippy --all-targets -- -D warnings` 报告 6 个错误。当前 CI 主要运行 `cargo test`，没有把格式和严格 Clippy 作为合并门禁。
+修复状态：全仓已执行 `cargo fmt`，并修复严格 Clippy 报告；测试 CI 现在要求格式、`--all-targets --all-features -D warnings` Clippy、RustSec `cargo audit`、npm audit 和 IPC 生成物一致性全部通过。
 
 ### 4.9 本轮自动化验证
 
@@ -453,10 +453,10 @@ manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对�
 | 素材保存 | Data URL 与生成结果会落盘并记录哈希 | 外部远程 URL 尚未下载成本地资产 |
 | TTS | SAPI、OpenAI Compatible 与 audio.cpp TTS 已接入 | audio.cpp 支持自动启动和空闲卸载；情绪/角色模板和真实服务验收仍缺 |
 | 字幕 | 已知旁白与云端 ASR 听写 | ASR 依赖服务返回 segment；无时间片段时回退按场景均分 |
-| 项目保存 | debounce、项目锁、文档和修订目录已接通 | 仍是项目级状态合并；修订无去重/保留策略；文档级 revision/expectedRevision 冲突协议未启用 |
+| 项目保存 | debounce、项目锁、内容哈希修订去重、数量/时间/容量保留策略已接通 | 仍是项目级状态合并；文档级 revision/expectedRevision 冲突协议未启用 |
 | 项目版本 | Agent 修订与保存快照 | 手动 UI 编辑没有同等全局 undo/redo 栈 |
 | 项目复制 | 本地素材与项目数据可复制 | 数据库工作流/渲染历史不复制到新项目 |
-| 项目导入导出 | 含素材、渲染和修订的 ZIP 包 | 跨项目素材来源边界待加固；ZIP 导入缺少资源预算；无独立迁移工具和跨设备自动升级 |
+| 项目导入导出 | 含素材、渲染和受保留策略约束修订的 ZIP 包 | 跨项目边界与压缩/解压/单文件/条目预算已闭合；无独立迁移工具和跨设备自动升级 |
 | 本地模型运行时 | 三种运行时支持固定版本下载；统一调度器负责 GPU 租约、自动启动、健康检查、互斥和空闲卸载 | 安装后完整性复验偏弱；真实 audio.cpp/stable-diffusion.cpp 模型仍需实机验收 |
 | 渲染 | 持久 Job、进度、取消、Windows Job Object、离线 runtime、验证和原子提交 | 尚无跨平台进程树容器；当前发行目标是 Windows |
 | 4K/60 FPS | Composition 与 Renderer 支持参数 | UI 只验证了 1080P；没有 4K/60 实测和资源限制 |
@@ -464,12 +464,12 @@ manifest 中的 `executable` 相对路径也没有 canonicalize 后限制在对�
 | 质量检查 | `status=fail` 在 UI 与 Rust 渲染入口双重阻断 | 没有自动修复、逐项修复按钮或可配置发布规则 |
 | 错误恢复 | Agent 自动指数退避重试；App 重启安全暂停/中断；本地模型有进程和租约回收 | 尚无统一 `tasks` worker 消费器 |
 | 用量统计 | LLM token、图片数、音频时长写入 `usage_records` | 无价格表、成本估算、额度与预算限制 |
-| IPC 契约 | Rust/TS 手工定义对应类型 | 没有使用 Specta/Tauri Specta 自动生成 |
-| JSON Schema | 有设计用 Schema 文件 | 与运行时 TS/Rust 模型没有自动生成关系，存在重复定义 |
+| IPC 契约 | Rust DTO 派生 JSON Schema，生成 TS DTO 与 `docs/schemas/ipc.schema.json`，CI 校验生成物 | 项目业务对象仍有 TS 领域类型；命令参数映射尚未全部从宏自动枚举 |
+| JSON Schema | Remotion Zod 与 IPC Rust DTO 分别作为可执行真源 | 设计型项目 Schema 仍保留兼容说明用途 |
 
 ## 6. 未实现
 
-- Authenticode 签名、时间戳和 signed updater。
+- 实际 Authenticode 证书、时间戳服务和签名 updater 私钥（构建、验签、清单、干净 VM CI 流程已就绪）。
 - 第三方云端 LLM/Image/TTS/ASR/Embedding 服务（OpenAI/Anthropic/Gemini）凭据验收：本地真实服务已完成，云端仍无 Key 记录。
 - CLIP 语义嵌入通道（需要具备图像嵌入能力的 Provider，当前只有手工视觉描述子）、多人同框的多角色同时锁定，以及 ControlNet/IP-Adapter 在真实 GPU 上的采样验收。
 
@@ -543,9 +543,9 @@ Remotion 使用 Zod 强校验；项目保存由 Rust 路径/素材/身份校验�
 
 ### P2：平台完整性
 
-1. 为修订快照增加内容去重和容量/时间保留策略。
-2. 为 ZIP 导入增加压缩、解压、单文件和条目数预算。
-3. 生成 IPC TypeScript 类型与 JSON Schema，消除手工重复模型。
-4. 扩展桌面 E2E 到审批流、真实媒体任务、本地模型安装失败恢复和取消/重启场景。
-5. 将 `cargo fmt --check`、严格 Clippy 和依赖审计纳入 CI。
-6. 增加发布 CI 日志聚合、远程诊断导出、SBOM 与 signed updater。
+1. 为修订快照增加内容去重和容量/时间保留策略。**完成。**
+2. 为 ZIP 导入增加压缩、解压、单文件和条目数预算。**完成。**
+3. 生成 IPC TypeScript 类型与 JSON Schema，消除手工重复模型。**完成。**
+4. 扩展桌面 E2E 到审批流、真实媒体任务、本地模型安装失败恢复和取消/重启场景。**场景已接入；本地复跑受当前主机 WebView2 GPU/DevTools 环境阻断，CI 中仍是发布门禁。**
+5. 将 `cargo fmt --check`、严格 Clippy 和依赖审计纳入 CI。**完成。**
+6. 增加发布 CI 日志聚合、远程诊断导出、SBOM 与 signed updater。**完成；真实签名发布仍需仓库 Secrets 中的证书与私钥。**

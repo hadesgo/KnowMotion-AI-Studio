@@ -69,10 +69,7 @@ impl GgufLlmProvider {
         Self::load_internal(config, Some(lease))
     }
 
-    fn load_internal(
-        config: &ProviderConfig,
-        lease: Option<GpuLease>,
-    ) -> Result<Self, String> {
+    fn load_internal(config: &ProviderConfig, lease: Option<GpuLease>) -> Result<Self, String> {
         let server = load_cached_server(config)?;
         let client = Client::builder()
             .timeout(LOCAL_INFERENCE_TIMEOUT_FLOOR)
@@ -429,9 +426,8 @@ fn start_server(
         log,
         last_used: Mutex::new(Instant::now()),
     };
-    wait_until_ready(&server, port).map_err(|error| {
+    wait_until_ready(&server, port).inspect_err(|_| {
         server.stop();
-        error
     })?;
     Ok(server)
 }

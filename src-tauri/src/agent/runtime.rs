@@ -538,7 +538,14 @@ impl AgentRuntime {
             let error = runtime.advance(app.clone(), run_id.clone()).await.err();
             if let Some(error) = &error {
                 let _ = runtime.mark_run_failed(&run_id, error);
-                runtime.emit_event(app.as_ref(), &run_id, None, "workflow_failed", error, "failed");
+                runtime.emit_event(
+                    app.as_ref(),
+                    &run_id,
+                    None,
+                    "workflow_failed",
+                    error,
+                    "failed",
+                );
             }
             if let Ok(mut active) = runtime.active_runs.lock() {
                 active.remove(&run_id);
@@ -546,11 +553,7 @@ impl AgentRuntime {
         });
     }
 
-    async fn advance(
-        &self,
-        app: Arc<dyn WorkflowEventSink>,
-        run_id: String,
-    ) -> Result<(), String> {
+    async fn advance(&self, app: Arc<dyn WorkflowEventSink>, run_id: String) -> Result<(), String> {
         loop {
             let run_status = {
                 let db = self.lock_db()?;
@@ -622,11 +625,7 @@ impl AgentRuntime {
                                     error_message = NULL, updated_at = ?1
                                 WHERE run_id = ?2 AND step_key = ?3
                                 "#,
-                                params![
-                                    Utc::now().to_rfc3339(),
-                                    run_id,
-                                    step.step_key
-                                ],
+                                params![Utc::now().to_rfc3339(), run_id, step.step_key],
                             )
                             .map_err(|error| error.to_string())?;
                         }
@@ -637,7 +636,10 @@ impl AgentRuntime {
                             "step_retry_scheduled",
                             &format!(
                                 "{} 将在 {} 秒后自动重试（{}/{}）",
-                                step.title, delay_seconds, retry.0 + 1, retry.1
+                                step.title,
+                                delay_seconds,
+                                retry.0 + 1,
+                                retry.1
                             ),
                             "running",
                         );
@@ -1149,9 +1151,7 @@ impl AgentRuntime {
                 ],
             );
         }
-        app.emit_workflow_event(
-            serde_json::to_value(&payload).unwrap_or(serde_json::Value::Null),
-        );
+        app.emit_workflow_event(serde_json::to_value(&payload).unwrap_or(serde_json::Value::Null));
     }
 
     fn lock_db(&self) -> Result<std::sync::MutexGuard<'_, Connection>, String> {

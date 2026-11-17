@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type {
+  RenderJobView,
+  RenderProgressPayload,
+  RenderStartResponse,
+} from "../generated/ipc";
 import type { CompositionDsl } from "../remotion/schema";
 import { isTauriDesktop } from "./desktop";
 
@@ -9,10 +14,7 @@ export interface RemotionRenderResult {
   elapsedMs: number;
 }
 
-export interface RenderStartResponse {
-  jobId: string;
-  taskId: string;
-}
+export type { RenderStartResponse };
 
 export type RenderJobStatus =
   | "queued"
@@ -23,34 +25,11 @@ export type RenderJobStatus =
   | "canceled"
   | "interrupted";
 
-export interface RenderJob {
-  id: string;
-  taskId: string;
-  projectId: string;
-  projectRevision: number;
+export type RenderJob = Omit<RenderJobView, "status"> & {
   status: RenderJobStatus;
-  percent: number;
-  renderedFrames: number;
-  encodedFrames: number;
-  stage: string;
-  outputPath?: string;
-  bytes?: number;
-  sha256?: string;
-  durationMs?: number;
-  error?: string;
-  createdAt: string;
-  updatedAt: string;
-}
+};
 
-export interface RenderProgressEvent {
-  eventId: string;
-  jobId: string;
-  percent: number;
-  renderedFrames: number;
-  encodedFrames: number;
-  stage: string;
-  at: string;
-}
+export type RenderProgressEvent = RenderProgressPayload;
 
 function requireDesktop() {
   if (!isTauriDesktop) {

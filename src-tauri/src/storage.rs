@@ -1,10 +1,12 @@
 use crate::write_atomic;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
+use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashSet,
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Component, Path, PathBuf},
@@ -12,8 +14,15 @@ use std::{
 };
 
 const MAX_EMBEDDED_ASSET_BYTES: usize = 25 * 1024 * 1024;
+const SNAPSHOT_MAX_ENTRIES: usize = 40;
+const SNAPSHOT_MAX_BYTES: u64 = 128 * 1024 * 1024;
+const SNAPSHOT_MAX_AGE: Duration = Duration::from_secs(90 * 24 * 60 * 60);
+const ZIP_MAX_COMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
+const ZIP_MAX_UNCOMPRESSED_BYTES: u64 = 1024 * 1024 * 1024;
+const ZIP_MAX_SINGLE_FILE_BYTES: u64 = 256 * 1024 * 1024;
+const ZIP_MAX_ENTRIES: usize = 4096;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MissingAsset {
     pub asset_id: String,
@@ -283,29 +292,127 @@ fn materialize_asset(
 }
 
 fn write_snapshot(project_root: &Path, project: &Value) -> Result<(), String> {
-    let revision = Utc::now().format("%Y%m%dT%H%M%S%.3fZ").to_string();
-    let snapshot = project_root.join("revisions").join(revision);
-    for (relative, key) in [
-        ("script/outline.json", "outline"),
-        ("storyboard/scenes.json", "scenes"),
-        ("animation/timeline.json", "timeline"),
-        ("subtitles/captions.json", "subtitles"),
-        ("assets/manifest.json", "assets"),
-    ] {
-        let destination = snapshot.join(relative);
-        if relative == "assets/manifest.json" {
-            continue;
-        }
-        let value = project
-            .get(key)
-            .cloned()
-            .unwrap_or_else(|| Value::Array(Vec::new()));
+    let revisions = project_root.join("revisions");
+    fs::create_dir_all(&revisions).map_err(|error| error.to_string())?;
+
+    // `updatedAt` changes on every save but is not project content. Excluding it lets
+    // autosaves and no-op edits reuse the same content-addressed snapshot.
+    let mut snapshot_project = project.clone();
+    if let Some(object) = snapshot_project.as_object_mut() {
+        object.remove("updatedAt");
+    }
+    let canonical = serde_json::to_vec(&snapshot_project).map_err(|error| error.to_string())?;
+    let fingerprint = hex::encode(Sha256::digest(&canonical));
+    let destination = revisions.join(format!("{fingerprint}.json"));
+    if !destination.is_file() {
+        let snapshot = json!({
+            "schemaVersion": "1.0",
+            "fingerprint": fingerprint,
+            "capturedAt": Utc::now().to_rfc3339(),
+            "project": snapshot_project
+        });
         write_atomic(
             &destination,
-            &serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?,
+            &serde_json::to_vec_pretty(&snapshot).map_err(|error| error.to_string())?,
         )?;
     }
+    prune_revision_snapshots(&revisions, SnapshotRetention::default())
+}
+
+#[derive(Clone, Copy)]
+struct SnapshotRetention {
+    max_entries: usize,
+    max_bytes: u64,
+    max_age: Duration,
+}
+
+impl Default for SnapshotRetention {
+    fn default() -> Self {
+        Self {
+            max_entries: SNAPSHOT_MAX_ENTRIES,
+            max_bytes: SNAPSHOT_MAX_BYTES,
+            max_age: SNAPSHOT_MAX_AGE,
+        }
+    }
+}
+
+struct SnapshotEntry {
+    path: PathBuf,
+    bytes: u64,
+    modified: SystemTime,
+}
+
+fn prune_revision_snapshots(root: &Path, retention: SnapshotRetention) -> Result<(), String> {
+    let mut entries = revision_snapshot_entries(root)?;
+    entries.sort_by(|left, right| {
+        right
+            .modified
+            .cmp(&left.modified)
+            .then_with(|| right.path.cmp(&left.path))
+    });
+
+    let now = SystemTime::now();
+    let mut kept = 0_usize;
+    let mut kept_bytes = 0_u64;
+    for entry in entries {
+        let recent = now.duration_since(entry.modified).unwrap_or_default() <= retention.max_age;
+        let fits = kept == 0
+            || (kept < retention.max_entries
+                && kept_bytes.saturating_add(entry.bytes) <= retention.max_bytes);
+        if recent && fits {
+            kept += 1;
+            kept_bytes = kept_bytes.saturating_add(entry.bytes);
+            continue;
+        }
+        remove_snapshot_entry(&entry.path)?;
+    }
     Ok(())
+}
+
+fn revision_snapshot_entries(root: &Path) -> Result<Vec<SnapshotEntry>, String> {
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with('.') {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+        let file_type = metadata.file_type();
+        if !file_type.is_file() && !file_type.is_dir() && !file_type.is_symlink() {
+            continue;
+        }
+        entries.push(SnapshotEntry {
+            bytes: path_size(&path)?,
+            modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+            path,
+        });
+    }
+    Ok(entries)
+}
+
+fn path_size(path: &Path) -> Result<u64, String> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    if !metadata.is_dir() {
+        return Ok(metadata.len());
+    }
+    let mut total = 0_u64;
+    for entry in fs::read_dir(path).map_err(|error| error.to_string())? {
+        total = total.saturating_add(path_size(
+            &entry.map_err(|error| error.to_string())?.path(),
+        )?);
+    }
+    Ok(total)
+}
+
+fn remove_snapshot_entry(path: &Path) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        fs::remove_dir_all(path).map_err(|error| error.to_string())
+    } else {
+        fs::remove_file(path).map_err(|error| error.to_string())
+    }
 }
 
 pub(crate) fn scan_missing_assets(
@@ -325,10 +432,7 @@ pub(crate) fn scan_missing_assets(
                 .and_then(Value::as_str)
                 .unwrap_or("unknown")
                 .to_string();
-            let source = asset
-                .get("src")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
+            let source = asset.get("src").and_then(Value::as_str).unwrap_or_default();
             if source.starts_with("data:") {
                 continue;
             }
@@ -457,7 +561,7 @@ pub(crate) fn create_project_zip(
     let file = File::create(&temporary).map_err(|error| error.to_string())?;
     let mut writer = ZipWriter::new(file);
     let mut files = Vec::new();
-    collect_package_files(&project_root, &project_root, &mut files)?;
+    collect_package_files(&project_root, &mut files)?;
     files.sort();
     for file_path in files {
         let relative = file_path
@@ -472,13 +576,49 @@ pub(crate) fn create_project_zip(
     fs::rename(&temporary, output).map_err(|error| error.to_string())
 }
 
+pub(crate) fn create_diagnostic_zip(
+    output: &Path,
+    files: Vec<(String, Vec<u8>)>,
+) -> Result<(), String> {
+    let temporary = output.with_extension("zip.partial");
+    let result = (|| -> Result<(), String> {
+        let file = File::create(&temporary).map_err(|error| error.to_string())?;
+        let mut writer = ZipWriter::new(file);
+        let mut names = HashSet::new();
+        for (name, bytes) in files {
+            let safe = safe_relative_path(&name)
+                .ok_or_else(|| "Diagnostic bundle contains an unsafe path".to_string())?;
+            if !names.insert(safe.to_lowercase()) {
+                return Err(format!("Diagnostic bundle contains duplicate path: {safe}"));
+            }
+            writer.add_file(&safe, &bytes)?;
+        }
+        writer.finish()?;
+        fs::rename(&temporary, output).map_err(|error| error.to_string())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
 pub(crate) fn import_project_zip(
     projects_root: &Path,
     package_path: &Path,
 ) -> Result<(String, Value), String> {
+    let package_bytes = fs::metadata(package_path)
+        .map_err(|error| format!("Unable to inspect project package: {error}"))?
+        .len();
+    let budget = ZipImportBudget::default();
+    if package_bytes > budget.max_compressed_bytes {
+        return Err(format!(
+            "Project package is larger than the {} MiB compressed limit",
+            budget.max_compressed_bytes / 1024 / 1024
+        ));
+    }
     let bytes = fs::read(package_path)
         .map_err(|error| format!("Unable to read project package: {error}"))?;
-    let entries = read_zip_entries(&bytes)?;
+    let entries = read_zip_entries(&bytes, budget)?;
     let has_manifest = entries
         .iter()
         .any(|entry| entry.name == "project.json" && !entry.is_directory);
@@ -551,11 +691,7 @@ fn sanitize_imported_sources(project: &mut Value, manifest_id: &str) -> Result<(
         return Ok(());
     };
     for asset in assets {
-        let Some(source) = asset
-            .get("src")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-        else {
+        let Some(source) = asset.get("src").and_then(Value::as_str).map(str::to_string) else {
             continue;
         };
         let Some((source_project_id, relative)) = parse_client_url(&source) else {
@@ -574,7 +710,8 @@ fn sanitize_imported_sources(project: &mut Value, manifest_id: &str) -> Result<(
     Ok(())
 }
 
-fn collect_package_files(root: &Path, current: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {    for entry in fs::read_dir(current).map_err(|error| error.to_string())? {
+fn collect_package_files(current: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+    for entry in fs::read_dir(current).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
         let path = entry.path();
         let name = entry.file_name();
@@ -582,7 +719,7 @@ fn collect_package_files(root: &Path, current: &Path, files: &mut Vec<PathBuf>) 
             if name == "cache" || name == ".lock" {
                 continue;
             }
-            collect_package_files(root, &path, files)?;
+            collect_package_files(&path, files)?;
         } else if name != ".lock" {
             files.push(path);
         }
@@ -613,7 +750,7 @@ pub(crate) fn client_url_to_relative(project_id: &str, source: &str) -> Option<S
 pub(crate) fn public_asset_source(project_id: &str, relative: &str) -> String {
     let encoded = relative
         .split('/')
-        .map(|segment| utf8_percent_encode(segment))
+        .map(utf8_percent_encode)
         .collect::<Vec<_>>()
         .join("/");
     #[cfg(windows)]
@@ -921,22 +1058,54 @@ fn crc32(bytes: &[u8]) -> u32 {
     !crc
 }
 
+#[derive(Debug)]
 struct ReadZipEntry {
     name: String,
     data: Vec<u8>,
     is_directory: bool,
 }
 
-fn read_zip_entries(bytes: &[u8]) -> Result<Vec<ReadZipEntry>, String> {
+#[derive(Clone, Copy)]
+struct ZipImportBudget {
+    max_compressed_bytes: u64,
+    max_uncompressed_bytes: u64,
+    max_single_file_bytes: u64,
+    max_entries: usize,
+}
+
+impl Default for ZipImportBudget {
+    fn default() -> Self {
+        Self {
+            max_compressed_bytes: ZIP_MAX_COMPRESSED_BYTES,
+            max_uncompressed_bytes: ZIP_MAX_UNCOMPRESSED_BYTES,
+            max_single_file_bytes: ZIP_MAX_SINGLE_FILE_BYTES,
+            max_entries: ZIP_MAX_ENTRIES,
+        }
+    }
+}
+
+fn read_zip_entries(bytes: &[u8], budget: ZipImportBudget) -> Result<Vec<ReadZipEntry>, String> {
     let eocd = find_signature_reverse(bytes, 0x0605_4b50)
         .ok_or_else(|| "ZIP end-of-central-directory record is missing".to_string())?;
     if bytes.len() < eocd + 22 {
         return Err("ZIP end record is truncated".to_string());
     }
     let count = read_u16(bytes, eocd + 10)? as usize;
+    if count == u16::MAX as usize {
+        return Err("ZIP64 project packages are not supported".to_string());
+    }
+    if count > budget.max_entries {
+        return Err(format!(
+            "ZIP package contains {count} entries; the limit is {}",
+            budget.max_entries
+        ));
+    }
     let central_offset = read_u32(bytes, eocd + 16)? as usize;
     let mut cursor = central_offset;
     let mut entries = Vec::with_capacity(count);
+    let mut names = HashSet::with_capacity(count);
+    let mut compressed_total = 0_u64;
+    let mut uncompressed_total = 0_u64;
     for _ in 0..count {
         if read_u32(bytes, cursor)? != 0x0201_4b50 {
             return Err("ZIP central directory entry is invalid".to_string());
@@ -944,12 +1113,21 @@ fn read_zip_entries(bytes: &[u8]) -> Result<Vec<ReadZipEntry>, String> {
         let flags = read_u16(bytes, cursor + 8)?;
         let method = read_u16(bytes, cursor + 10)?;
         let expected_crc = read_u32(bytes, cursor + 16)?;
-        let compressed_size = read_u32(bytes, cursor + 20)? as usize;
-        let uncompressed_size = read_u32(bytes, cursor + 24)? as usize;
+        let compressed_size = read_u32(bytes, cursor + 20)?;
+        let uncompressed_size = read_u32(bytes, cursor + 24)?;
+        let raw_local_offset = read_u32(bytes, cursor + 42)?;
+        if compressed_size == u32::MAX
+            || uncompressed_size == u32::MAX
+            || raw_local_offset == u32::MAX
+        {
+            return Err("ZIP64 project packages are not supported".to_string());
+        }
+        let compressed_size = compressed_size as u64;
+        let uncompressed_size = uncompressed_size as u64;
         let name_length = read_u16(bytes, cursor + 28)? as usize;
         let extra_length = read_u16(bytes, cursor + 30)? as usize;
         let comment_length = read_u16(bytes, cursor + 32)? as usize;
-        let local_offset = read_u32(bytes, cursor + 42)? as usize;
+        let local_offset = raw_local_offset as usize;
         let name_start = cursor + 46;
         let name_end = name_start
             .checked_add(name_length)
@@ -957,6 +1135,12 @@ fn read_zip_entries(bytes: &[u8]) -> Result<Vec<ReadZipEntry>, String> {
             .ok_or_else(|| "ZIP entry name is truncated".to_string())?;
         let name = String::from_utf8(bytes[name_start..name_end].to_vec())
             .map_err(|_| "ZIP entry name is not valid UTF-8".to_string())?;
+        let normalized_name =
+            safe_relative_path(&name).ok_or_else(|| format!("Unsafe ZIP entry path: {name}"))?;
+        let collision_key = normalized_name.to_lowercase();
+        if !names.insert(collision_key) {
+            return Err(format!("ZIP package contains a duplicate path: {name}"));
+        }
         if flags & 1 != 0 {
             return Err(format!("Encrypted ZIP entry is not supported: {name}"));
         }
@@ -968,6 +1152,26 @@ fn read_zip_entries(bytes: &[u8]) -> Result<Vec<ReadZipEntry>, String> {
         if compressed_size != uncompressed_size {
             return Err(format!("ZIP entry size mismatch: {name}"));
         }
+        if uncompressed_size > budget.max_single_file_bytes {
+            return Err(format!(
+                "ZIP entry {name} exceeds the {} MiB single-file limit",
+                budget.max_single_file_bytes / 1024 / 1024
+            ));
+        }
+        compressed_total = compressed_total.saturating_add(compressed_size);
+        uncompressed_total = uncompressed_total.saturating_add(uncompressed_size);
+        if compressed_total > budget.max_compressed_bytes {
+            return Err(format!(
+                "ZIP payload exceeds the {} MiB compressed limit",
+                budget.max_compressed_bytes / 1024 / 1024
+            ));
+        }
+        if uncompressed_total > budget.max_uncompressed_bytes {
+            return Err(format!(
+                "ZIP payload exceeds the {} MiB extracted limit",
+                budget.max_uncompressed_bytes / 1024 / 1024
+            ));
+        }
         if read_u32(bytes, local_offset)? != 0x0403_4b50 {
             return Err(format!("ZIP local header is invalid: {name}"));
         }
@@ -975,7 +1179,7 @@ fn read_zip_entries(bytes: &[u8]) -> Result<Vec<ReadZipEntry>, String> {
         let local_extra_length = read_u16(bytes, local_offset + 28)? as usize;
         let data_start = local_offset + 30 + local_name_length + local_extra_length;
         let data_end = data_start
-            .checked_add(compressed_size)
+            .checked_add(compressed_size as usize)
             .filter(|end| *end <= bytes.len())
             .ok_or_else(|| format!("ZIP entry data is truncated: {name}"))?;
         let data = bytes[data_start..data_end].to_vec();
@@ -994,9 +1198,7 @@ fn read_zip_entries(bytes: &[u8]) -> Result<Vec<ReadZipEntry>, String> {
 
 fn find_signature_reverse(bytes: &[u8], signature: u32) -> Option<usize> {
     let needle = signature.to_le_bytes();
-    bytes
-        .windows(4)
-        .rposition(|window| window == needle)
+    bytes.windows(4).rposition(|window| window == needle)
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> Result<u16, String> {
@@ -1034,9 +1236,7 @@ mod tests {
         let normalized =
             normalize_project_assets(directory.path(), &project).expect("normalize assets");
         assert_eq!(normalized["assets"][0]["src"], "assets/images/asset-1.svg");
-        let asset_path = directory
-            .path()
-            .join("project-1/assets/images/asset-1.svg");
+        let asset_path = directory.path().join("project-1/assets/images/asset-1.svg");
         assert!(asset_path.is_file());
         let manifest: Value = serde_json::from_str(
             &fs::read_to_string(directory.path().join("project-1/assets/manifest.json"))
@@ -1063,9 +1263,14 @@ mod tests {
         });
         let normalized =
             normalize_project_assets(directory.path(), &project).expect("normalize assets");
-        assert_eq!(normalized["assets"][0]["src"], "assets/images/asset-svg.svg");
+        assert_eq!(
+            normalized["assets"][0]["src"],
+            "assets/images/asset-svg.svg"
+        );
         let written = fs::read_to_string(
-            directory.path().join("project-1/assets/images/asset-svg.svg"),
+            directory
+                .path()
+                .join("project-1/assets/images/asset-svg.svg"),
         )
         .expect("svg file");
         assert!(written.contains("http://www.w3.org/2000/svg"));
@@ -1081,8 +1286,7 @@ mod tests {
             r#"{"id":"project-1","assets":[]}"#,
         )
         .expect("project manifest");
-        fs::write(project_root.join("assets/images/scene.svg"), b"<svg/>")
-            .expect("asset");
+        fs::write(project_root.join("assets/images/scene.svg"), b"<svg/>").expect("asset");
         let output = directory.path().join("project.zip");
         create_project_zip(directory.path(), "project-1", &output).expect("zip");
         let bytes = fs::read(output).expect("zip bytes");
@@ -1101,8 +1305,7 @@ mod tests {
             r#"{"id":"project-1","title":"Imported","assets":[]}"#,
         )
         .expect("project manifest");
-        fs::write(project_root.join("assets/images/scene.svg"), b"<svg/>")
-            .expect("asset");
+        fs::write(project_root.join("assets/images/scene.svg"), b"<svg/>").expect("asset");
         let output = directory.path().join("project.zip");
         create_project_zip(&projects_root, "project-1", &output).expect("zip");
 
@@ -1154,9 +1357,7 @@ mod tests {
             error.contains("duplicate-project flow"),
             "unexpected error: {error}"
         );
-        assert!(!projects_root
-            .join("project-b/assets/images/a.svg")
-            .exists());
+        assert!(!projects_root.join("project-b/assets/images/a.svg").exists());
     }
 
     #[test]
@@ -1178,7 +1379,10 @@ mod tests {
         let projects_root = duplicate_fixture(&directory);
         let cases = [
             ("..", "http://kmasset.localhost/../assets/images/a.svg"),
-            ("a%2Fb", "http://kmasset.localhost/a%2Fb/assets/images/a.svg"),
+            (
+                "a%2Fb",
+                "http://kmasset.localhost/a%2Fb/assets/images/a.svg",
+            ),
             (
                 "C:%5CWindows",
                 "http://kmasset.localhost/C:%5CWindows/assets/images/a.svg",
@@ -1269,6 +1473,154 @@ mod tests {
         let mut foreign = duplicated_project("project-a");
         let error = sanitize_imported_sources(&mut foreign, "project-self")
             .expect_err("foreign asset sources must be rejected");
-        assert!(error.contains("another project"), "unexpected error: {error}");
+        assert!(
+            error.contains("another project"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn revision_snapshots_are_content_addressed_and_deduplicated() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let project_root = directory.path().join("project-1");
+        fs::create_dir_all(project_root.join("revisions")).expect("revision dir");
+        let first = json!({
+            "id": "project-1",
+            "updatedAt": "2026-01-01T00:00:00Z",
+            "scenes": [{"id": "scene-1", "title": "Same content"}]
+        });
+        write_snapshot(&project_root, &first).expect("first snapshot");
+        let mut second = first.clone();
+        second["updatedAt"] = json!("2026-01-02T00:00:00Z");
+        write_snapshot(&project_root, &second).expect("duplicate snapshot");
+
+        let snapshots = fs::read_dir(project_root.join("revisions"))
+            .expect("revisions")
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry.path().extension().and_then(|value| value.to_str()) == Some("json")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(snapshots.len(), 1);
+
+        let mut changed = second;
+        changed["scenes"][0]["title"] = json!("Changed content");
+        write_snapshot(&project_root, &changed).expect("changed snapshot");
+        assert_eq!(
+            fs::read_dir(project_root.join("revisions"))
+                .expect("revisions")
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry.path().extension().and_then(|value| value.to_str()) == Some("json")
+                })
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn revision_retention_prunes_by_count_and_capacity() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let revisions = directory.path().join("revisions");
+        fs::create_dir_all(&revisions).expect("revision dir");
+        for index in 0..4 {
+            fs::write(revisions.join(format!("{index}.json")), b"1234").expect("snapshot");
+        }
+
+        prune_revision_snapshots(
+            &revisions,
+            SnapshotRetention {
+                max_entries: 3,
+                max_bytes: 8,
+                max_age: SNAPSHOT_MAX_AGE,
+            },
+        )
+        .expect("prune snapshots");
+
+        let remaining = fs::read_dir(&revisions)
+            .expect("revisions")
+            .filter_map(Result::ok)
+            .map(|entry| entry.metadata().expect("metadata").len())
+            .collect::<Vec<_>>();
+        assert!(remaining.len() <= 2, "capacity budget was exceeded");
+        assert!(remaining.iter().sum::<u64>() <= 8);
+    }
+
+    #[test]
+    fn zip_import_budget_rejects_entries_files_and_extracted_size() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let project_root = directory.path().join("project-1");
+        fs::create_dir_all(project_root.join("assets/images")).expect("project dirs");
+        fs::write(
+            project_root.join("project.json"),
+            r#"{"id":"project-1","assets":[]}"#,
+        )
+        .expect("project manifest");
+        fs::write(project_root.join("assets/images/scene.svg"), b"<svg/>").expect("asset");
+        let output = directory.path().join("project.zip");
+        create_project_zip(directory.path(), "project-1", &output).expect("zip");
+        let bytes = fs::read(output).expect("zip bytes");
+
+        read_zip_entries(&bytes, ZipImportBudget::default()).expect("default budget");
+        let too_few_entries = ZipImportBudget {
+            max_entries: 1,
+            ..ZipImportBudget::default()
+        };
+        assert!(read_zip_entries(&bytes, too_few_entries)
+            .expect_err("entry budget")
+            .contains("entries"));
+        let tiny_file = ZipImportBudget {
+            max_single_file_bytes: 2,
+            ..ZipImportBudget::default()
+        };
+        assert!(read_zip_entries(&bytes, tiny_file)
+            .expect_err("single file budget")
+            .contains("single-file"));
+        let tiny_extracted = ZipImportBudget {
+            max_uncompressed_bytes: 8,
+            ..ZipImportBudget::default()
+        };
+        assert!(read_zip_entries(&bytes, tiny_extracted)
+            .expect_err("extracted budget")
+            .contains("extracted"));
+        let tiny_compressed = ZipImportBudget {
+            max_compressed_bytes: 8,
+            ..ZipImportBudget::default()
+        };
+        assert!(read_zip_entries(&bytes, tiny_compressed)
+            .expect_err("compressed budget")
+            .contains("compressed"));
+    }
+
+    #[test]
+    fn diagnostic_bundles_are_valid_zip_files_and_reject_duplicate_paths() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let output = directory.path().join("diagnostics.zip");
+        create_diagnostic_zip(
+            &output,
+            vec![
+                ("diagnostic.json".to_string(), br#"{"ok":true}"#.to_vec()),
+                ("logs/knowmotion.log".to_string(), b"{}\n".to_vec()),
+            ],
+        )
+        .expect("diagnostic zip");
+        let entries = read_zip_entries(
+            &fs::read(&output).expect("zip bytes"),
+            ZipImportBudget::default(),
+        )
+        .expect("diagnostic entries");
+        assert_eq!(entries.len(), 2);
+
+        let duplicate = directory.path().join("duplicate.zip");
+        create_diagnostic_zip(
+            &duplicate,
+            vec![
+                ("README.txt".to_string(), b"one".to_vec()),
+                ("readme.txt".to_string(), b"two".to_vec()),
+            ],
+        )
+        .expect_err("duplicate path must fail");
+        assert!(!duplicate.exists());
+        assert!(!duplicate.with_extension("zip.partial").exists());
     }
 }

@@ -105,7 +105,12 @@ pub(crate) fn install_panic_hook() {
             let location = info
                 .location()
                 .map(|location| {
-                    format!("{}:{}:{}", location.file(), location.line(), location.column())
+                    format!(
+                        "{}:{}:{}",
+                        location.file(),
+                        location.line(),
+                        location.column()
+                    )
                 })
                 .unwrap_or_else(|| "unknown".to_string());
             let message = if let Some(message) = info.payload().downcast_ref::<&str>() {
@@ -135,12 +140,7 @@ pub(crate) fn log(level: LogLevel, target: &str, message: &str) {
     log_event(level, target, message, None);
 }
 
-pub(crate) fn log_event(
-    level: LogLevel,
-    target: &str,
-    message: &str,
-    fields: Option<Value>,
-) {
+pub(crate) fn log_event(level: LogLevel, target: &str, message: &str, fields: Option<Value>) {
     let record = prepare_record(level, target, message, fields);
     let Some(logger_slot) = LOGGER.get() else {
         return;
@@ -205,6 +205,49 @@ pub(crate) fn healthy() -> bool {
         .and_then(|logger| logger.lock().ok())
         .and_then(|logger| logger.as_ref().map(|state| !state.writer.is_finished()))
         .unwrap_or(false)
+}
+
+pub(crate) fn diagnostic_log_files(
+    max_total_bytes: usize,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    flush()?;
+    let Some(directory) = directory() else {
+        return Ok(Vec::new());
+    };
+    let mut files = fs::read_dir(&directory)
+        .map_err(|error| format!("Unable to enumerate diagnostics logs: {error}"))?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.path().is_file()
+                && entry.path().extension().and_then(|value| value.to_str()) == Some("log")
+        })
+        .collect::<Vec<_>>();
+    files.sort_by_key(|entry| {
+        std::cmp::Reverse(
+            entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH),
+        )
+    });
+
+    let mut total = 0_usize;
+    let mut diagnostics = Vec::new();
+    for entry in files {
+        let bytes = fs::read(entry.path())
+            .map_err(|error| format!("Unable to read diagnostic log: {error}"))?;
+        if total.saturating_add(bytes.len()) > max_total_bytes {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&bytes);
+        let redacted = text.lines().map(redact_text).collect::<Vec<_>>().join("\n");
+        total = total.saturating_add(redacted.len());
+        diagnostics.push((
+            format!("logs/{}", entry.file_name().to_string_lossy()),
+            redacted.into_bytes(),
+        ));
+    }
+    Ok(diagnostics)
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, String> {
@@ -422,15 +465,11 @@ fn redact_keyed_values(input: &str) -> String {
                 separator += 1;
             }
         }
-        if separator < bytes.len()
-            && matches!(bytes[separator], b':' | b'=')
-            && sensitive_key(key)
+        if separator < bytes.len() && matches!(bytes[separator], b':' | b'=') && sensitive_key(key)
         {
             output.push_str(&input[key_start..separator + 1]);
             let mut value_start = separator + 1;
-            while value_start < bytes.len()
-                && matches!(bytes[value_start], b' ' | b'\t')
-            {
+            while value_start < bytes.len() && matches!(bytes[value_start], b' ' | b'\t') {
                 value_start += 1;
             }
             output.push_str("[REDACTED]");
@@ -501,7 +540,7 @@ fn redact_url_userinfo(input: &str) -> String {
         let scheme_end = cursor + relative + 3;
         output.push_str(&input[cursor..scheme_end]);
         let authority_end = input[scheme_end..]
-            .find(|character| matches!(character, '/' | '?' | '#' | ' ' | '\r' | '\n'))
+            .find(['/', '?', '#', ' ', '\r', '\n'])
             .map(|offset| scheme_end + offset)
             .unwrap_or(input.len());
         let authority = &input[scheme_end..authority_end];
@@ -571,8 +610,7 @@ fn redact_after_case_insensitive_marker(input: &str, marker: &str) -> String {
     while let Some(relative) = lower[search..].find(marker) {
         let marker_start = search + relative;
         let marker_end = marker_start + marker.len();
-        let boundary_before =
-            marker_start == 0 || !is_key_char(input.as_bytes()[marker_start - 1]);
+        let boundary_before = marker_start == 0 || !is_key_char(input.as_bytes()[marker_start - 1]);
         if !boundary_before {
             search = marker_end;
             continue;
@@ -645,7 +683,9 @@ impl RotatingFileWriter {
             directory: directory.to_path_buf(),
             file_name: file_name.to_string(),
             file: open_append(&path)?,
-            size: fs::metadata(&path).map(|metadata| metadata.len()).unwrap_or(0),
+            size: fs::metadata(&path)
+                .map(|metadata| metadata.len())
+                .unwrap_or(0),
             max_bytes: max_bytes.max(1),
             max_rotated_files: max_rotated_files.max(1),
             unsynced_records: 0,
@@ -712,8 +752,7 @@ impl RotatingFileWriter {
             .extension()
             .and_then(|value| value.to_str())
             .unwrap_or("log");
-        self.directory
-            .join(format!("{stem}.{index}.{extension}"))
+        self.directory.join(format!("{stem}.{index}.{extension}"))
     }
 
     fn prune_extra_files(&self) -> io::Result<()> {
@@ -751,10 +790,7 @@ impl RotatingFileWriter {
 }
 
 fn open_append(path: &Path) -> io::Result<File> {
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
+    OpenOptions::new().create(true).append(true).open(path)
 }
 
 #[cfg(test)]
@@ -856,8 +892,7 @@ mod tests {
             })),
         );
         flush().expect("flush logger");
-        let content =
-            fs::read_to_string(directory.path().join(LOG_FILE_NAME)).expect("read log");
+        let content = fs::read_to_string(directory.path().join(LOG_FILE_NAME)).expect("read log");
         assert!(content.contains("\"level\":\"error\""));
         assert!(content.contains("\"status\":429"));
         assert!(!content.contains("sk-test-secret"));

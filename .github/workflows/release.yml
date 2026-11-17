@@ -1,0 +1,170 @@
+name: Signed Windows Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (for example v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  signed-windows-release:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      KNOWMOTION_SIGN_PFX_BASE64: ${{ secrets.KNOWMOTION_SIGN_PFX_BASE64 }}
+      KNOWMOTION_SIGN_PFX_PASSWORD: ${{ secrets.KNOWMOTION_SIGN_PFX_PASSWORD }}
+      KNOWMOTION_SIGN_THUMBPRINT: ${{ secrets.KNOWMOTION_SIGN_THUMBPRINT }}
+      KNOWMOTION_SIGN_TIMESTAMP_URL: ${{ secrets.KNOWMOTION_SIGN_TIMESTAMP_URL }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.22.1"
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies and tools
+        run: |
+          npm ci
+          cargo install cargo-audit --locked
+          cargo install cargo-cyclonedx --locked
+
+      - name: Release preflight
+        run: |
+          npm run ipc:check
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+          cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+          cargo audit --file src-tauri/Cargo.lock
+          npm audit --audit-level=high
+
+      - name: Prepare signing credential
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-evidence/ci | Out-Null
+          if ($env:KNOWMOTION_SIGN_PFX_BASE64) {
+            $pfxPath = Join-Path $env:RUNNER_TEMP "knowmotion-release.pfx"
+            [IO.File]::WriteAllBytes(
+              $pfxPath,
+              [Convert]::FromBase64String($env:KNOWMOTION_SIGN_PFX_BASE64)
+            )
+            "KNOWMOTION_SIGN_PFX=$pfxPath" >> $env:GITHUB_ENV
+          }
+          if (-not ($env:KNOWMOTION_SIGN_PFX_BASE64 -or $env:KNOWMOTION_SIGN_THUMBPRINT)) {
+            throw "Release signing certificate secret is missing"
+          }
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+            throw "Updater signing private key secret is missing"
+          }
+
+      - name: Generate CycloneDX SBOM
+        run: ./scripts/release/generate-sbom.ps1
+
+      - name: Build signed installer and updater artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Start-Transcript -Path release-evidence/ci/build.log
+          try {
+            npm run desktop:build:signed
+            if ($LASTEXITCODE -ne 0) {
+              throw "Signed desktop build failed with exit code $LASTEXITCODE"
+            }
+          } finally {
+            Stop-Transcript
+          }
+
+      - name: Signed clean-VM install, offline render, and uninstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Start-Transcript -Path release-evidence/ci/clean-vm.log
+          try {
+            $signed = Get-Content "src-tauri/target/release/signed-release.json" -Raw |
+              ConvertFrom-Json
+            $thumbprint = $signed.artifacts |
+              Where-Object { $_.thumbprint } |
+              Select-Object -First 1 -ExpandProperty thumbprint
+            $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*.exe" -File |
+              Sort-Object LastWriteTime -Descending |
+              Select-Object -First 1
+            if (-not $thumbprint -or -not $installer) {
+              throw "Signed report or NSIS installer is incomplete"
+            }
+            ./scripts/windows-vm/run-install-smoke.ps1 `
+              -InstallerPath $installer.FullName `
+              -ResultPath "release-evidence/ci/clean-vm-result.json" `
+              -RequireSignature `
+              -ExpectedSignerThumbprint $thumbprint `
+              -EnforceOffline
+            if ($LASTEXITCODE -ne 0) {
+              throw "Signed clean-VM smoke failed with exit code $LASTEXITCODE"
+            }
+          } finally {
+            Stop-Transcript
+          }
+
+      - name: Generate updater manifest
+        shell: pwsh
+        run: |
+          ./scripts/release/generate-updater-manifest.ps1 `
+            -ReleaseTag $env:RELEASE_TAG `
+            -Repository $env:GITHUB_REPOSITORY
+
+      - name: Aggregate release evidence
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:KNOWMOTION_SIGN_PFX) {
+            Remove-Item -LiteralPath $env:KNOWMOTION_SIGN_PFX -Force -ErrorAction SilentlyContinue
+          }
+          ./scripts/release/aggregate-release.ps1
+
+      - name: Attest release artifacts
+        if: success()
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            release-evidence/artifacts/*.exe
+            release-evidence/artifacts/*.sig
+            release-evidence/artifacts/*.cdx.json
+            release-evidence/artifacts/latest.json
+
+      - name: Upload signed release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-release-${{ env.RELEASE_TAG }}
+          path: release-evidence/
+          if-no-files-found: warn
+
+      - name: Publish GitHub release
+        if: success() && startsWith(env.RELEASE_TAG, 'v')
+        shell: pwsh
+        run: |
+          $assets = Get-ChildItem release-evidence/artifacts -File |
+            Where-Object { $_.Extension -in @(".exe", ".sig", ".json") } |
+            ForEach-Object { $_.FullName }
+          if (-not $assets) {
+            throw "No release assets were produced"
+          }
+          gh release create $env:RELEASE_TAG $assets --generate-notes

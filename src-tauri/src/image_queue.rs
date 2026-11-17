@@ -6,6 +6,7 @@ use crate::{
 };
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
+use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
@@ -24,7 +25,7 @@ const MAX_BATCH_SIZE: usize = 24;
 const MAX_QUEUE_DEPTH: usize = 64;
 const MAX_LIST_LIMIT: i64 = 200;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageJobView {
     pub id: String,

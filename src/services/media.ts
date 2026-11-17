@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { GeneratedMediaAsset } from "../generated/ipc";
 import { isTauriDesktop } from "./desktop";
 import type { Asset, Scene } from "../types";
+
+type GeneratedAsset = Omit<GeneratedMediaAsset, "kind"> & Pick<Asset, "kind">;
 
 function requireDesktop(): void {
   if (!isTauriDesktop) {
@@ -15,7 +18,7 @@ export async function generateNarrationAudio(
   rate: number,
 ): Promise<Asset[]> {
   requireDesktop();
-  return invoke<Asset[]>("generate_project_narration", {
+  return invoke<GeneratedAsset[]>("generate_project_narration", {
     request: {
       projectId,
       scenes: scenes.map((scene) => ({
@@ -34,7 +37,7 @@ export async function generateBackgroundMusic(
   durationSeconds = 15,
 ): Promise<Asset> {
   requireDesktop();
-  return invoke<Asset>("generate_background_music", {
+  return invoke<GeneratedAsset>("generate_background_music", {
     request: { projectId, durationSeconds },
   });
 }

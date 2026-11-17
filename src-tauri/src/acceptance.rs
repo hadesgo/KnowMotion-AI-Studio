@@ -38,9 +38,9 @@ use serde_json::{json, Value};
 use std::{
     env, fs,
     net::TcpListener,
-    sync::Arc,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -406,7 +406,10 @@ async fn run_embedding(harness: &Harness) -> Value {
         }
         let near = cosine_similarity(&vectors[0], &vectors[1]).unwrap_or(f64::NEG_INFINITY);
         let far = cosine_similarity(&vectors[0], &vectors[2]).unwrap_or(f64::INFINITY);
-        if !(near > far + 0.02) {
+        if !matches!(
+            near.partial_cmp(&(far + 0.02)),
+            Some(std::cmp::Ordering::Greater)
+        ) {
             return Err(format!(
                 "Embedding 语义排序不符合预期：相关 {near:.4} 未明显高于无关 {far:.4}"
             ));
@@ -831,12 +834,7 @@ fn decode_png_rgba(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 }
 
 /// 返回（可重绘区域内、区域外）的平均绝对像素差，用来判断遮罩方向。
-fn region_diff(
-    before: &[u8],
-    after: &[u8],
-    width: u32,
-    band: (u32, u32),
-) -> (f64, f64) {
+fn region_diff(before: &[u8], after: &[u8], width: u32, band: (u32, u32)) -> (f64, f64) {
     let mut inside = (0_f64, 0_u64);
     let mut outside = (0_f64, 0_u64);
     for (index, (left, right)) in before.chunks(4).zip(after.chunks(4)).enumerate() {
@@ -1022,22 +1020,13 @@ fn real_inpaint_acceptance() {
     let mut channels: Vec<Value> = Vec::new();
     let sd_provider = inpaint_sd_provider(&harness);
     println!("[inpaint] stable-diffusion.cpp channel …");
-    channels.push(runtime.block_on(run_inpaint_channel(
-        &harness,
-        "sdcpp",
-        &sd_provider,
-        size,
-    )));
+    channels.push(runtime.block_on(run_inpaint_channel(&harness, "sdcpp", &sd_provider, size)));
 
     match cloud_inpaint_provider() {
         Some(provider) => {
             println!("[inpaint] OpenAI Compatible channel …");
-            channels.push(runtime.block_on(run_inpaint_channel(
-                &harness,
-                "openai",
-                &provider,
-                size,
-            )));
+            channels
+                .push(runtime.block_on(run_inpaint_channel(&harness, "openai", &provider, size)));
             clear_provider_secret(CLOUD_IMAGE_PROVIDER_ID).ok();
         }
         None => {
@@ -1061,9 +1050,15 @@ fn real_inpaint_acceptance() {
         "channels": channels
     });
     let path = harness.artifact_path("inpaint-acceptance-report.json");
-    fs::write(&path, serde_json::to_vec_pretty(&report).expect("report json"))
-        .expect("write report");
-    println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&report).expect("report json"),
+    )
+    .expect("write report");
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).unwrap_or_default()
+    );
 
     let failed = report["channels"]
         .as_array()
@@ -1182,7 +1177,17 @@ fn real_workflow_acceptance() {
         capabilities: vec!["LLM".to_string()],
     };
     let mut routes = std::collections::BTreeMap::new();
-    for agent_key in ["research", "director", "script", "storyboard", "art_director", "asset", "animation", "audio", "quality"] {
+    for agent_key in [
+        "research",
+        "director",
+        "script",
+        "storyboard",
+        "art_director",
+        "asset",
+        "animation",
+        "audio",
+        "quality",
+    ] {
         routes.insert(
             agent_key.to_string(),
             AgentModelRoute {
@@ -1214,14 +1219,14 @@ fn real_workflow_acceptance() {
     let mut approvals = 0_u32;
     loop {
         if Instant::now() > deadline {
-            panic!("workflow did not finish within 150 minutes; last status {}", run.status);
+            panic!(
+                "workflow did not finish within 150 minutes; last status {}",
+                run.status
+            );
         }
         match run.status.as_str() {
             "completed" => break,
-            "failed" => panic!(
-                "workflow failed: {}",
-                run.error.clone().unwrap_or_default()
-            ),
+            "failed" => panic!("workflow failed: {}", run.error.clone().unwrap_or_default()),
             "waiting_approval" => {
                 let step = run
                     .steps
@@ -1341,22 +1346,34 @@ fn real_workflow_acceptance() {
         "runtimes": runtime_report(&harness)
     });
     let path = harness.artifact_path("workflow-acceptance-report.json");
-    fs::write(&path, serde_json::to_vec_pretty(&report).expect("report json"))
-        .expect("write report");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&report).expect("report json"),
+    )
+    .expect("write report");
     fs::write(
         harness.artifact_path("workflow-acceptance-project.json"),
         serde_json::to_vec_pretty(&project).expect("project json"),
     )
     .expect("write project");
-    println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).unwrap_or_default()
+    );
 
     assert_eq!(run.status, "completed", "workflow must complete");
-    assert!(failed_steps == 0, "every step must complete: {failed_steps} failed");
+    assert!(
+        failed_steps == 0,
+        "every step must complete: {failed_steps} failed"
+    );
     assert!(outlines > 0, "outline must not be empty");
     assert!(scenes > 0, "storyboard must produce scenes");
     assert!(subtitles > 0, "audio agent must produce subtitles");
-    assert!(provider_calls >= 9, "expected at least nine LLM calls, saw {provider_calls}");
-    assert_eq!(quality_status != "missing", true, "quality report is missing");
+    assert!(
+        provider_calls >= 9,
+        "expected at least nine LLM calls, saw {provider_calls}"
+    );
+    assert!(quality_status != "missing", "quality report is missing");
     assert!(
         matches!(quality_status.as_str(), "pass" | "warn" | "fail"),
         "unexpected quality status {quality_status} ({quality_score})"
@@ -1466,7 +1483,10 @@ fn real_cloud_acceptance() {
         }
         let near = cosine_similarity(&vectors[0], &vectors[1]).unwrap_or(f64::NEG_INFINITY);
         let far = cosine_similarity(&vectors[0], &vectors[2]).unwrap_or(f64::INFINITY);
-        if !(near > far + 0.02) {
+        if !matches!(
+            near.partial_cmp(&(far + 0.02)),
+            Some(std::cmp::Ordering::Greater)
+        ) {
             return Err(format!("语义排序不成立：相关 {near:.4} 无关 {far:.4}"));
         }
         Ok(json!({"model": embedding_provider.model, "dimensions": dimensions, "related": near, "unrelated": far}))
@@ -1477,14 +1497,8 @@ fn real_cloud_acceptance() {
     let tts_provider = cloud.provider("acceptance-cloud-tts", "TTS");
     save_provider_secret(&tts_provider.id, &cloud.api_key).ok();
     let tts = runtime.block_on(async {
-        let bytes = synthesize_speech(
-            &tts_provider,
-            None,
-            NARRATION,
-            &cloud.tts_voice,
-            1.0,
-        )
-        .await?;
+        let bytes =
+            synthesize_speech(&tts_provider, None, NARRATION, &cloud.tts_voice, 1.0).await?;
         let duration = wav_duration_ms(&bytes)?;
         if duration < 1500 {
             return Err(format!("云端 TTS 音频过短：{duration} ms"));
@@ -1566,7 +1580,10 @@ fn real_cloud_acceptance() {
         clear_provider_secret(provider).ok();
     }
 
-    let failed = checks.iter().filter(|check| check["ok"] != json!(true)).count();
+    let failed = checks
+        .iter()
+        .filter(|check| check["ok"] != json!(true))
+        .count();
     let report = json!({
         "generatedAt": chrono::Utc::now().to_rfc3339(),
         "baseUrl": cloud.base_url,
@@ -1580,8 +1597,15 @@ fn real_cloud_acceptance() {
         "checks": checks
     });
     let path = harness.artifact_path("cloud-acceptance-report.json");
-    fs::write(&path, serde_json::to_vec_pretty(&report).expect("report json")).expect("write report");
-    println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&report).expect("report json"),
+    )
+    .expect("write report");
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).unwrap_or_default()
+    );
     assert_eq!(failed, 0, "cloud acceptance has failing capabilities");
 }
 
@@ -1632,14 +1656,22 @@ fn real_gguf_json_acceptance() {
         !response.text.trim().is_empty(),
         "structured completion returned empty content"
     );
-    let parsed: Value = serde_json::from_str(response.text.trim())
-        .unwrap_or_else(|error| panic!("output is not JSON ({error}): {}", tail(&response.text, 400)));
+    let parsed: Value = serde_json::from_str(response.text.trim()).unwrap_or_else(|error| {
+        panic!(
+            "output is not JSON ({error}): {}",
+            tail(&response.text, 400)
+        )
+    });
     let scenes = parsed
         .pointer("/input/scenes")
         .and_then(Value::as_array)
         .map(Vec::len)
         .unwrap_or(0);
-    assert!(scenes > 0, "expected a scenes array, got: {}", tail(&response.text, 400));
+    assert!(
+        scenes > 0,
+        "expected a scenes array, got: {}",
+        tail(&response.text, 400)
+    );
     let report = json!({
         "ok": true,
         "elapsedMs": started.elapsed().as_millis(),
@@ -1648,10 +1680,14 @@ fn real_gguf_json_acceptance() {
         "scenes": scenes,
         "artifact": harness.write_artifact("gguf-json-acceptance.json", response.text.as_bytes())
     });
-    println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).unwrap_or_default()
+    );
 }
 
-fn environment_report() -> Value {    let gpu = command_text(
+fn environment_report() -> Value {
+    let gpu = command_text(
         "nvidia-smi",
         &[
             "--query-gpu=name,driver_version,memory.total",

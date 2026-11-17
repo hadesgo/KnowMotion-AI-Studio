@@ -1,4 +1,5 @@
 import type { GsapMotionConfig } from "./gsap/gsapMotion";
+import type { LocalRuntimeConfig } from "./generated/ipc";
 import type { IdentitySignature, IdentityVerdict } from "./services/identity";
 
 export type AspectRatio = "16:9" | "9:16" | "1:1";
@@ -378,17 +379,7 @@ export interface VideoProject {
 export type ProviderCapability = "LLM" | "Image" | "TTS" | "ASR" | "Embedding";
 export type GgufInferenceBackend = "auto" | "gpu" | "cpu";
 
-export interface LocalModelRuntimeConfig {
-  modelPath?: string;
-  modelDirectory?: string;
-  modelFamily?: string;
-  diffusionModel?: string;
-  textEncoder?: string;
-  /** 视觉塔（mmproj*.gguf）。Qwen Image 编辑通道必需；留空时自动发现。 */
-  llmVision?: string;
-  vae?: string;
-  idleUnloadSeconds?: number;
-}
+export type LocalModelRuntimeConfig = LocalRuntimeConfig;
 
 export interface ProviderProfile {
   id: string;

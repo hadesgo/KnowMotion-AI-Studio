@@ -1,49 +1,42 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Asset, ProviderProfile, ReferenceRole } from "../types";
+import type {
+  AsrCue as GeneratedAsrCue,
+  AsrResult as GeneratedAsrResult,
+  ImageGenerationRequest,
+  ImageGenerationResult as GeneratedImageGenerationResult,
+  ImageReferenceInput as GeneratedImageReferenceInput,
+  InpaintResult as GeneratedInpaintResult,
+  TtsGenerationResult,
+} from "../generated/ipc";
 import type { ImageConditioningInput } from "./characterLock";
 import { isTauriDesktop } from "./desktop";
 
-export interface ImageReferenceInput {
-  assetId: string;
+export type ImageReferenceInput = Required<
+  Pick<
+    GeneratedImageReferenceInput,
+    "assetId" | "role" | "label" | "weight" | "source"
+  >
+> & {
   role: ReferenceRole;
-  label: string;
-  weight: number;
-  /** kmasset URL 或 data URL；后端只接受项目内文件。 */
-  source: string;
-}
+};
 
-export interface ImageGenerationResult {
+export type ImageGenerationResult = Omit<
+  GeneratedImageGenerationResult,
+  "assets" | "referenceMode"
+> & {
   assets: Asset[];
-  providerId: string;
-  model: string;
-  elapsedMs: number;
   referenceMode: "prompt" | "prompt+img2img" | "prompt+ip-adapter" | "prompt+controlnet";
-  referenceCount: number;
-  seed: number;
-  anchorLabel: string;
-  /** 后端实际生效的像素条件通道。 */
-  conditioning: string;
-  /** 前端请求的条件通道，用于对照是否发生降级。 */
-  requestedConditioning: string;
-  degradations: string[];
-}
+};
 
-export interface ImageGenerationRequestInput {
-  projectId: string;
-  sceneId: string;
+export type ImageGenerationRequestInput = Omit<
+  ImageGenerationRequest,
+  "provider" | "size" | "conditioning"
+> & {
   provider: ProviderProfile;
-  prompt: string;
-  style: string;
   size: "1024x1024" | "1536x1024" | "1024x1536";
-  count: number;
-  negativePrompt?: string;
-  seed?: number;
-  references?: ImageReferenceInput[];
-  anchorLabel?: string;
-  consistencyFingerprint?: string;
-  /** 角色锁：参考图进入生成管的像素条件。 */
   conditioning?: ImageConditioningInput;
-}
+};
 
 export async function generateProjectImages(
   input: ImageGenerationRequestInput,
@@ -56,14 +49,10 @@ export async function generateProjectImages(
   });
 }
 
-export interface InpaintResult {
+export type InpaintResult = Omit<GeneratedInpaintResult, "asset" | "mode"> & {
   asset: Asset;
-  providerId: string;
-  model: string;
-  elapsedMs: number;
   mode: "openai-edits" | "sdcpp-native-inpaint" | "openai-edits-fallback" | string;
-  seed: number;
-}
+};
 
 export async function inpaintProjectImage(input: {
   projectId: string;
@@ -93,38 +82,20 @@ export async function generateCloudNarration(input: {
   scenes: Array<{ id: string; title: string; narration: string }>;
   voice: string;
   rate: number;
-}): Promise<{
-  assets: Asset[];
-  providerId: string;
-  model: string;
-  elapsedMs: number;
-}> {
+}): Promise<CloudNarrationResult> {
   if (!isTauriDesktop) {
     throw new Error("云端旁白生成需要 Tauri 桌面运行时。");
   }
-  return invoke<{
-    assets: Asset[];
-    providerId: string;
-    model: string;
-    elapsedMs: number;
-  }>("generate_project_cloud_narration", {
+  return invoke<CloudNarrationResult>("generate_project_cloud_narration", {
     request: input,
   });
 }
 
-export interface AsrCue {
-  start: number;
-  end: number;
-  text: string;
-}
-
-export interface AsrResult {
-  text: string;
-  cues: AsrCue[];
-  providerId: string;
-  model: string;
-  elapsedMs: number;
-}
+export type CloudNarrationResult = Omit<TtsGenerationResult, "assets"> & {
+  assets: Asset[];
+};
+export type AsrCue = GeneratedAsrCue;
+export type AsrResult = GeneratedAsrResult;
 
 export async function transcribeProjectAudio(input: {
   projectId: string;
