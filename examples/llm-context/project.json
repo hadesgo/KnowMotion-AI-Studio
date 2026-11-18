@@ -1,0 +1,1623 @@
+{
+  "assets": [
+    {
+      "id": "narration-v2-scene-3885f05e-d786-4ddf-a899-0783b587cacc",
+      "sceneId": "scene-3885f05e-d786-4ddf-a899-0783b587cacc",
+      "name": "旁白 · 它真的“记住”了吗？",
+      "kind": "audio",
+      "src": "assets/audio/narration-v2-scene-3885f05e-d786-4ddf-a899-0783b587cacc.wav",
+      "prompt": "Windows SAPI local narration",
+      "createdAt": "2026-11-18T09:09:23.992Z",
+      "local": true,
+      "durationMs": 9752.375,
+      "mimeType": "audio/wav"
+    },
+    {
+      "id": "narration-v2-scene-e17f8507-528d-4d60-8f61-f67d4d421026",
+      "sceneId": "scene-e17f8507-528d-4d60-8f61-f67d4d421026",
+      "name": "旁白 · 上下文先变成一串线索",
+      "kind": "audio",
+      "src": "assets/audio/narration-v2-scene-e17f8507-528d-4d60-8f61-f67d4d421026.wav",
+      "prompt": "Windows SAPI local narration",
+      "createdAt": "2026-11-18T09:09:23.995Z",
+      "local": true,
+      "durationMs": 7785.75,
+      "mimeType": "audio/wav"
+    },
+    {
+      "id": "narration-v2-scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b",
+      "sceneId": "scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b",
+      "name": "旁白 · 注意力建立词与词的关系",
+      "kind": "audio",
+      "src": "assets/audio/narration-v2-scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b.wav",
+      "prompt": "Windows SAPI local narration",
+      "createdAt": "2026-11-18T09:09:23.996Z",
+      "local": true,
+      "durationMs": 8124.000000000001,
+      "mimeType": "audio/wav"
+    },
+    {
+      "id": "narration-v2-scene-0903610a-37ef-4d06-8548-afbd9ba442ce",
+      "sceneId": "scene-0903610a-37ef-4d06-8548-afbd9ba442ce",
+      "name": "旁白 · 顺序和可见范围同样重要",
+      "kind": "audio",
+      "src": "assets/audio/narration-v2-scene-0903610a-37ef-4d06-8548-afbd9ba442ce.wav",
+      "prompt": "Windows SAPI local narration",
+      "createdAt": "2026-11-18T09:09:23.997Z",
+      "local": true,
+      "durationMs": 5834.75,
+      "mimeType": "audio/wav"
+    },
+    {
+      "id": "narration-v2-scene-context-window-001",
+      "sceneId": "scene-context-window-001",
+      "name": "旁白 · 上下文窗口不是无限记忆",
+      "kind": "audio",
+      "src": "assets/audio/narration-v2-scene-context-window-001.wav",
+      "prompt": "Windows SAPI local narration",
+      "createdAt": "2026-11-18T09:09:23.999Z",
+      "local": true,
+      "durationMs": 9077,
+      "mimeType": "audio/wav"
+    },
+    {
+      "id": "narration-v2-scene-takeaway-context-001",
+      "sceneId": "scene-takeaway-context-001",
+      "name": "旁白 · 理解上下文，是组织线索",
+      "kind": "audio",
+      "src": "assets/audio/narration-v2-scene-takeaway-context-001.wav",
+      "prompt": "Windows SAPI local narration",
+      "createdAt": "2026-11-18T09:09:24.000Z",
+      "local": true,
+      "durationMs": 8075.625000000001,
+      "mimeType": "audio/wav"
+    }
+  ],
+  "audio": {
+    "rate": 0.96,
+    "subtitlePosition": "bottom",
+    "subtitleSize": 32,
+    "voice": "系统中文语音",
+    "volume": 0.82
+  },
+  "characters": [],
+  "createdAt": "2026-11-18T08:18:10.152Z",
+  "id": "project-a14ade6d-97fd-4ff1-8a88-85461cd22ca7",
+  "isDemo": false,
+  "locations": [],
+  "outline": [
+    {
+      "body": "用反直觉问题建立好奇：大语言模型并没有像人一样记住对话，却能在前文线索中继续生成。画面用漂浮的文字碎片、聚光灯扫描和短暂停顿，形成电影感开场。",
+      "eyebrow": "01 · HOOK",
+      "id": "hook-context-question",
+      "seconds": 5,
+      "title": "它真的“记住”了吗？"
+    },
+    {
+      "body": "把输入文本拆成 token 序列，解释“上下文”首先是可被读取的文字线索。画面用纸带、胶片或发光字符块排列成行，强调这是计算输入，而不是人类式记忆。",
+      "eyebrow": "02 · TOKENS",
+      "id": "tokens-as-clues",
+      "seconds": 8,
+      "title": "上下文先变成一串线索"
+    },
+    {
+      "body": "用自注意力类比：每个 token 会与其他 token 建立权重连线，找出当前生成时更相关的线索。画面展示连线网络随问题变化，但旁白需说明注意力是计算相关性，不等于可解释的人类理解。",
+      "eyebrow": "03 · ATTENTION",
+      "id": "attention-connections",
+      "seconds": 10,
+      "title": "注意力建立词与词的关系"
+    },
+    {
+      "body": "用位置编码和注意力掩码解释模型如何知道词序、哪些信息可被读取。画面用舞台座位、幕布和路径箭头，把抽象机制转成可见的空间关系，并提示这是简化类比。",
+      "eyebrow": "04 · ORDER",
+      "id": "position-and-mask",
+      "seconds": 8,
+      "title": "顺序和可见范围同样重要"
+    },
+    {
+      "body": "说明上下文窗口更像一次推理时可读取的 token 范围，受计算资源限制；超出范围的信息可能被截断或压缩。画面用窗口边框、滚动字幕和逐渐淡出的旧线索，避免给出具体模型数字。",
+      "eyebrow": "05 · WINDOW",
+      "id": "context-window",
+      "seconds": 7,
+      "title": "上下文窗口不是无限记忆"
+    },
+    {
+      "body": "收束结论：大语言模型的“上下文理解”可以理解为把当前输入中的 token、顺序、关联和可见范围组织成可计算的结构。画面回到开场文字碎片，形成完整闭环，留下可复述洞见。",
+      "eyebrow": "06 · TAKEAWAY",
+      "id": "takeaway-context",
+      "seconds": 7,
+      "title": "理解上下文，是组织线索"
+    }
+  ],
+  "outlineApproved": false,
+  "qualityReport": {
+    "checkedAt": "2026-11-18T08:27:30Z",
+    "findings": [
+      {
+        "code": "SOURCE_UNVERIFIED",
+        "message": "7 个研究来源均为 verified=false，导出前需逐条核验 URL、论文版本、文档可访问性与内容是否支持当前表述。",
+        "severity": "error"
+      },
+      {
+        "code": "OUTLINE_NOT_APPROVED",
+        "message": "outlineApproved=false，最终导出前应确认大纲与场景已获批准。",
+        "severity": "warning"
+      },
+      {
+        "code": "RENDER_MISSING",
+        "message": "renders 为空，无法验证实际画幅、字幕安全区、素材可见性和视觉密度。",
+        "severity": "warning"
+      },
+      {
+        "code": "DURATION_MATCH",
+        "message": "目标时长 45 秒与视频轨道总时长一致；旁白合计约 42.8 秒，留有少量静默缓冲。",
+        "severity": "info"
+      },
+      {
+        "code": "ASSETS_COMPLETE",
+        "message": "6 个场景均存在对应本地图片 assetId，未发现素材缺失。",
+        "severity": "info"
+      },
+      {
+        "code": "ASPECT_RATIO_METADATA_OK",
+        "message": "场景设置 aspectRatio 为 16:9，图层坐标和尺寸在 0-100 范围内，元数据未发现越界。",
+        "severity": "info"
+      },
+      {
+        "code": "FACT_RISK_CONTEXT_WINDOW",
+        "message": "“超出部分会被截断或压缩”可能过度泛化；上下文窗口超限通常表现为截断、报错或需要外部检索/压缩，建议加限定词或核验来源。",
+        "sceneId": "scene-context-window-001",
+        "severity": "warning"
+      },
+      {
+        "code": "FACT_RISK_ATTENTION_WEIGHT",
+        "message": "“连线粗细 = 相关性”容易暗示注意力权重等于可解释语义相关性；应保留“计算相关性，不等于人类理解”的边界，并避免观众误解。",
+        "sceneId": "scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b",
+        "severity": "warning"
+      },
+      {
+        "code": "FACT_RISK_POSITION_MASK",
+        "message": "位置编码和注意力掩码的表述需核验：掩码在不同模型中可控制未来不可见或填充不可见，位置编码也不只等同于词序。",
+        "sceneId": "scene-0903610a-37ef-4d06-8548-afbd9ba442ce",
+        "severity": "warning"
+      },
+      {
+        "code": "TTS_TIMING_RISK",
+        "message": "系统中文语音 rate=0.96 且含 token、注意力掩码等术语，实际时长可能超过场景时长；需试听并微调旁白或 cue。",
+        "severity": "warning"
+      },
+      {
+        "code": "SUBTITLE_GAP",
+        "message": "字幕存在 0.2-0.4 秒场景间空隙；若面向听障或静音观看，建议评估是否需要连续字幕或静默说明。",
+        "severity": "warning"
+      },
+      {
+        "code": "SUBTITLE_OVERLAP_RISK",
+        "message": "主标题位于 y=66、height=20，字幕位置为 bottom，渲染时可能与标题或底部提示重叠；需检查安全区，尤其是 window 与 takeaway。",
+        "severity": "warning"
+      },
+      {
+        "code": "INFO_DENSITY",
+        "message": "多个场景同时包含章节提示、主标题、3-4 条说明文字和 canvas 动效；普通观众下需确认 16:9 可读性和停留时长。",
+        "severity": "warning"
+      },
+      {
+        "code": "AUDIENCE_SOURCE_ACCESSIBILITY",
+        "message": "研究来源包含论文和技术文档，对普通观众偏技术；建议增加通俗来源说明或不在画面直接引用。",
+        "severity": "warning"
+      },
+      {
+        "code": "STYLE_LOCK_DISABLED",
+        "message": "styleLock.enabled=false，视觉风格一致性依赖提示词与场景描述；导出前建议确认渲染风格统一。",
+        "severity": "warning"
+      }
+    ],
+    "score": 72,
+    "status": "warn",
+    "summary": "时长与素材结构基本完整；主要风险是事实来源未核验、上下文窗口/注意力表述可能引发误解、缺少渲染预览导致字幕安全区与视觉密度无法确认。"
+  },
+  "renders": [
+    {
+      "createdAt": "2026-11-18T09:10:00.000Z",
+      "duration": 53,
+      "format": "MP4",
+      "id": "render-llm-context-v2",
+      "resolution": "1080p",
+      "size": "10.0 MB",
+      "status": "ready"
+    }
+  ],
+  "researchSources": [
+    {
+      "id": "source-transformer-attention-paper",
+      "note": "用于解释 Transformer 中的自注意力机制、位置编码和并行上下文建模；这是大语言模型理解上下文的核心技术来源之一。当前未联网核验，verified=false，需要人工确认论文版本、作者与 URL 可访问性。",
+      "title": "Attention Is All You Need (arXiv:1706.03762)",
+      "url": "https://arxiv.org/abs/1706.03762",
+      "verified": false
+    },
+    {
+      "id": "source-bert-paper",
+      "note": "用于说明双向 Transformer 如何编码上下文，以及“理解上下文”在预训练语言模型中的技术含义。当前未联网核验，verified=false，需要人工确认论文细节与公开可访问性。",
+      "title": "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding (arXiv:1810.04825)",
+      "url": "https://arxiv.org/abs/1810.04825",
+      "verified": false
+    },
+    {
+      "id": "source-gpt3-paper",
+      "note": "用于解释自回归大语言模型如何基于前文 token 生成后续内容，以及 in-context learning 与提示词上下文的关系。当前未联网核验，verified=false，需要人工核验论文是否适合普通观众引用。",
+      "title": "Language Models are Few-Shot Learners (arXiv:2005.14165)",
+      "url": "https://arxiv.org/abs/2005.14165",
+      "verified": false
+    },
+    {
+      "id": "source-huggingface-transformers-glossary",
+      "note": "用于核对 attention mask、context length、position IDs、tokenization 等术语的通俗解释，适合动画中的概念拆解。当前未联网核验，verified=false，需要人工确认页面内容与术语定义是否仍保持一致。",
+      "title": "Hugging Face Transformers Glossary",
+      "url": "https://huggingface.co/docs/transformers/en/glossary",
+      "verified": false
+    },
+    {
+      "id": "source-openai-prompt-guide",
+      "note": "用于说明上下文窗口、提示词、指令与示例如何影响模型输出。当前未联网核验，verified=false，需要人工确认该文档是否公开、是否仍有效，以及是否适合直接面向中文普通观众引用。",
+      "title": "OpenAI Prompt Engineering / Context Window Guide",
+      "url": "https://platform.openai.com/docs/guides/prompt-engineering",
+      "verified": false
+    },
+    {
+      "id": "source-illustrated-transformer",
+      "note": "用于为动画提供可视觉化的类比，例如 token 序列、注意力连线、上下文窗口与位置信息。当前未联网核验，verified=false，需要人工确认页面可访问、内容准确且可引用。",
+      "title": "The Illustrated Transformer",
+      "url": "https://jalammar.github.io/illustrated-transformer/",
+      "verified": false
+    },
+    {
+      "id": "source-lilian-weng-transformer-family",
+      "note": "用于补充说明 Transformer 架构演进、长上下文处理、注意力机制扩展等技术背景。当前未联网核验，verified=false，需要人工确认博客内容、发布日期与可引用性。",
+      "title": "The Transformer Family Version 2.0",
+      "url": "https://lilianweng.github.io/posts/2023-01-27-the-transformer-family/",
+      "verified": false
+    }
+  ],
+  "scenes": [
+    {
+      "accent": "#c8ff65",
+      "assetId": null,
+      "characterIds": [],
+      "description": "黑暗空间中央偏左漂浮半透明文字碎片，冷色聚光灯从右上缓慢扫描；碎片短暂停顿后排列成未完成的问句，主标题位于下三分之一。镜头从远景缓慢推进到碎片群，随后停顿，形成记忆与线索之间的悬念。信息层级：主标题 > 未完成句子 > 漂浮文字碎片。视觉素材：文字碎片、聚光灯光锥、轻微尘埃、未闭合引号或下划线。",
+      "duration": 10.402375000000001,
+      "gsapMotion": null,
+      "id": "scene-3885f05e-d786-4ddf-a899-0783b587cacc",
+      "layers": [],
+      "motionPreset": "pushIn",
+      "narration": "模型看起来记住了前文，但只要离开当前输入，它并不会自动保留这段对话。真正参与这次生成的内容，叫做上下文。",
+      "remotion": {
+        "schemaVersion": "1.0",
+        "id": "scene-3885f05e-d786-4ddf-a899-0783b587cacc",
+        "styleVariant": "diagram",
+        "title": "它真的“记住”了吗？",
+        "narration": "模型看起来记住了前文，但只要离开当前输入，它并不会自动保留这段对话。真正参与这次生成的内容，叫做上下文。",
+        "durationMs": 10402.375000000002,
+        "background": {
+          "type": "gradient",
+          "colors": [
+            "#0d2d33",
+            "#091b20",
+            "#050d11"
+          ],
+          "angle": 145,
+          "vignette": 0.46
+        },
+        "camera": {
+          "from": {
+            "scale": 1,
+            "x": 0,
+            "y": 0
+          },
+          "to": {
+            "scale": 1.012,
+            "x": 0,
+            "y": -0.2
+          },
+          "easing": "easeInOut"
+        },
+        "transition": {
+          "type": "fade",
+          "durationMs": 420,
+          "direction": "right"
+        },
+        "layers": [
+          {
+            "id": "scene-3885f05e-d786-4ddf-a899-0783b587cacc-semantic-eyebrow",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 10402.375000000002
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 40,
+              "durationMs": 380,
+              "easing": "easeOut"
+            },
+            "opacity": 0.82,
+            "x": 6,
+            "y": 3.4,
+            "width": 60,
+            "height": 4,
+            "rotation": 0,
+            "type": "text",
+            "content": "01 / INPUT",
+            "color": "#71e2d3",
+            "fontSize": 17,
+            "fontWeight": 650,
+            "align": "left",
+            "letterSpacing": 2.5
+          },
+          {
+            "id": "scene-3885f05e-d786-4ddf-a899-0783b587cacc-semantic-title",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 10402.375000000002
+            },
+            "animation": {
+              "type": "fadeUp",
+              "delayMs": 80,
+              "durationMs": 540,
+              "easing": "easeOut"
+            },
+            "opacity": 1,
+            "x": 6,
+            "y": 5.8,
+            "width": 87,
+            "height": 10,
+            "rotation": 0,
+            "type": "text",
+            "content": "它真的“记住”了吗？",
+            "color": "#f4f2e8",
+            "fontSize": 54,
+            "fontWeight": 680,
+            "align": "left",
+            "letterSpacing": -1.2
+          },
+          {
+            "id": "scene-3885f05e-d786-4ddf-a899-0783b587cacc-semantic-diagram",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 10402.375000000002
+            },
+            "animation": {
+              "type": "none",
+              "delayMs": 0,
+              "durationMs": 0,
+              "easing": "linear"
+            },
+            "opacity": 1,
+            "x": 2.2,
+            "y": 17.5,
+            "width": 95.6,
+            "height": 66,
+            "rotation": 0,
+            "type": "diagram",
+            "variant": "contextBridge",
+            "accent": "#71e2d3",
+            "secondaryColor": "#90c9b2",
+            "caption": "上下文不是自动长期保存的记忆，而是本次推理可以读取的输入。",
+            "labels": [
+              "明天去杭州",
+              "下午三点出发",
+              "帮我查路线"
+            ]
+          },
+          {
+            "id": "scene-3885f05e-d786-4ddf-a899-0783b587cacc-semantic-subtitle-llm-context-v2-scene-3885f05e-d786-4ddf-a899-0783b587cacc-0",
+            "timing": {
+              "fromMs": 200,
+              "toMs": 6577
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 0,
+              "durationMs": 180,
+              "easing": "easeOut"
+            },
+            "opacity": 0.96,
+            "x": 8,
+            "y": 89,
+            "width": 84,
+            "height": 7,
+            "rotation": 0,
+            "type": "text",
+            "content": "模型看起来记住了前文，但只要离开当前输入，它并不会自动保留这段对话。",
+            "color": "#ffffff",
+            "fontSize": 32,
+            "fontWeight": 500,
+            "align": "center",
+            "letterSpacing": 0
+          },
+          {
+            "id": "scene-3885f05e-d786-4ddf-a899-0783b587cacc-semantic-subtitle-llm-context-v2-scene-3885f05e-d786-4ddf-a899-0783b587cacc-1",
+            "timing": {
+              "fromMs": 6577,
+              "toMs": 9952
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 0,
+              "durationMs": 180,
+              "easing": "easeOut"
+            },
+            "opacity": 0.96,
+            "x": 8,
+            "y": 89,
+            "width": 84,
+            "height": 7,
+            "rotation": 0,
+            "type": "text",
+            "content": "真正参与这次生成的内容，叫做上下文。",
+            "color": "#ffffff",
+            "fontSize": 32,
+            "fontWeight": 500,
+            "align": "center",
+            "letterSpacing": 0
+          }
+        ]
+      },
+      "shotType": "Hook",
+      "title": "它真的“记住”了吗？",
+      "transition": "柔光淡入",
+      "visualMode": "programmatic",
+      "visualPrompt": "电影感矢量信息图纪录片开场，深炭灰背景，半透明文字碎片漂浮，冷色聚光灯扫描，碎片短暂停顿后排列成未完成问句，主标题位于下三分之一，轻微尘埃和程序化光锥，深灰、青绿、亮白配色，高级编辑式构图，避免拟人化大脑、眼睛、照片质感"
+    },
+    {
+      "accent": "#79a9ff",
+      "assetId": null,
+      "characterIds": [],
+      "description": "中景横向推移，纸带或胶片轨道从左到右穿过画面，连续文字被切分为发光 token 方块；当前 token 被扫描光点亮，右侧保留空白表示待生成。镜头匀速横移，末尾轻停。信息层级：token 序列 > 高亮当前 token > 右侧空白生成区。视觉素材：纸带、胶片轨道、token 方块、扫描光、方向箭头。",
+      "duration": 8.43575,
+      "gsapMotion": null,
+      "id": "scene-e17f8507-528d-4d60-8f61-f67d4d421026",
+      "layers": [],
+      "motionPreset": "panRight",
+      "narration": "输入文本先按分词器切成 token。每个 token 变成离散线索，再被转换成模型可以计算的向量。",
+      "remotion": {
+        "schemaVersion": "1.0",
+        "id": "scene-e17f8507-528d-4d60-8f61-f67d4d421026",
+        "styleVariant": "diagram",
+        "title": "上下文先变成一串线索",
+        "narration": "输入文本先按分词器切成 token。每个 token 变成离散线索，再被转换成模型可以计算的向量。",
+        "durationMs": 8435.75,
+        "background": {
+          "type": "gradient",
+          "colors": [
+            "#102b39",
+            "#0a1c28",
+            "#050b11"
+          ],
+          "angle": 145,
+          "vignette": 0.46
+        },
+        "camera": {
+          "from": {
+            "scale": 1,
+            "x": 0,
+            "y": 0
+          },
+          "to": {
+            "scale": 1.012,
+            "x": 0,
+            "y": -0.2
+          },
+          "easing": "easeInOut"
+        },
+        "transition": {
+          "type": "wipe",
+          "durationMs": 420,
+          "direction": "left"
+        },
+        "layers": [
+          {
+            "id": "scene-e17f8507-528d-4d60-8f61-f67d4d421026-semantic-eyebrow",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 8435.75
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 40,
+              "durationMs": 380,
+              "easing": "easeOut"
+            },
+            "opacity": 0.82,
+            "x": 6,
+            "y": 3.4,
+            "width": 60,
+            "height": 4,
+            "rotation": 0,
+            "type": "text",
+            "content": "02 / TOKENS",
+            "color": "#74baf4",
+            "fontSize": 17,
+            "fontWeight": 650,
+            "align": "left",
+            "letterSpacing": 2.5
+          },
+          {
+            "id": "scene-e17f8507-528d-4d60-8f61-f67d4d421026-semantic-title",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 8435.75
+            },
+            "animation": {
+              "type": "fadeUp",
+              "delayMs": 80,
+              "durationMs": 540,
+              "easing": "easeOut"
+            },
+            "opacity": 1,
+            "x": 6,
+            "y": 5.8,
+            "width": 87,
+            "height": 10,
+            "rotation": 0,
+            "type": "text",
+            "content": "上下文先变成一串线索",
+            "color": "#f4f2e8",
+            "fontSize": 54,
+            "fontWeight": 680,
+            "align": "left",
+            "letterSpacing": -1.2
+          },
+          {
+            "id": "scene-e17f8507-528d-4d60-8f61-f67d4d421026-semantic-diagram",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 8435.75
+            },
+            "animation": {
+              "type": "none",
+              "delayMs": 0,
+              "durationMs": 0,
+              "easing": "linear"
+            },
+            "opacity": 1,
+            "x": 2.2,
+            "y": 17.5,
+            "width": 95.6,
+            "height": 66,
+            "rotation": 0,
+            "type": "diagram",
+            "variant": "tokenSequence",
+            "accent": "#74baf4",
+            "secondaryColor": "#90c9b2",
+            "caption": "示意切分；真实 token 边界由具体模型的分词器决定。",
+            "labels": [
+              "明天去杭州，下午三点出发，帮我查路线",
+              "明天",
+              "去",
+              "杭州",
+              "下午",
+              "三点",
+              "出发",
+              "查",
+              "路线"
+            ]
+          },
+          {
+            "id": "scene-e17f8507-528d-4d60-8f61-f67d4d421026-semantic-subtitle-llm-context-v2-scene-e17f8507-528d-4d60-8f61-f67d4d421026-0",
+            "timing": {
+              "fromMs": 199.62499999999818,
+              "toMs": 3059.624999999998
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 0,
+              "durationMs": 180,
+              "easing": "easeOut"
+            },
+            "opacity": 0.96,
+            "x": 8,
+            "y": 89,
+            "width": 84,
+            "height": 7,
+            "rotation": 0,
+            "type": "text",
+            "content": "输入文本先按分词器切成 token。",
+            "color": "#ffffff",
+            "fontSize": 32,
+            "fontWeight": 500,
+            "align": "center",
+            "letterSpacing": 0
+          },
+          {
+            "id": "scene-e17f8507-528d-4d60-8f61-f67d4d421026-semantic-subtitle-llm-context-v2-scene-e17f8507-528d-4d60-8f61-f67d4d421026-1",
+            "timing": {
+              "fromMs": 3059.624999999998,
+              "toMs": 7985.624999999998
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 0,
+              "durationMs": 180,
+              "easing": "easeOut"
+            },
+            "opacity": 0.96,
+            "x": 8,
+            "y": 89,
+            "width": 84,
+            "height": 7,
+            "rotation": 0,
+            "type": "text",
+            "content": "每个 token 变成离散线索，再被转换成模型可以计算的向量。",
+            "color": "#ffffff",
+            "fontSize": 32,
+            "fontWeight": 500,
+            "align": "center",
+            "letterSpacing": 0
+          }
+        ]
+      },
+      "shotType": "Explainer",
+      "title": "上下文先变成一串线索",
+      "transition": "横向推移",
+      "visualMode": "programmatic",
+      "visualPrompt": "电影感矢量信息图，深灰背景，发光字符块沿纸带或胶片轨道排列成行，文字被拆成 token 单元，镜头横向移动，蓝色与青绿色高光，右侧留白表示待生成，简洁程序化构图，强调计算输入和线索排列，避免人类记忆、大脑、照片质感"
+    },
+    {
+      "accent": "#ffbc66",
+      "assetId": null,
+      "characterIds": [],
+      "description": "中心 token 被聚焦，周围 token 悬浮在空间中；细线从中心 token 连出，连线粗细和亮度随相关度变化，强相关线短暂脉冲。镜头从全景推进到局部网络，再轻微拉回。信息层级：中心 token > 权重连线 > 背景 token。视觉素材：token 方块、贝塞尔连线、权重光晕、脉冲粒子。",
+      "duration": 8.774000000000001,
+      "gsapMotion": null,
+      "id": "scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b",
+      "layers": [],
+      "motionPreset": "pushIn",
+      "narration": "在注意力层里，每个 token 会和前文计算相关权重。权重决定混合多少信息，但它不是人类解释。",
+      "remotion": {
+        "schemaVersion": "1.0",
+        "id": "scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b",
+        "styleVariant": "diagram",
+        "title": "注意力建立词与词的关系",
+        "narration": "在注意力层里，每个 token 会和前文计算相关权重。权重决定混合多少信息，但它不是人类解释。",
+        "durationMs": 8774,
+        "background": {
+          "type": "gradient",
+          "colors": [
+            "#302718",
+            "#151d1b",
+            "#080d0f"
+          ],
+          "angle": 145,
+          "vignette": 0.46
+        },
+        "camera": {
+          "from": {
+            "scale": 1,
+            "x": 0,
+            "y": 0
+          },
+          "to": {
+            "scale": 1.012,
+            "x": 0,
+            "y": -0.2
+          },
+          "easing": "easeInOut"
+        },
+        "transition": {
+          "type": "wipe",
+          "durationMs": 420,
+          "direction": "right"
+        },
+        "layers": [
+          {
+            "id": "scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b-semantic-eyebrow",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 8774
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 40,
+              "durationMs": 380,
+              "easing": "easeOut"
+            },
+            "opacity": 0.82,
+            "x": 6,
+            "y": 3.4,
+            "width": 60,
+            "height": 4,
+            "rotation": 0,
+            "type": "text",
+            "content": "03 / ATTENTION",
+            "color": "#ffc868",
+            "fontSize": 17,
+            "fontWeight": 650,
+            "align": "left",
+            "letterSpacing": 2.5
+          },
+          {
+            "id": "scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b-semantic-title",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 8774
+            },
+            "animation": {
+              "type": "fadeUp",
+              "delayMs": 80,
+              "durationMs": 540,
+              "easing": "easeOut"
+            },
+            "opacity": 1,
+            "x": 6,
+            "y": 5.8,
+            "width": 87,
+            "height": 10,
+            "rotation": 0,
+            "type": "text",
+            "content": "注意力建立词与词的关系",
+            "color": "#f4f2e8",
+            "fontSize": 54,
+            "fontWeight": 680,
+            "align": "left",
+            "letterSpacing": -1.2
+          },
+          {
+            "id": "scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b-semantic-diagram",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 8774
+            },
+            "animation": {
+              "type": "none",
+              "delayMs": 0,
+              "durationMs": 0,
+              "easing": "linear"
+            },
+            "opacity": 1,
+            "x": 2.2,
+            "y": 17.5,
+            "width": 95.6,
+            "height": 66,
+            "rotation": 0,
+            "type": "diagram",
+            "variant": "attentionMechanism",
+            "accent": "#ffc868",
+            "secondaryColor": "#74baf4",
+            "caption": "注意力权重用于计算和混合信息，不等于可解释的人类理解。",
+            "labels": [
+              "明天",
+              "去",
+              "杭州",
+              "下午",
+              "三点",
+              "出发",
+              "查"
+            ]
+          },
+          {
+            "id": "scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b-semantic-subtitle-llm-context-v2-scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b-0",
+            "timing": {
+              "fromMs": 199.875,
+              "toMs": 4866.875
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 0,
+              "durationMs": 180,
+              "easing": "easeOut"
+            },
+            "opacity": 0.96,
+            "x": 8,
+            "y": 89,
+            "width": 84,
+            "height": 7,
+            "rotation": 0,
+            "type": "text",
+            "content": "在注意力层里，每个 token 会和前文计算相关权重。",
+            "color": "#ffffff",
+            "fontSize": 32,
+            "fontWeight": 500,
+            "align": "center",
+            "letterSpacing": 0
+          },
+          {
+            "id": "scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b-semantic-subtitle-llm-context-v2-scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b-1",
+            "timing": {
+              "fromMs": 4866.875,
+              "toMs": 8323.875
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 0,
+              "durationMs": 180,
+              "easing": "easeOut"
+            },
+            "opacity": 0.96,
+            "x": 8,
+            "y": 89,
+            "width": 84,
+            "height": 7,
+            "rotation": 0,
+            "type": "text",
+            "content": "权重决定混合多少信息，但它不是人类解释。",
+            "color": "#ffffff",
+            "fontSize": 32,
+            "fontWeight": 500,
+            "align": "center",
+            "letterSpacing": 0
+          }
+        ]
+      },
+      "shotType": "Diagram",
+      "title": "注意力建立词与词的关系",
+      "transition": "柔光淡入",
+      "visualMode": "programmatic",
+      "visualPrompt": "电影感矢量信息图，token 方块悬浮，细线随问题变化连接不同方块，连线粗细和亮度表示权重，橙色高亮强相关，背景保持克制，青绿、蓝色、橙色点缀，程序化网络图，强调计算相关性，避免眼睛、大脑、拟人化理解符号"
+    },
+    {
+      "accent": "#a78bfa",
+      "assetId": null,
+      "characterIds": [],
+      "description": "舞台座位按编号排列，每个座位上放置发光 token 方块；路径箭头从左侧已读座位指向当前座位，幕布遮住部分座位表示不可读取。镜头横向推移并轻微下摇，强调空间顺序和可见范围。信息层级：座位编号 > 路径箭头 > 幕布遮挡。视觉素材：舞台座位、编号、token 方块、幕布、路径箭头、冷色舞台光。",
+      "duration": 6.48475,
+      "gsapMotion": null,
+      "id": "scene-0903610a-37ef-4d06-8548-afbd9ba442ce",
+      "layers": [],
+      "motionPreset": "panRight",
+      "narration": "位置编码补上词序；自回归生成时，因果掩码会挡住尚未出现的 token。",
+      "remotion": {
+        "schemaVersion": "1.0",
+        "id": "scene-0903610a-37ef-4d06-8548-afbd9ba442ce",
+        "styleVariant": "diagram",
+        "title": "顺序和可见范围同样重要",
+        "narration": "位置编码补上词序；自回归生成时，因果掩码会挡住尚未出现的 token。",
+        "durationMs": 6484.75,
+        "background": {
+          "type": "gradient",
+          "colors": [
+            "#182a38",
+            "#0b1b28",
+            "#060c12"
+          ],
+          "angle": 145,
+          "vignette": 0.46
+        },
+        "camera": {
+          "from": {
+            "scale": 1,
+            "x": 0,
+            "y": 0
+          },
+          "to": {
+            "scale": 1.012,
+            "x": 0,
+            "y": -0.2
+          },
+          "easing": "easeInOut"
+        },
+        "transition": {
+          "type": "wipe",
+          "durationMs": 420,
+          "direction": "left"
+        },
+        "layers": [
+          {
+            "id": "scene-0903610a-37ef-4d06-8548-afbd9ba442ce-semantic-eyebrow",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 6484.75
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 40,
+              "durationMs": 380,
+              "easing": "easeOut"
+            },
+            "opacity": 0.82,
+            "x": 6,
+            "y": 3.4,
+            "width": 60,
+            "height": 4,
+            "rotation": 0,
+            "type": "text",
+            "content": "04 / MASK",
+            "color": "#9aa9ff",
+            "fontSize": 17,
+            "fontWeight": 650,
+            "align": "left",
+            "letterSpacing": 2.5
+          },
+          {
+            "id": "scene-0903610a-37ef-4d06-8548-afbd9ba442ce-semantic-title",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 6484.75
+            },
+            "animation": {
+              "type": "fadeUp",
+              "delayMs": 80,
+              "durationMs": 540,
+              "easing": "easeOut"
+            },
+            "opacity": 1,
+            "x": 6,
+            "y": 5.8,
+            "width": 87,
+            "height": 10,
+            "rotation": 0,
+            "type": "text",
+            "content": "顺序和可见范围同样重要",
+            "color": "#f4f2e8",
+            "fontSize": 54,
+            "fontWeight": 680,
+            "align": "left",
+            "letterSpacing": -1.2
+          },
+          {
+            "id": "scene-0903610a-37ef-4d06-8548-afbd9ba442ce-semantic-diagram",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 6484.75
+            },
+            "animation": {
+              "type": "none",
+              "delayMs": 0,
+              "durationMs": 0,
+              "easing": "linear"
+            },
+            "opacity": 1,
+            "x": 2.2,
+            "y": 17.5,
+            "width": 95.6,
+            "height": 66,
+            "rotation": 0,
+            "type": "diagram",
+            "variant": "positionMask",
+            "accent": "#9aa9ff",
+            "secondaryColor": "#90c9b2",
+            "caption": "自回归生成时，因果掩码遮住尚未出现的 token。",
+            "labels": [
+              "明天",
+              "去",
+              "杭州",
+              "下午",
+              "三点",
+              "出发",
+              "查"
+            ]
+          },
+          {
+            "id": "scene-0903610a-37ef-4d06-8548-afbd9ba442ce-semantic-subtitle-llm-context-v2-scene-0903610a-37ef-4d06-8548-afbd9ba442ce-0",
+            "timing": {
+              "fromMs": 199.875,
+              "toMs": 1699.875
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 0,
+              "durationMs": 180,
+              "easing": "easeOut"
+            },
+            "opacity": 0.96,
+            "x": 8,
+            "y": 89,
+            "width": 84,
+            "height": 7,
+            "rotation": 0,
+            "type": "text",
+            "content": "位置编码补上词序；",
+            "color": "#ffffff",
+            "fontSize": 32,
+            "fontWeight": 500,
+            "align": "center",
+            "letterSpacing": 0
+          },
+          {
+            "id": "scene-0903610a-37ef-4d06-8548-afbd9ba442ce-semantic-subtitle-llm-context-v2-scene-0903610a-37ef-4d06-8548-afbd9ba442ce-1",
+            "timing": {
+              "fromMs": 1699.875,
+              "toMs": 6034.875
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 0,
+              "durationMs": 180,
+              "easing": "easeOut"
+            },
+            "opacity": 0.96,
+            "x": 8,
+            "y": 89,
+            "width": 84,
+            "height": 7,
+            "rotation": 0,
+            "type": "text",
+            "content": "自回归生成时，因果掩码会挡住尚未出现的 token。",
+            "color": "#ffffff",
+            "fontSize": 32,
+            "fontWeight": 500,
+            "align": "center",
+            "letterSpacing": 0
+          }
+        ]
+      },
+      "shotType": "Diagram",
+      "title": "顺序和可见范围同样重要",
+      "transition": "横向推移",
+      "visualMode": "programmatic",
+      "visualPrompt": "电影感矢量信息图，舞台座位排列成序列，每个座位上有发光 token 方块，幕布遮挡部分座位，路径箭头显示可读取范围，薄荷绿与冷色舞台光，简洁几何构图，画面角落可出现简化类比小字，避免真实舞台照片和人类记忆隐喻"
+    },
+    {
+      "accent": "#c8ff65",
+      "assetId": null,
+      "characterIds": [],
+      "description": "发光窗口边框框住一段滚动 token 字幕，窗口内 token 清晰，窗口外旧线索逐渐淡出；底部细进度条表示计算资源限制，不出现具体模型数字。镜头缓慢推进到窗口，末尾轻微缩放。信息层级：窗口框 > 滚动 token > 淡出旧线索。视觉素材：窗口边框、滚动字幕、淡出粒子、进度条。",
+      "duration": 9.727,
+      "gsapMotion": null,
+      "id": "scene-context-window-001",
+      "layers": [],
+      "motionPreset": "pushIn",
+      "narration": "模型一次推理只能读取上下文窗口里的内容。窗口大小因模型和配置而异，旧内容如何保留，取决于产品策略。",
+      "remotion": {
+        "schemaVersion": "1.0",
+        "id": "scene-context-window-001",
+        "styleVariant": "diagram",
+        "title": "上下文窗口不是无限记忆",
+        "narration": "模型一次推理只能读取上下文窗口里的内容。窗口大小因模型和配置而异，旧内容如何保留，取决于产品策略。",
+        "durationMs": 9727,
+        "background": {
+          "type": "gradient",
+          "colors": [
+            "#142d2d",
+            "#0a1b1d",
+            "#060b0e"
+          ],
+          "angle": 145,
+          "vignette": 0.46
+        },
+        "camera": {
+          "from": {
+            "scale": 1,
+            "x": 0,
+            "y": 0
+          },
+          "to": {
+            "scale": 1.012,
+            "x": 0,
+            "y": -0.2
+          },
+          "easing": "easeInOut"
+        },
+        "transition": {
+          "type": "wipe",
+          "durationMs": 420,
+          "direction": "right"
+        },
+        "layers": [
+          {
+            "id": "scene-context-window-001-semantic-eyebrow",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 9727
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 40,
+              "durationMs": 380,
+              "easing": "easeOut"
+            },
+            "opacity": 0.82,
+            "x": 6,
+            "y": 3.4,
+            "width": 60,
+            "height": 4,
+            "rotation": 0,
+            "type": "text",
+            "content": "05 / WINDOW",
+            "color": "#88e0a2",
+            "fontSize": 17,
+            "fontWeight": 650,
+            "align": "left",
+            "letterSpacing": 2.5
+          },
+          {
+            "id": "scene-context-window-001-semantic-title",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 9727
+            },
+            "animation": {
+              "type": "fadeUp",
+              "delayMs": 80,
+              "durationMs": 540,
+              "easing": "easeOut"
+            },
+            "opacity": 1,
+            "x": 6,
+            "y": 5.8,
+            "width": 87,
+            "height": 10,
+            "rotation": 0,
+            "type": "text",
+            "content": "上下文窗口不是无限记忆",
+            "color": "#f4f2e8",
+            "fontSize": 54,
+            "fontWeight": 680,
+            "align": "left",
+            "letterSpacing": -1.2
+          },
+          {
+            "id": "scene-context-window-001-semantic-diagram",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 9727
+            },
+            "animation": {
+              "type": "none",
+              "delayMs": 0,
+              "durationMs": 0,
+              "easing": "linear"
+            },
+            "opacity": 1,
+            "x": 2.2,
+            "y": 17.5,
+            "width": 95.6,
+            "height": 66,
+            "rotation": 0,
+            "type": "diagram",
+            "variant": "contextWindow",
+            "accent": "#88e0a2",
+            "secondaryColor": "#90c9b2",
+            "caption": "窗口容量有限，旧内容是否保留取决于产品的截断、检索或压缩策略。",
+            "labels": [
+              "旧对话",
+              "设定",
+              "问题",
+              "资料",
+              "引用",
+              "限制",
+              "目标",
+              "格式",
+              "当前",
+              "后续"
+            ]
+          },
+          {
+            "id": "scene-context-window-001-semantic-subtitle-llm-context-v2-scene-context-window-001-0",
+            "timing": {
+              "fromMs": 200.125,
+              "toMs": 3905.125
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 0,
+              "durationMs": 180,
+              "easing": "easeOut"
+            },
+            "opacity": 0.96,
+            "x": 8,
+            "y": 89,
+            "width": 84,
+            "height": 7,
+            "rotation": 0,
+            "type": "text",
+            "content": "模型一次推理只能读取上下文窗口里的内容。",
+            "color": "#ffffff",
+            "fontSize": 32,
+            "fontWeight": 500,
+            "align": "center",
+            "letterSpacing": 0
+          },
+          {
+            "id": "scene-context-window-001-semantic-subtitle-llm-context-v2-scene-context-window-001-1",
+            "timing": {
+              "fromMs": 3905.125,
+              "toMs": 9277.125
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 0,
+              "durationMs": 180,
+              "easing": "easeOut"
+            },
+            "opacity": 0.96,
+            "x": 8,
+            "y": 89,
+            "width": 84,
+            "height": 7,
+            "rotation": 0,
+            "type": "text",
+            "content": "窗口大小因模型和配置而异，旧内容如何保留，取决于产品策略。",
+            "color": "#ffffff",
+            "fontSize": 32,
+            "fontWeight": 500,
+            "align": "center",
+            "letterSpacing": 0
+          }
+        ]
+      },
+      "shotType": "Diagram",
+      "title": "上下文窗口不是无限记忆",
+      "transition": "柔光淡入",
+      "visualMode": "programmatic",
+      "visualPrompt": "电影感矢量信息图，发光窗口边框框住滚动 token 字幕，窗口外旧线索逐渐淡出，底部细进度条表示限制，不出现具体数字，深蓝灰背景，紫色窗口光与青绿色 token，程序化字幕滚动，避免模型参数、真实界面截图"
+    },
+    {
+      "accent": "#79a9ff",
+      "assetId": null,
+      "characterIds": [],
+      "description": "回到开场黑暗空间，漂浮文字碎片在聚光灯下重新出现，依次连接成有序网络，最终形成稳定结论句；画面从碎片化过渡到结构感，完成闭环。镜头缓慢推进后定格。信息层级：结论句 > 连接网络 > 残余碎片。视觉素材：开场文字碎片、连接网络、聚光灯、稳定文字块。",
+      "duration": 8.725625,
+      "gsapMotion": null,
+      "id": "scene-takeaway-context-001",
+      "layers": [],
+      "motionPreset": "pushIn",
+      "narration": "所以理解上下文，是读取当前线索、保留顺序、计算关联，再在有限窗口内组织成可计算结构。",
+      "remotion": {
+        "schemaVersion": "1.0",
+        "id": "scene-takeaway-context-001",
+        "styleVariant": "diagram",
+        "title": "理解上下文，是组织线索",
+        "narration": "所以理解上下文，是读取当前线索、保留顺序、计算关联，再在有限窗口内组织成可计算结构。",
+        "durationMs": 8725.625,
+        "background": {
+          "type": "gradient",
+          "colors": [
+            "#102c2c",
+            "#09191b",
+            "#050b0c"
+          ],
+          "angle": 145,
+          "vignette": 0.46
+        },
+        "camera": {
+          "from": {
+            "scale": 1,
+            "x": 0,
+            "y": 0
+          },
+          "to": {
+            "scale": 1.012,
+            "x": 0,
+            "y": -0.2
+          },
+          "easing": "easeInOut"
+        },
+        "transition": {
+          "type": "wipe",
+          "durationMs": 420,
+          "direction": "left"
+        },
+        "layers": [
+          {
+            "id": "scene-takeaway-context-001-semantic-eyebrow",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 8725.625
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 40,
+              "durationMs": 380,
+              "easing": "easeOut"
+            },
+            "opacity": 0.82,
+            "x": 6,
+            "y": 3.4,
+            "width": 60,
+            "height": 4,
+            "rotation": 0,
+            "type": "text",
+            "content": "06 / SUMMARY",
+            "color": "#7fe5cd",
+            "fontSize": 17,
+            "fontWeight": 650,
+            "align": "left",
+            "letterSpacing": 2.5
+          },
+          {
+            "id": "scene-takeaway-context-001-semantic-title",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 8725.625
+            },
+            "animation": {
+              "type": "fadeUp",
+              "delayMs": 80,
+              "durationMs": 540,
+              "easing": "easeOut"
+            },
+            "opacity": 1,
+            "x": 6,
+            "y": 5.8,
+            "width": 87,
+            "height": 10,
+            "rotation": 0,
+            "type": "text",
+            "content": "理解上下文，是组织线索",
+            "color": "#f4f2e8",
+            "fontSize": 54,
+            "fontWeight": 680,
+            "align": "left",
+            "letterSpacing": -1.2
+          },
+          {
+            "id": "scene-takeaway-context-001-semantic-diagram",
+            "timing": {
+              "fromMs": 0,
+              "toMs": 8725.625
+            },
+            "animation": {
+              "type": "none",
+              "delayMs": 0,
+              "durationMs": 0,
+              "easing": "linear"
+            },
+            "opacity": 1,
+            "x": 2.2,
+            "y": 17.5,
+            "width": 95.6,
+            "height": 66,
+            "rotation": 0,
+            "type": "diagram",
+            "variant": "contextSummary",
+            "accent": "#7fe5cd",
+            "secondaryColor": "#90c9b2",
+            "caption": "这里的“理解”是可计算的信息组织，不等同于人类理解。",
+            "labels": [
+              "读取线索",
+              "保留顺序",
+              "计算关联",
+              "限定范围",
+              "组织成结构"
+            ]
+          },
+          {
+            "id": "scene-takeaway-context-001-semantic-subtitle-llm-context-v2-scene-takeaway-context-001-0",
+            "timing": {
+              "fromMs": 200.125,
+              "toMs": 8276.125
+            },
+            "animation": {
+              "type": "fade",
+              "delayMs": 0,
+              "durationMs": 180,
+              "easing": "easeOut"
+            },
+            "opacity": 0.96,
+            "x": 8,
+            "y": 89,
+            "width": 84,
+            "height": 7,
+            "rotation": 0,
+            "type": "text",
+            "content": "所以理解上下文，是读取当前线索、保留顺序、计算关联，再在有限窗口内组织成可计算结构。",
+            "color": "#ffffff",
+            "fontSize": 32,
+            "fontWeight": 500,
+            "align": "center",
+            "letterSpacing": 0
+          }
+        ]
+      },
+      "shotType": "Explainer",
+      "title": "理解上下文，是组织线索",
+      "transition": "横向推移",
+      "visualMode": "programmatic",
+      "visualPrompt": "电影感矢量信息图结尾，开场漂浮文字碎片重新出现，在聚光灯下连成有序网络，随后形成一句稳定结论，画面从碎片化过渡到结构感，深灰空间、青绿与白色高光，完整闭环，避免拟人化记忆表达和照片质感"
+    }
+  ],
+  "settings": {
+    "aspectRatio": "16:9",
+    "audience": "对世界保持好奇的普通观众",
+    "brief": "大语言模型怎样理解上下文？",
+    "contentType": "AI 技术",
+    "duration": 45,
+    "language": "简体中文",
+    "style": "电影感矢量信息图纪录片：暗色程序化构图、发光 token、细线关系、克制镜头运动",
+    "topic": "大语言模型怎样理解上下文？"
+  },
+  "stage": "render",
+  "styleLock": {
+    "descriptor": "电影感纪录片",
+    "enabled": false,
+    "negative": "",
+    "palette": [],
+    "referenceAssetIds": []
+  },
+  "subtitles": [
+    {
+      "id": "llm-context-v2-scene-3885f05e-d786-4ddf-a899-0783b587cacc-0",
+      "sceneId": "scene-3885f05e-d786-4ddf-a899-0783b587cacc",
+      "start": 0.2,
+      "end": 6.577,
+      "text": "模型看起来记住了前文，但只要离开当前输入，它并不会自动保留这段对话。"
+    },
+    {
+      "id": "llm-context-v2-scene-3885f05e-d786-4ddf-a899-0783b587cacc-1",
+      "sceneId": "scene-3885f05e-d786-4ddf-a899-0783b587cacc",
+      "start": 6.577,
+      "end": 9.952,
+      "text": "真正参与这次生成的内容，叫做上下文。"
+    },
+    {
+      "id": "llm-context-v2-scene-e17f8507-528d-4d60-8f61-f67d4d421026-0",
+      "sceneId": "scene-e17f8507-528d-4d60-8f61-f67d4d421026",
+      "start": 10.602,
+      "end": 13.462,
+      "text": "输入文本先按分词器切成 token。"
+    },
+    {
+      "id": "llm-context-v2-scene-e17f8507-528d-4d60-8f61-f67d4d421026-1",
+      "sceneId": "scene-e17f8507-528d-4d60-8f61-f67d4d421026",
+      "start": 13.462,
+      "end": 18.388,
+      "text": "每个 token 变成离散线索，再被转换成模型可以计算的向量。"
+    },
+    {
+      "id": "llm-context-v2-scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b-0",
+      "sceneId": "scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b",
+      "start": 19.038,
+      "end": 23.705,
+      "text": "在注意力层里，每个 token 会和前文计算相关权重。"
+    },
+    {
+      "id": "llm-context-v2-scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b-1",
+      "sceneId": "scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b",
+      "start": 23.705,
+      "end": 27.162,
+      "text": "权重决定混合多少信息，但它不是人类解释。"
+    },
+    {
+      "id": "llm-context-v2-scene-0903610a-37ef-4d06-8548-afbd9ba442ce-0",
+      "sceneId": "scene-0903610a-37ef-4d06-8548-afbd9ba442ce",
+      "start": 27.812,
+      "end": 29.312,
+      "text": "位置编码补上词序；"
+    },
+    {
+      "id": "llm-context-v2-scene-0903610a-37ef-4d06-8548-afbd9ba442ce-1",
+      "sceneId": "scene-0903610a-37ef-4d06-8548-afbd9ba442ce",
+      "start": 29.312,
+      "end": 33.647,
+      "text": "自回归生成时，因果掩码会挡住尚未出现的 token。"
+    },
+    {
+      "id": "llm-context-v2-scene-context-window-001-0",
+      "sceneId": "scene-context-window-001",
+      "start": 34.297,
+      "end": 38.002,
+      "text": "模型一次推理只能读取上下文窗口里的内容。"
+    },
+    {
+      "id": "llm-context-v2-scene-context-window-001-1",
+      "sceneId": "scene-context-window-001",
+      "start": 38.002,
+      "end": 43.374,
+      "text": "窗口大小因模型和配置而异，旧内容如何保留，取决于产品策略。"
+    },
+    {
+      "id": "llm-context-v2-scene-takeaway-context-001-0",
+      "sceneId": "scene-takeaway-context-001",
+      "start": 44.024,
+      "end": 52.1,
+      "text": "所以理解上下文，是读取当前线索、保留顺序、计算关联，再在有限窗口内组织成可计算结构。"
+    }
+  ],
+  "timeline": [
+    {
+      "id": "llm-context-v2-video-0",
+      "track": "video",
+      "sceneId": "scene-3885f05e-d786-4ddf-a899-0783b587cacc",
+      "label": "01 它真的“记住”了吗？",
+      "start": 0,
+      "duration": 10.402375000000001,
+      "color": "#c8ff65"
+    },
+    {
+      "id": "llm-context-v2-narration-0",
+      "track": "narration",
+      "sceneId": "scene-3885f05e-d786-4ddf-a899-0783b587cacc",
+      "assetId": "narration-v2-scene-3885f05e-d786-4ddf-a899-0783b587cacc",
+      "label": "旁白 · 它真的“记住”了吗？",
+      "start": 0.2,
+      "duration": 9.752375,
+      "color": "#a78bfa"
+    },
+    {
+      "id": "llm-context-v2-video-1",
+      "track": "video",
+      "sceneId": "scene-e17f8507-528d-4d60-8f61-f67d4d421026",
+      "label": "02 上下文先变成一串线索",
+      "start": 10.402375000000001,
+      "duration": 8.43575,
+      "color": "#79a9ff"
+    },
+    {
+      "id": "llm-context-v2-narration-1",
+      "track": "narration",
+      "sceneId": "scene-e17f8507-528d-4d60-8f61-f67d4d421026",
+      "assetId": "narration-v2-scene-e17f8507-528d-4d60-8f61-f67d4d421026",
+      "label": "旁白 · 上下文先变成一串线索",
+      "start": 10.602375,
+      "duration": 7.78575,
+      "color": "#a78bfa"
+    },
+    {
+      "id": "llm-context-v2-video-2",
+      "track": "video",
+      "sceneId": "scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b",
+      "label": "03 注意力建立词与词的关系",
+      "start": 18.838125,
+      "duration": 8.774000000000001,
+      "color": "#ffbc66"
+    },
+    {
+      "id": "llm-context-v2-narration-2",
+      "track": "narration",
+      "sceneId": "scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b",
+      "assetId": "narration-v2-scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b",
+      "label": "旁白 · 注意力建立词与词的关系",
+      "start": 19.038125,
+      "duration": 8.124,
+      "color": "#a78bfa"
+    },
+    {
+      "id": "llm-context-v2-video-3",
+      "track": "video",
+      "sceneId": "scene-0903610a-37ef-4d06-8548-afbd9ba442ce",
+      "label": "04 顺序和可见范围同样重要",
+      "start": 27.612125000000002,
+      "duration": 6.48475,
+      "color": "#a78bfa"
+    },
+    {
+      "id": "llm-context-v2-narration-3",
+      "track": "narration",
+      "sceneId": "scene-0903610a-37ef-4d06-8548-afbd9ba442ce",
+      "assetId": "narration-v2-scene-0903610a-37ef-4d06-8548-afbd9ba442ce",
+      "label": "旁白 · 顺序和可见范围同样重要",
+      "start": 27.812125,
+      "duration": 5.83475,
+      "color": "#a78bfa"
+    },
+    {
+      "id": "llm-context-v2-video-4",
+      "track": "video",
+      "sceneId": "scene-context-window-001",
+      "label": "05 上下文窗口不是无限记忆",
+      "start": 34.096875000000004,
+      "duration": 9.727,
+      "color": "#c8ff65"
+    },
+    {
+      "id": "llm-context-v2-narration-4",
+      "track": "narration",
+      "sceneId": "scene-context-window-001",
+      "assetId": "narration-v2-scene-context-window-001",
+      "label": "旁白 · 上下文窗口不是无限记忆",
+      "start": 34.29687500000001,
+      "duration": 9.077,
+      "color": "#a78bfa"
+    },
+    {
+      "id": "llm-context-v2-video-5",
+      "track": "video",
+      "sceneId": "scene-takeaway-context-001",
+      "label": "06 理解上下文，是组织线索",
+      "start": 43.823875,
+      "duration": 8.725625,
+      "color": "#79a9ff"
+    },
+    {
+      "id": "llm-context-v2-narration-5",
+      "track": "narration",
+      "sceneId": "scene-takeaway-context-001",
+      "assetId": "narration-v2-scene-takeaway-context-001",
+      "label": "旁白 · 理解上下文，是组织线索",
+      "start": 44.023875000000004,
+      "duration": 8.075625,
+      "color": "#a78bfa"
+    }
+  ],
+  "title": "大语言模型怎样理解上下文",
+  "updatedAt": "2026-11-18T09:09:24.000Z"
+}

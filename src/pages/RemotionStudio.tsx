@@ -91,7 +91,7 @@ export default function RemotionStudio() {
       for (const layer of scene.layers) stats[layer.type] += 1;
       return stats;
     },
-    { text: 0, svg: 0, image: 0, chart: 0, canvas: 0, video: 0 },
+    { text: 0, svg: 0, image: 0, chart: 0, canvas: 0, video: 0, diagram: 0 },
   );
 
   const validateNow = () => {

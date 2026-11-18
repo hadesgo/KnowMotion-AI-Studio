@@ -1,14 +1,12 @@
 import path from "node:path";
-import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { bundle } from "@remotion/bundler";
-import { renderMedia, selectComposition } from "@remotion/renderer";
 import { makeSampleProject } from "../src/data/demo";
 import {
   buildProjectComposition,
   compositionSchema,
   type CompositionDsl,
 } from "../src/remotion/schema";
+import { renderVideoFile } from "./render-video-runtime";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, "..");
@@ -34,29 +32,7 @@ export async function renderRemotionVideo(
   composition: CompositionDsl,
   outputLocation: string,
 ) {
-  const serveUrl = await bundle({
-    entryPoint: path.join(projectRoot, "src/remotion/index.ts"),
-  });
-  const inputProps = { composition };
-  const selectedComposition = await selectComposition({
-    serveUrl,
-    id: "KnowledgeVideo",
-    inputProps,
-  });
-  await mkdir(path.dirname(outputLocation), { recursive: true });
-  await renderMedia({
-    serveUrl,
-    composition: selectedComposition,
-    inputProps,
-    codec: "h264",
-    outputLocation,
-    concurrency: 1,
-    onProgress: ({ progress }) => {
-      process.stdout.write(`\rRendering ${Math.round(progress * 100)}%`);
-    },
-  });
-  process.stdout.write("\n");
-  return outputLocation;
+  return renderVideoFile(composition, outputLocation);
 }
 
 if (

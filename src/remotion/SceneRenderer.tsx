@@ -16,10 +16,12 @@ import {
 } from "remotion";
 import { CanvasLayer } from "../canvas/CanvasLayer";
 import { evaluateGsapMotion } from "../gsap/gsapMotion";
+import { KnowledgeDiagram } from "./KnowledgeDiagram";
 import type {
   CanvasLayerDsl,
   ChartLayerDsl,
   CompositionDsl,
+  DiagramLayerDsl,
   ImageLayerDsl,
   SceneDsl,
   SceneLayerDsl,
@@ -547,6 +549,11 @@ function CanvasRenderer({ layer }: { layer: CanvasLayerDsl }) {
   );
 }
 
+function DiagramRenderer({ layer }: { layer: DiagramLayerDsl }) {
+  const frame = useCurrentFrame();
+  return <KnowledgeDiagram layer={layer} frame={frame} />;
+}
+
 function LayerRenderer({
   layer,
   scene,
@@ -568,6 +575,8 @@ function LayerRenderer({
         <VideoRenderer layer={layer} composition={composition} />
       ) : layer.type === "chart" ? (
         <ChartRenderer layer={layer} />
+      ) : layer.type === "diagram" ? (
+        <DiagramRenderer layer={layer} />
       ) : (
         <CanvasRenderer layer={layer} />
       )}

@@ -30,6 +30,7 @@
     "llama:smoke": "node scripts/smoke-llama-runtime.mjs",
     "renderer:smoke": "node --import tsx scripts/smoke-render-worker.mjs",
     "mvp:render": "tsx scripts/render-sky-blue-mvp.ts",
+    "llm-context:render": "tsx scripts/render-llm-context-explainer.ts",
     "acceptance:runtimes": "node scripts/acceptance/install-local-runtimes.mjs",
     "acceptance:services": "cargo test --manifest-path src-tauri/Cargo.toml --lib real_service_acceptance -- --ignored --nocapture --test-threads=1",
     "acceptance:inpaint": "cargo test --manifest-path src-tauri/Cargo.toml --lib real_inpaint_acceptance -- --ignored --nocapture --test-threads=1",

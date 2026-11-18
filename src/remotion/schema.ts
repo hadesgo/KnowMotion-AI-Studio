@@ -158,6 +158,25 @@ const canvasLayerSchema = z
   })
   .strict();
 
+const diagramLayerSchema = z
+  .object({
+    ...baseLayerShape,
+    type: z.literal("diagram"),
+    variant: z.enum([
+      "contextBridge",
+      "tokenSequence",
+      "attentionMechanism",
+      "positionMask",
+      "contextWindow",
+      "contextSummary",
+    ]),
+    accent: colorSchema,
+    secondaryColor: colorSchema,
+    caption: z.string().max(500).default(""),
+    labels: z.array(z.string().max(80)).max(32).default([]),
+  })
+  .strict();
+
 export const sceneLayerSchema = z.discriminatedUnion("type", [
   textLayerSchema,
   svgLayerSchema,
@@ -165,6 +184,7 @@ export const sceneLayerSchema = z.discriminatedUnion("type", [
   videoLayerSchema,
   chartLayerSchema,
   canvasLayerSchema,
+  diagramLayerSchema,
 ]);
 
 const cameraPointSchema = z
@@ -372,6 +392,7 @@ export type ImageLayerDsl = z.infer<typeof imageLayerSchema>;
 export type VideoLayerDsl = z.infer<typeof videoLayerSchema>;
 export type ChartLayerDsl = z.infer<typeof chartLayerSchema>;
 export type CanvasLayerDsl = z.infer<typeof canvasLayerSchema>;
+export type DiagramLayerDsl = z.infer<typeof diagramLayerSchema>;
 export type GsapMotionDsl = z.infer<typeof gsapMotionSchema>;
 export type SceneDsl = z.infer<typeof sceneDslSchema>;
 export type CompositionDsl = z.infer<typeof compositionSchema>;
@@ -399,6 +420,238 @@ export function validateComposition(input: unknown): CompositionValidation {
   return { valid: true, errors: [], warnings };
 }
 
+function isContextExplainerTopic(topic: string): boolean {
+  return /(大语言模型|语言模型|LLM).{0,18}(上下文|context)|(上下文|context).{0,18}(大语言模型|语言模型|LLM|token|注意力)/i.test(
+    topic,
+  );
+}
+
+function contextDiagramVariant(
+  scene: Scene,
+  index: number,
+): DiagramLayerDsl["variant"] {
+  const text = `${scene.title} ${scene.narration}`;
+  if (/收束|结论|理解为|组织线索|组织成|所以理解/.test(text)) {
+    return "contextSummary";
+  }
+  if (/上下文窗口|window|无限记忆|窗口/.test(text)) return "contextWindow";
+  if (/掩码|词序|顺序|位置编码|mask/.test(text)) return "positionMask";
+  if (/注意力|attention|相关权重|权重连线/.test(text)) {
+    return "attentionMechanism";
+  }
+  if (/token|分词|切成|线索/.test(text)) return "tokenSequence";
+  return index === 0 ? "contextBridge" : "contextSummary";
+}
+
+function contextDiagramLabels(
+  variant: DiagramLayerDsl["variant"],
+): string[] {
+  if (variant === "contextBridge") {
+    return ["明天去杭州", "下午三点出发", "帮我查路线"];
+  }
+  if (variant === "tokenSequence") {
+    return [
+      "明天去杭州，下午三点出发，帮我查路线",
+      "明天",
+      "去",
+      "杭州",
+      "下午",
+      "三点",
+      "出发",
+      "查",
+      "路线",
+    ];
+  }
+  if (variant === "attentionMechanism") {
+    return ["明天", "去", "杭州", "下午", "三点", "出发", "查"];
+  }
+  if (variant === "positionMask") {
+    return ["明天", "去", "杭州", "下午", "三点", "出发", "查"];
+  }
+  if (variant === "contextWindow") {
+    return [
+      "旧对话",
+      "设定",
+      "问题",
+      "资料",
+      "引用",
+      "限制",
+      "目标",
+      "格式",
+      "当前",
+      "后续",
+    ];
+  }
+  return ["读取线索", "保留顺序", "计算关联", "限定范围", "组织成结构"];
+}
+
+/**
+ * Programmatic explainers must animate the mechanism, not place a generic
+ * illustration behind the narration. This deliberately ignores auto-generated
+ * canvas layers for the LLM-context explainer and emits a semantic diagram.
+ */
+function buildContextExplainerDsl(
+  scene: Scene,
+  index: number,
+  project: VideoProject,
+): SceneDsl {
+  const durationMs = Math.max(500, scene.duration * 1000);
+  const variant = contextDiagramVariant(scene, index);
+  const sceneStartMs = project.scenes
+    .slice(0, Math.max(0, project.scenes.findIndex((item) => item.id === scene.id)))
+    .reduce((sum, item) => sum + item.duration * 1000, 0);
+  const chapterNames = ["INPUT", "TOKENS", "ATTENTION", "MASK", "WINDOW", "SUMMARY"];
+  const backgrounds = [
+    ["#0d2d33", "#091b20", "#050d11"],
+    ["#102b39", "#0a1c28", "#050b11"],
+    ["#302718", "#151d1b", "#080d0f"],
+    ["#182a38", "#0b1b28", "#060c12"],
+    ["#142d2d", "#0a1b1d", "#060b0e"],
+    ["#102c2c", "#09191b", "#050b0c"],
+  ];
+  const accents = ["#71e2d3", "#74baf4", "#ffc868", "#9aa9ff", "#88e0a2", "#7fe5cd"];
+  const subtitles: SceneLayerDsl[] = project.subtitles
+    .filter((cue) => cue.sceneId === scene.id)
+    .flatMap((cue) => {
+      const fromMs = Math.max(0, cue.start * 1000 - sceneStartMs);
+      const toMs = Math.min(durationMs, cue.end * 1000 - sceneStartMs);
+      if (toMs <= fromMs) return [];
+      return [
+        {
+          type: "text" as const,
+          id: `${scene.id}-semantic-subtitle-${cue.id}`,
+          timing: { fromMs, toMs },
+          animation: {
+            type: "fade" as const,
+            delayMs: 0,
+            durationMs: 180,
+            easing: "easeOut" as const,
+          },
+          opacity: 0.96,
+          x: 8,
+          y: 89,
+          width: 84,
+          height: 7,
+          rotation: 0,
+          content: cue.text,
+          color: "#ffffff",
+          fontSize: project.audio.subtitleSize,
+          fontWeight: 500,
+          align: "center" as const,
+          letterSpacing: 0,
+        },
+      ];
+    });
+  const layers: SceneLayerDsl[] = [
+    {
+      type: "text",
+      id: `${scene.id}-semantic-eyebrow`,
+      timing: { fromMs: 0, toMs: durationMs },
+      animation: {
+        type: "fade",
+        delayMs: 40,
+        durationMs: 380,
+        easing: "easeOut",
+      },
+      opacity: 0.82,
+      x: 6,
+      y: 3.4,
+      width: 60,
+      height: 4,
+      rotation: 0,
+      content: `${String(index + 1).padStart(2, "0")} / ${chapterNames[index] ?? "CONTEXT"}`,
+      color: accents[index] ?? "#71e2d3",
+      fontSize: 17,
+      fontWeight: 650,
+      align: "left",
+      letterSpacing: 2.5,
+    },
+    {
+      type: "text",
+      id: `${scene.id}-semantic-title`,
+      timing: { fromMs: 0, toMs: durationMs },
+      animation: {
+        type: "fadeUp",
+        delayMs: 80,
+        durationMs: 540,
+        easing: "easeOut",
+      },
+      opacity: 1,
+      x: 6,
+      y: 5.8,
+      width: 87,
+      height: 10,
+      rotation: 0,
+      content: scene.title,
+      color: "#f4f2e8",
+      fontSize: 54,
+      fontWeight: 680,
+      align: "left",
+      letterSpacing: -1.2,
+    },
+    {
+      type: "diagram",
+      id: `${scene.id}-semantic-diagram`,
+      timing: { fromMs: 0, toMs: durationMs },
+      animation: {
+        type: "none",
+        delayMs: 0,
+        durationMs: 0,
+        easing: "linear",
+      },
+      opacity: 1,
+      x: 2.2,
+      y: 17.5,
+      width: 95.6,
+      height: 66,
+      rotation: 0,
+      variant,
+      accent: accents[index] ?? "#71e2d3",
+      secondaryColor: index === 2 ? "#74baf4" : "#90c9b2",
+      caption:
+        variant === "contextBridge"
+          ? "上下文不是自动长期保存的记忆，而是本次推理可以读取的输入。"
+          : variant === "tokenSequence"
+            ? "示意切分；真实 token 边界由具体模型的分词器决定。"
+            : variant === "attentionMechanism"
+              ? "注意力权重用于计算和混合信息，不等于可解释的人类理解。"
+              : variant === "positionMask"
+                ? "自回归生成时，因果掩码遮住尚未出现的 token。"
+                : variant === "contextWindow"
+                  ? "窗口容量有限，旧内容是否保留取决于产品的截断、检索或压缩策略。"
+                  : "这里的“理解”是可计算的信息组织，不等同于人类理解。",
+      labels: contextDiagramLabels(variant),
+    },
+    ...subtitles,
+  ];
+  return sceneDslSchema.parse({
+    schemaVersion: "1.0",
+    id: scene.id,
+    styleVariant: "diagram",
+    title: scene.title,
+    narration: scene.narration,
+    durationMs,
+    background: {
+      type: "gradient",
+      colors: backgrounds[index] ?? backgrounds[0],
+      angle: 145,
+      vignette: 0.46,
+    },
+    camera: {
+      from: { scale: 1, x: 0, y: 0 },
+      to: { scale: 1.012, x: 0, y: -0.2 },
+      easing: "easeInOut",
+    },
+    transition: {
+      type: index === 0 ? "fade" : "wipe",
+      durationMs: 420,
+      direction: index % 2 === 0 ? "right" : "left",
+    },
+    gsap: scene.gsapMotion ?? undefined,
+    layers,
+  });
+}
+
 export function sceneToRemotionDsl(
   scene: Scene,
   index: number,
@@ -415,6 +668,9 @@ export function sceneToRemotionDsl(
         ),
       );
     }
+  }
+  if (isContextExplainerTopic(project.settings.topic)) {
+    return buildContextExplainerDsl(scene, index, project);
   }
   const style = (
     ["cinematic", "diagram", "data", "editorial", "minimal"] as const
@@ -512,11 +768,10 @@ export function sceneToRemotionDsl(
     });
   }
 
-  if (
-    scene.visualMode === "image" ||
-    style === "cinematic" ||
-    style === "editorial"
-  ) {
+  // Only a scene explicitly marked as image-led should mount its asset as the
+  // primary visual. Programmatic explainers used to show an unrelated SVG
+  // placeholder behind the title merely because of the selected style.
+  if (scene.visualMode === "image") {
     const fallbackAsset = ensureFallbackAsset(project, scene, assets);
     if (fallbackAsset) {
       layers.unshift({

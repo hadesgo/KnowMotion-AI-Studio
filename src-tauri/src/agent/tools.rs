@@ -649,18 +649,151 @@ fn svg_asset(scene_id: &str, brief: &AssetBrief, index: usize) -> (Value, String
     let asset_id = format!("asset-{}", Uuid::new_v4());
     let palettes = ["#c8ff65", "#79a9ff", "#ffbc66", "#a78bfa"];
     let accent = palettes[index % palettes.len()].to_string();
+    let secondary = palettes[(index + 1) % palettes.len()];
     let title = escape_xml(&clip_text(&brief.title, 46));
-    let prompt = escape_xml(&clip_text(&brief.prompt, 92));
-    let style = escape_xml(&clip_text(&brief.style, 40));
+    let focus = format!("{} {}", brief.title, brief.prompt).to_lowercase();
+    let motif = if focus.contains("token")
+        || focus.contains("分词")
+        || focus.contains("字符")
+        || focus.contains("文本")
+    {
+        let labels = ["输入", "token", "向量", "计算"];
+        let blocks = labels
+            .iter()
+            .enumerate()
+            .map(|(item_index, label)| {
+                let x = 214 + item_index * 224;
+                format!(
+                    r####"<g transform="translate({x} 250)">
+<rect width="176" height="104" rx="22" fill="#12343b" stroke="{stroke}" stroke-width="2"/>
+<text x="88" y="61" text-anchor="middle" fill="#eef4ef" font-family="Segoe UI, sans-serif" font-size="23" font-weight="600">{label}</text>
+</g>
+<path d="M {line_start} 302 H {line_end}" stroke="{accent}" stroke-width="2" stroke-dasharray="7 7" opacity=".6"/>"####,
+                    x = x,
+                    line_start = x - 46,
+                    line_end = x - 8,
+                    stroke = if item_index == 1 {
+                        accent.as_str()
+                    } else {
+                        "#36545b"
+                    },
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        format!(
+            r####"<g>{blocks}</g>
+<rect x="382" y="398" width="516" height="58" rx="29" fill="{accent}" fill-opacity=".12" stroke="{accent}"/>
+<text x="640" y="434" text-anchor="middle" fill="{accent}" font-family="Segoe UI, sans-serif" font-size="20">离散线索 → 可计算表示</text>"####
+        )
+    } else if focus.contains("注意力")
+        || focus.contains("attention")
+        || focus.contains("关系")
+        || focus.contains("网络")
+    {
+        let nodes = [
+            (310, 250),
+            (500, 190),
+            (690, 260),
+            (860, 186),
+            (930, 360),
+            (620, 390),
+            (390, 404),
+        ];
+        let lines = nodes
+            .iter()
+            .enumerate()
+            .map(|(node_index, (x, y))| {
+                format!(
+                    r####"<path d="M 600 300 Q {} {} {} {}" fill="none" stroke="{}" stroke-width="{}" opacity=".{}"/>"####,
+                    (x + 600) / 2,
+                    (y + 300) / 2 - 20,
+                    x,
+                    y,
+                    if node_index % 2 == 0 {
+                        accent.as_str()
+                    } else {
+                        secondary
+                    },
+                    1.2 + (node_index % 3) as f32 * 0.8,
+                    0.22 + (node_index % 4) as f32 * 0.12,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        let circles = nodes
+            .iter()
+            .enumerate()
+            .map(|(node_index, (x, y))| {
+                format!(
+                    r####"<circle cx="{x}" cy="{y}" r="{}" fill="{}" fill-opacity=".16" stroke="{}" stroke-width="2"/>
+<circle cx="{x}" cy="{y}" r="6" fill="{}"/>"####,
+                    26 + (node_index % 2) * 7,
+                    accent.as_str(),
+                    if node_index == 0 {
+                        accent.as_str()
+                    } else {
+                        "#436069"
+                    },
+                    if node_index == 0 {
+                        accent.as_str()
+                    } else {
+                        secondary
+                    },
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        format!(
+            r####"<g>{lines}{circles}</g>
+<circle cx="600" cy="300" r="34" fill="{accent}" fill-opacity=".18" stroke="{accent}" stroke-width="3"/>
+<circle cx="600" cy="300" r="8" fill="{accent}"/>
+<text x="600" y="460" text-anchor="middle" fill="#a9bac2" font-family="Segoe UI, sans-serif" font-size="18">相关权重用于混合信息</text>"####
+        )
+    } else if focus.contains("窗口")
+        || focus.contains("范围")
+        || focus.contains("memory")
+        || focus.contains("记忆")
+    {
+        format!(
+            r####"<g opacity=".35">
+<rect x="210" y="264" width="118" height="92" rx="16" fill="#12343b" stroke="#36545b"/>
+<rect x="340" y="264" width="118" height="92" rx="16" fill="#12343b" stroke="#36545b"/>
+<rect x="782" y="264" width="118" height="92" rx="16" fill="#12343b" stroke="#36545b"/>
+<rect x="912" y="264" width="118" height="92" rx="16" fill="#12343b" stroke="#36545b"/>
+</g>
+<rect x="478" y="224" width="284" height="172" rx="28" fill="{accent}" fill-opacity=".1" stroke="{accent}" stroke-width="3"/>
+<rect x="498" y="244" width="244" height="132" rx="18" fill="#14353c" stroke="#3b626a"/>
+<text x="620" y="318" text-anchor="middle" fill="#eef4ef" font-family="Segoe UI, sans-serif" font-size="26" font-weight="600">可见范围</text>
+<path d="M 424 310 H 462 M 778 310 H 816" stroke="{accent}" stroke-width="2" stroke-dasharray="7 6"/>
+<text x="640" y="452" text-anchor="middle" fill="#a9bac2" font-family="Segoe UI, sans-serif" font-size="18">窗口外信息不一定参与本次计算</text>"####
+        )
+    } else {
+        format!(
+            r####"<g transform="translate(218 222)">
+<rect width="844" height="176" rx="30" fill="#12343b" stroke="#35545b"/>
+<circle cx="72" cy="88" r="34" fill="{accent}" fill-opacity=".18" stroke="{accent}" stroke-width="2"/>
+<circle cx="72" cy="88" r="7" fill="{accent}"/>
+<path d="M 128 88 H 724" stroke="{secondary}" stroke-width="2" stroke-dasharray="8 8" opacity=".55"/>
+<path d="M 701 76 L 716 88 L 701 100" fill="none" stroke="{secondary}" stroke-width="2"/>
+<text x="142" y="70" fill="#eef4ef" font-family="Segoe UI, sans-serif" font-size="22" font-weight="600">概念线索</text>
+<text x="142" y="103" fill="#9caeb8" font-family="Segoe UI, sans-serif" font-size="16">沿画面流程进入计算</text>
+<circle cx="770" cy="88" r="22" fill="{accent}" fill-opacity=".12" stroke="{accent}"/>
+</g>"####
+        )
+    };
     let svg = format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
-<defs><radialGradient id="g" cx="78%" cy="24%" r="85%"><stop offset="0" stop-color="{accent}" stop-opacity=".7"/><stop offset=".45" stop-color="#103943"/><stop offset="1" stop-color="#060b10"/></radialGradient></defs>
-<rect width="1280" height="720" fill="url(#g)"/><circle cx="1010" cy="210" r="118" fill="none" stroke="{accent}" stroke-width="2" opacity=".6"/><circle cx="1010" cy="210" r="72" fill="none" stroke="{accent}" opacity=".3"/><circle cx="1010" cy="210" r="18" fill="{accent}"/>
-<text x="82" y="70" fill="{accent}" font-family="Segoe UI, sans-serif" font-size="15" letter-spacing="4">ASSET AGENT / {style}</text>
-<text x="82" y="490" fill="#f2f7f3" font-family="Segoe UI, sans-serif" font-size="48" font-weight="600">{title}</text>
-<foreignObject x="84" y="520" width="760" height="90"><div xmlns="http://www.w3.org/1999/xhtml" style="color:#aab9c4;font:21px/1.5 'Segoe UI',sans-serif">{prompt}</div></foreignObject>
-<rect x="82" y="640" width="110" height="3" fill="{accent}"/>
-</svg>"##
+        r####"<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+<defs>
+<radialGradient id="g" cx="78%" cy="20%" r="90%"><stop offset="0" stop-color="{accent}" stop-opacity=".18"/><stop offset=".5" stop-color="#0d2b32"/><stop offset="1" stop-color="#060d11"/></radialGradient>
+<pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M 32 0 H 0 V 32" fill="none" stroke="#8fb3ba" stroke-opacity=".045"/></pattern>
+</defs>
+<rect width="1280" height="720" fill="url(#g)"/><rect width="1280" height="720" fill="url(#grid)"/>
+<circle cx="1080" cy="82" r="220" fill="{accent}" opacity=".035"/>
+{motif}
+<rect x="82" y="558" width="86" height="3" rx="1.5" fill="{accent}"/>
+<text x="82" y="618" fill="#f2f7f3" font-family="Segoe UI, sans-serif" font-size="42" font-weight="650">{title}</text>
+</svg>"####
     );
     // 统一用 base64 载荷：存储层把 data URL 落盘成文件后靠它还原字节，
     // 百分号编码虽然也是合法 RFC 2397，但会让“草案 → 项目文件”这一步失败。
@@ -929,6 +1062,12 @@ mod tests {
             .as_str()
             .expect("generated asset must have a data URL");
         assert!(asset_src.starts_with("data:image/svg+xml"));
+        let encoded = asset_src.split_once(',').expect("base64 payload").1;
+        let svg = String::from_utf8(BASE64.decode(encoded).expect("valid SVG payload"))
+            .expect("UTF-8 SVG");
+        assert!(!svg.contains("A clean scientific orbit diagram"));
+        assert!(!svg.contains("ASSET AGENT"));
+        assert!(svg.contains("概念线索"));
         assert_eq!(project["scenes"][0]["assetId"], project["assets"][0]["id"]);
     }
 

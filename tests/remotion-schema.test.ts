@@ -101,3 +101,56 @@ test("legacy null GSAP fields are normalized instead of crashing the render edit
   assert.ok(normalized.scenes[0].layers.every((layer) => layer.gsap === undefined));
   assert.equal(validateComposition(normalized).valid, true);
 });
+
+test("LLM context explainers use semantic mechanism diagrams, not generic assets", () => {
+  const project = makeSampleProject();
+  project.settings.topic = "大语言模型怎样理解上下文？";
+  const specifications = [
+    {
+      title: "它真的记住前文了吗？",
+      narration: "离开当前输入后，模型不会自动保留整段对话。",
+    },
+    {
+      title: "输入先被切成 token",
+      narration: "文本会先经过分词器，变成离散 token。",
+    },
+    {
+      title: "注意力计算相关权重",
+      narration: "每个 token 会和前文计算相关权重。",
+    },
+    {
+      title: "上下文窗口有读取范围",
+      narration: "一次推理只能读取当前窗口里的内容。",
+    },
+    {
+      title: "理解上下文是组织线索",
+      narration: "读取线索、保留顺序、计算关联并组织成结构。",
+    },
+  ];
+  project.scenes = project.scenes.map((scene, index) => ({
+    ...scene,
+    ...specifications[index],
+  }));
+
+  const composition = buildProjectComposition(project);
+  const variants = composition.scenes.map(
+    (scene) =>
+      scene.layers.find((layer) => layer.type === "diagram")?.type === "diagram"
+        ? scene.layers.find((layer) => layer.type === "diagram")?.variant
+        : undefined,
+  );
+
+  assert.deepEqual(variants, [
+    "contextBridge",
+    "tokenSequence",
+    "attentionMechanism",
+    "contextWindow",
+    "contextSummary",
+  ]);
+  assert.ok(
+    composition.scenes.every(
+      (scene) => !scene.layers.some((layer) => layer.type === "image"),
+    ),
+  );
+  assert.equal(validateComposition(composition).valid, true);
+});
