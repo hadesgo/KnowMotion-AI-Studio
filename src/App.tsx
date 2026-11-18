@@ -1,8 +1,10 @@
 import { lazy, Suspense } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { AppShell, ProjectGuard } from "./components/AppShell";
+import { RemotionRouteBoundary } from "./components/RemotionRouteBoundary";
 import AnimationEditor from "./pages/AnimationEditor";
 import AgentWorkflow from "./pages/AgentWorkflow";
+import AutoStudio from "./pages/AutoStudio";
 import AudioSubtitles from "./pages/AudioSubtitles";
 import Canon from "./pages/Canon";
 import Dashboard from "./pages/Dashboard";
@@ -35,6 +37,7 @@ export default function App() {
         <Route path="settings/models" element={<Models />} />
         <Route path="projects/:projectId" element={<ProjectOutlet />}>
           <Route index element={<Navigate to="plan" replace />} />
+          <Route path="auto" element={<AutoStudio />} />
           <Route path="plan" element={<Planning />} />
           <Route path="workflow" element={<AgentWorkflow />} />
           <Route path="script" element={<ScriptEditor />} />
@@ -46,9 +49,11 @@ export default function App() {
           <Route
             path="remotion"
             element={
-              <Suspense fallback={<div className="workflow-loading">正在加载 Remotion Player…</div>}>
-                <RemotionStudio />
-              </Suspense>
+              <RemotionRouteBoundary>
+                <Suspense fallback={<div className="workflow-loading">正在加载 Remotion Player…</div>}>
+                  <RemotionStudio />
+                </Suspense>
+              </RemotionRouteBoundary>
             }
           />
           <Route path="timeline" element={<TimelineEditor />} />

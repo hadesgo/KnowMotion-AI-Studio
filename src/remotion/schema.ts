@@ -48,6 +48,13 @@ const gsapMotionSchema = z
   })
   .strict();
 
+// Older Agent outputs persisted optional motion as `null`. Treat that as an
+// omitted animation instead of letting one legacy field unmount the editor.
+const optionalGsapMotionSchema = z.preprocess(
+  (value) => value ?? undefined,
+  gsapMotionSchema.optional(),
+);
+
 const baseLayerShape = {
   id: z.string().min(1).max(120),
   timing: timingSchema,
@@ -58,7 +65,7 @@ const baseLayerShape = {
   width: z.number().finite().min(0.1).max(300),
   height: z.number().finite().min(0.1).max(300),
   rotation: z.number().finite().min(-3600).max(3600).default(0),
-  gsap: gsapMotionSchema.optional(),
+  gsap: optionalGsapMotionSchema,
 };
 
 const textLayerSchema = z
@@ -210,7 +217,7 @@ export const sceneDslSchema = z
       })
       .strict(),
     transition: transitionSchema,
-    gsap: gsapMotionSchema.optional(),
+    gsap: optionalGsapMotionSchema,
     layers: z.array(sceneLayerSchema).max(60),
   })
   .strict()
@@ -732,7 +739,7 @@ export function sceneToRemotionDsl(
       durationMs: Math.min(700, Math.round(durationMs * 0.1)),
       direction: index % 2 === 0 ? "left" : "right",
     },
-    gsap: scene.gsapMotion,
+    gsap: scene.gsapMotion ?? undefined,
     layers,
   });
 }

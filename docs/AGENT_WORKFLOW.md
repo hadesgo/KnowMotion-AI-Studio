@@ -4,6 +4,8 @@
 
 Agent 系统运行在 Tauri 的 Rust 后端。React 只负责启动、暂停、审批和展示持久状态，不直接调用模型、读取密钥或写入项目文件。
 
+自动成片模式仍通过同一 Workflow Runtime 执行，只把启动请求中的 `autoMode` 设为 `true`，因此三个审批节点会以连续执行方式落库，而不会让运行停在 `waiting_approval`。工作流完成后，应用编排层继续调用已有的 TTS、图片队列、质量门禁和 Remotion Renderer；专家工作台和自动模式共享项目修订、工具白名单、撤销记录与渲染输入。
+
 ```mermaid
 flowchart LR
     UI[Agent Workflow UI] -->|"command"| Runtime[Workflow Runtime]

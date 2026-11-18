@@ -5,6 +5,7 @@ import { evaluateGsapMotion } from "../src/gsap/gsapMotion";
 import {
   buildProjectComposition,
   compositionSchema,
+  sceneDslSchema,
   validateComposition,
 } from "../src/remotion/schema";
 
@@ -67,4 +68,36 @@ test("GSAP motion is deterministic and reaches generated Remotion layers", () =>
   const later = evaluateGsapMotion(project.scenes[0].gsapMotion, 2100);
   assert.deepEqual(first, repeated);
   assert.notDeepEqual(first, later);
+});
+
+test("legacy null GSAP fields are normalized instead of crashing the render editor", () => {
+  const project = makeSampleProject();
+  const composition = buildProjectComposition(project);
+  const legacyScene = {
+    ...composition.scenes[0],
+    gsap: null,
+    layers: composition.scenes[0].layers.map((layer) => ({
+      ...layer,
+      gsap: null,
+    })),
+  };
+  const parsedLegacyScene = sceneDslSchema.parse(legacyScene);
+  assert.equal(parsedLegacyScene.gsap, undefined);
+  assert.ok(parsedLegacyScene.layers.every((layer) => layer.gsap === undefined));
+
+  Object.assign(project.scenes[0], {
+    gsapMotion: null,
+    remotion: undefined,
+  });
+
+  let normalized: ReturnType<typeof buildProjectComposition>;
+  try {
+    normalized = buildProjectComposition(project);
+  } catch (error) {
+    assert.fail(error instanceof Error ? error.message : String(error));
+  }
+
+  assert.equal(normalized.scenes[0].gsap, undefined);
+  assert.ok(normalized.scenes[0].layers.every((layer) => layer.gsap === undefined));
+  assert.equal(validateComposition(normalized).valid, true);
 });

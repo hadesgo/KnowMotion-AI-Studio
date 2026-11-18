@@ -390,6 +390,12 @@ pub async fn test_provider(config: ProviderConfig) -> Result<ProviderTestResult,
         .iter()
         .any(|capability| capability == "LLM")
     {
+        if config.protocol == "ModelScope" {
+            return test_modelscope(config).await;
+        }
+        if config.protocol == "Fish Audio" {
+            return test_fish_audio(config).await;
+        }
         if config.protocol == "GGUF"
             && config
                 .capabilities
@@ -523,6 +529,91 @@ pub async fn test_provider(config: ProviderConfig) -> Result<ProviderTestResult,
         latency_ms: started.elapsed().as_millis(),
         model: response.model,
         backend,
+    })
+}
+
+/// Fish Audio 的连通性检测不提交文本，避免产生 TTS 用量。对 `/v1/tts`
+/// 发起不带 JSON 的 GET，鉴权成功时通常会返回 404/405/415/422。
+async fn test_fish_audio(config: ProviderConfig) -> Result<ProviderTestResult, String> {
+    let started = Instant::now();
+    let secret = get_provider_secret(&config.id)
+        .ok_or_else(|| format!("No Fish Audio token is stored for provider {}", config.name))?;
+    let base = config.base_url.trim().trim_end_matches('/');
+    let root = base.strip_suffix("/v1").unwrap_or(base);
+    if !(root.starts_with("https://") || root.starts_with("http://")) {
+        return Err("Fish Audio base URL must start with http:// or https://".to_string());
+    }
+    let response = Client::builder()
+        .timeout(Duration::from_secs(20))
+        .connect_timeout(Duration::from_secs(10))
+        .user_agent("KnowMotion-AI-Studio/0.1")
+        .build()
+        .map_err(|error| error.to_string())?
+        .get(format!("{root}/v1/tts"))
+        .bearer_auth(secret)
+        .header("model", config.model.as_str())
+        .send()
+        .await
+        .map_err(|error| format_provider_error(&error.to_string()))?;
+    let status = response.status();
+    if matches!(
+        status,
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+    ) {
+        return Err("Fish Audio 拒绝了当前 Token，请检查凭据是否有效".to_string());
+    }
+    if status.is_server_error() {
+        return Err(format!("Fish Audio 服务暂时不可用：{status}"));
+    }
+    Ok(ProviderTestResult {
+        ok: true,
+        message: "Fish Audio TTS 端点与 Token 可用".to_string(),
+        latency_ms: started.elapsed().as_millis(),
+        model: config.model,
+        backend: config.protocol,
+    })
+}
+
+/// 不提交真实生图任务，避免“检测连接”产生计费。用一个不存在的任务 ID
+/// 验证根地址与 Bearer Token：鉴权失败会返回 401/403，正常服务通常返回
+/// 404/422；服务端 5xx 仍视为不可用。
+async fn test_modelscope(config: ProviderConfig) -> Result<ProviderTestResult, String> {
+    let started = Instant::now();
+    let secret = get_provider_secret(&config.id)
+        .ok_or_else(|| format!("No ModelScope token is stored for provider {}", config.name))?;
+    let base = config.base_url.trim().trim_end_matches('/');
+    let root = base.strip_suffix("/v1").unwrap_or(base);
+    if !(root.starts_with("https://") || root.starts_with("http://")) {
+        return Err("ModelScope base URL must start with http:// or https://".to_string());
+    }
+    let response = Client::builder()
+        .timeout(Duration::from_secs(20))
+        .connect_timeout(Duration::from_secs(10))
+        .user_agent("KnowMotion-AI-Studio/0.1")
+        .build()
+        .map_err(|error| error.to_string())?
+        .get(format!("{root}/v1/tasks/__knowmotion_connection_probe__"))
+        .bearer_auth(secret)
+        .header("X-ModelScope-Task-Type", "image_generation")
+        .send()
+        .await
+        .map_err(|error| format_provider_error(&error.to_string()))?;
+    let status = response.status();
+    if matches!(
+        status,
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+    ) {
+        return Err("ModelScope 拒绝了当前 Token，请检查凭据是否有效".to_string());
+    }
+    if status.is_server_error() {
+        return Err(format!("ModelScope 服务暂时不可用：{status}"));
+    }
+    Ok(ProviderTestResult {
+        ok: true,
+        message: "ModelScope 异步任务端点与 Token 可用".to_string(),
+        latency_ms: started.elapsed().as_millis(),
+        model: config.model,
+        backend: config.protocol,
     })
 }
 

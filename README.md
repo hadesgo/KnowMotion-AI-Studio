@@ -12,11 +12,12 @@ AI-powered knowledge animation studio. 用户从一个知识主题开始，在�
 - 设定集：角色、场景与全局风格锚点，参考图库与权重，稳定指纹/种子，逐镜头一致性报告与素材过期检测。
 - 像素级身份验证：本机 canvas 取像素 → 64×64 工作网格 → 梯度结构/亮度/颜色直方图/感知哈希四组签名 + 人脸区域估计；多张参考图合成角色质心，逐镜头输出 0–1 相似度与通过/可疑/不一致判定，图像不出本机。
 - 角色锁：ControlNet 结构条件、IP-Adapter 参考注入、img2img 参考重绘三档按 Provider 能力协商，降级原因随请求返回并写入素材锚点快照。
-- 图片生成支持负向提示词、固定种子和参考图：stable-diffusion.cpp 提供本地生成入口，OpenAI 通道以文字锚点传递参考。
+- 图片生成支持负向提示词、固定种子和参考图：stable-diffusion.cpp 提供本地生成入口，ModelScope 支持异步文生图/参考图编辑，OpenAI 通道以文字锚点传递参考。
 - 持久批量图片队列：按镜头批量入队、最多 2 个并发、实时状态、取消/重试、重启恢复，完成素材自动回填素材库。
 - 图片局部重绘：画布遮罩画笔，stable-diffusion.cpp 与 OpenAI `images/edits` 双通道，结果另存为新素材。
 - 视频素材与图层：导入 MP4/WebM 等容器，剪出入点/速度/音量后插入镜头；Remotion 用 `OffthreadVideo` 参与 Player 预览与最终渲染。
 - 九个持久化 AI Agent 与 DAG Workflow：模型路由、审批、暂停恢复、局部重跑、受控项目工具、修订和撤销。
+- 单输入自动成片：用户只输入主题或完整视频要求，软件自动推断时长/画幅/受众/风格，连续执行 Agent DAG，补旁白字幕与可选图片，通过质量门禁后直接渲染 MP4；专业工作台保留全部人工精修能力。
 - 原生 GGUF 本地推理：可直接选择 `.gguf` 模型文件，由 llama.cpp 加载，支持 CPU 与 Vulkan GPU 加速。
 - 统一本地模型调度：llama.cpp、audio.cpp 与 stable-diffusion.cpp 共享单一 GPU 租约，按需启动、保留 768–1024 MiB 显存余量，并按空闲阈值卸载模型。
 - Remotion Scene/Composition DSL、可复用动画组件、实时 Player 和完整 H.264 渲染。
@@ -26,7 +27,7 @@ AI-powered knowledge animation studio. 用户从一个知识主题开始，在�
 - Windows Job Object 监管 Node/Chrome/FFmpeg 进程树，取消、崩溃或应用退出时不残留渲染子进程。
 - 结构化 JSONL 日志、5 MiB 轮转、7 份历史、30 天保留和统一 API Key/Authorization 脱敏。
 - 构建时打包固定 Node sidecar、Chrome Headless Shell、FFmpeg/FFprobe，并校验 runtime manifest。
-- OpenAI Compatible / stable-diffusion.cpp 图片，audio.cpp 本地 TTS/ASR，OpenAI Compatible TTS/ASR，Embedding/RAG（云端 OpenAI Compatible 或本地 GGUF，后者由 llama.cpp `--embeddings` 托管、无需 API Key）和网页来源正文抓取。
+- OpenAI Compatible / ModelScope / stable-diffusion.cpp 图片，audio.cpp 本地 TTS/ASR，OpenAI Compatible TTS/ASR，Fish Audio TTS，Embedding/RAG（云端 OpenAI Compatible 或本地 GGUF，后者由 llama.cpp `--embeddings` 托管、无需 API Key）和网页来源正文抓取。
 - 真实本地服务端到端验收：Qwen3.8-27B、EmbeddingGemma、Qwen3-TTS/ASR、Qwen Image 2.1 在 RTX 5070 上经真实运行时进程（llama.cpp / audio.cpp / stable-diffusion.cpp）完成 LLM / Embedding / TTS / ASR / Image 五项验收，判定基于可解析 JSON、语义排序、WAV 时长、TTS→ASR 闭环与 PNG 尺寸哈希，见 [docs/REAL_SERVICE_ACCEPTANCE.md](docs/REAL_SERVICE_ACCEPTANCE.md)。
 - 公网 URL 安全抓取：研究网页与远程图片统一执行 DNS/IP 分类、解析地址固定、逐跳重定向校验、HTTPS 降级阻断、响应大小与内容类型限制。
 - 项目文件锁、素材落盘、缺失扫描、可恢复归档删除及含素材的 ZIP 项目包导入导出。
@@ -76,6 +77,10 @@ npm run desktop:dev
 运行时按需保存到应用数据目录的 `runtimes/`。安装器优先通过 `nvidia-smi` 检测可用的 NVIDIA 驱动与计算能力：满足 CUDA 12.4 条件时下载 CUDA 12.4 包及其运行库；只有 Blackwell（RTX 50 系，计算能力 10.x/12.x）等 12.4 归档没有 kernel 的设备，在驱动达到 R620 时改用 CUDA 13 包；其余情况下载 Vulkan 包。GGUF 使用官方 llama.cpp `llama-server`，不依赖 Ollama。模型文件本身不复制到应用数据目录；Provider 只保存本地文件路径、上下文长度和推理设备偏好。
 
 本地 Provider 可填写 audio.cpp 模型文件/包目录或 stable-diffusion.cpp 模型目录。应用会生成受限的本地服务配置、自动发现扩散模型组件、启动服务并等待健康状态；请求之间由同一 `LocalModelScheduler` 串行化 GPU 工作，audio.cpp 和扩散模型空闲后通过各自 API 卸载，llama.cpp 空闲超过默认 180 秒后停止。
+
+ModelScope Provider 使用 `https://api-inference.modelscope.cn` 作为默认根地址，模型可填 `Qwen/Qwen-Image-2.1-Turbo`。Token 保存在系统凭据库；生成请求以异步模式提交到 `/v1/images/generations`，每 5 秒轮询 `/v1/tasks/{task_id}`，结果从 `output_images` 下载并写入项目素材目录。项目内的角色参考图会编码为 `image_url` data URL 随请求发送。
+
+Fish Audio Provider 使用 `https://api.fish.audio`，默认模型 `s2.1-pro-free`。TTS 请求发送到 `/v1/tts`，模型名放在 `model` 请求头，`reference_id` 在“音频字幕”页面按项目填写，`format` 固定为 MP3；返回的二进制音频通过格式与时长校验后写入 `assets/audio/`，并同步字幕和时间轴。
 
 ```text
 %APPDATA%/com.knowmotion.studio/

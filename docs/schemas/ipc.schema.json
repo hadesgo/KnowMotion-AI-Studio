@@ -1598,6 +1598,11 @@
           "default": {},
           "type": "object"
         },
+        "autoMode": {
+          "default": false,
+          "description": "自动成片模式跳过大纲、分镜和最终审批，让 DAG 连续执行。",
+          "type": "boolean"
+        },
         "instruction": {
           "type": [
             "string",

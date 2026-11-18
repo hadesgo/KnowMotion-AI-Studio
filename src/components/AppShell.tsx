@@ -37,6 +37,7 @@ import { Button, Toasts } from "./ui";
 import "./AppShell.css";
 
 const projectSteps = [
+  { path: "auto", label: "自动成片", icon: Sparkles },
   { path: "workflow", label: "Agent 工作流", icon: Network },
   { path: "plan", label: "AI 内容策划", icon: Sparkles },
   { path: "script", label: "脚本编辑", icon: FileText },
@@ -82,6 +83,16 @@ export function AppShell() {
   const stepState = useMemo(() => {
     if (!project) return new Map<string, "done" | "active" | "todo">();
     return new Map<string, "done" | "active" | "todo">([
+      [
+        "auto",
+        project.automation?.status === "completed"
+          ? "done"
+          : location.pathname.endsWith("/auto")
+            ? "active"
+            : project.automation?.status === "running"
+              ? "active"
+              : "todo",
+      ],
       ["workflow", location.pathname.endsWith("/workflow") ? "active" : "todo"],
       ["plan", project.outline.length ? "done" : location.pathname.endsWith("/plan") ? "active" : "todo"],
       [

@@ -885,7 +885,7 @@ fn validate_image_mime<'a>(declared: &'a str, bytes: &[u8]) -> Result<&'a str, S
 fn validate_audio_mime<'a>(declared: &'a str, bytes: &[u8]) -> Result<&'a str, String> {
     let detected = if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE") {
         "audio/wav"
-    } else if bytes.starts_with(b"ID3") || bytes.get(0..2) == Some(&[0xff, 0xfb]) {
+    } else if looks_like_mp3(bytes) {
         "audio/mpeg"
     } else {
         return Err("Embedded audio is not a supported WAV or MP3 file".to_string());
@@ -896,6 +896,21 @@ fn validate_audio_mime<'a>(declared: &'a str, bytes: &[u8]) -> Result<&'a str, S
         ));
     }
     Ok(detected)
+}
+
+fn looks_like_mp3(bytes: &[u8]) -> bool {
+    if bytes.starts_with(b"ID3") {
+        return true;
+    }
+    bytes.windows(4).take(4096).any(|header| {
+        header[0] == 0xff
+            && header[1] & 0xe0 == 0xe0
+            && (header[1] >> 3) & 0x03 != 0x01
+            && (header[1] >> 1) & 0x03 != 0
+            && (header[2] >> 4) & 0x0f != 0
+            && (header[2] >> 4) & 0x0f != 0x0f
+            && (header[2] >> 2) & 0x03 != 0x03
+    })
 }
 
 fn extension_for_mime(mime: &str) -> &'static str {
@@ -1218,6 +1233,17 @@ fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_mp3_audio_mime_is_validated_by_frame_signature() {
+        let mut frame = vec![0_u8; 417];
+        frame[..4].copy_from_slice(&[0xff, 0xfb, 0x90, 0x64]);
+        assert_eq!(
+            validate_audio_mime("audio/mpeg", &frame).expect("MPEG frame"),
+            "audio/mpeg"
+        );
+        assert!(validate_audio_mime("audio/wav", &frame).is_err());
+    }
 
     #[test]
     fn materializes_data_url_and_writes_asset_manifest() {

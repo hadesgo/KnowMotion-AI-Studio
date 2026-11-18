@@ -15,12 +15,34 @@ export type ProjectStage =
 
 export interface ProjectSettings {
   topic: string;
+  /** 用户最初输入的主题或完整视频要求，自动制作始终以此为准。 */
+  brief?: string;
   contentType: string;
   audience: string;
   duration: number;
   aspectRatio: AspectRatio;
   style: string;
   language: string;
+}
+
+export type AutoProductionStage =
+  | "queued"
+  | "planning"
+  | "media"
+  | "quality"
+  | "render"
+  | "done";
+
+export interface AutoProductionState {
+  status: "running" | "completed" | "failed" | "paused";
+  stage: AutoProductionStage;
+  runId?: string;
+  renderJobId?: string;
+  outputPath?: string;
+  error?: string;
+  warnings: string[];
+  startedAt: string;
+  updatedAt: string;
 }
 
 export interface OutlineSection {
@@ -362,6 +384,7 @@ export interface VideoProject {
   timeline: TimelineClip[];
   audio: AudioSettings;
   renders: RenderRecord[];
+  automation?: AutoProductionState;
   qualityReport?: {
     score: number;
     status: "pass" | "warn" | "fail" | string;
@@ -389,6 +412,8 @@ export interface ProviderProfile {
     | "Anthropic"
     | "Gemini"
     | "Ollama"
+    | "ModelScope"
+    | "Fish Audio"
     | "GGUF"
     | "audio.cpp"
     | "stable-diffusion.cpp";
@@ -407,6 +432,7 @@ export interface ProviderProfile {
 export interface CreateProjectInput {
   title: string;
   topic: string;
+  brief?: string;
   contentType: string;
   audience: string;
   duration: number;

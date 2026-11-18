@@ -27,6 +27,7 @@ import {
   IconButton,
   Pill,
   Select,
+  TextInput,
 } from "../components/ui";
 import { useStudioStore } from "../store/studio";
 import type { Asset, SubtitleCue } from "../types";
@@ -73,7 +74,9 @@ export default function AudioSubtitles() {
   const [generatingAudio, setGeneratingAudio] = useState(false);
   const [generatingMusic, setGeneratingMusic] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [fishVoiceDraft, setFishVoiceDraft] = useState("");
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const fishVoiceProjectRef = useRef("");
 
   const scene = project?.scenes.find((item) => item.id === activeSceneId);
   const asset = project?.assets.find((item) => item.id === scene?.assetId);
@@ -81,7 +84,9 @@ export default function AudioSubtitles() {
   const cloudTtsProvider = providers.find(
     (provider) =>
       provider.enabled &&
-      ["OpenAI Compatible", "audio.cpp"].includes(provider.protocol) &&
+      ["OpenAI Compatible", "audio.cpp", "Fish Audio"].includes(
+        provider.protocol,
+      ) &&
       provider.capabilities.includes("TTS") &&
       provider.id ===
         (taskRoutes.TTS ??
@@ -97,8 +102,12 @@ export default function AudioSubtitles() {
           providers.find((item) => item.capabilities.includes("ASR"))?.id),
   );
   const usesAudioCpp = cloudTtsProvider?.protocol === "audio.cpp";
+  const usesFishAudio = cloudTtsProvider?.protocol === "Fish Audio";
+  const usesFixedRate = usesAudioCpp || usesFishAudio;
   const effectiveVoice =
-    cloudTtsProvider?.protocol === "audio.cpp" &&
+    usesFishAudio
+      ? fishVoiceDraft
+      : usesAudioCpp &&
     !audioCppVoices.some(([id]) => id === project?.audio.voice)
       ? "serena"
       : (project?.audio.voice ?? "");
@@ -122,6 +131,17 @@ export default function AudioSubtitles() {
       if (audioUrl) URL.revokeObjectURL(audioUrl);
     };
   }, [audioUrl]);
+
+  useEffect(() => {
+    if (!usesFishAudio) {
+      fishVoiceProjectRef.current = "";
+      return;
+    }
+    if (fishVoiceProjectRef.current === project?.id) return;
+    fishVoiceProjectRef.current = project?.id ?? "";
+    const stored = project?.audio.voice ?? "";
+    setFishVoiceDraft(/^[a-f0-9]{32}$/i.test(stored.trim()) ? stored : "");
+  }, [project?.audio.voice, project?.id, usesFishAudio]);
 
   if (!project) return null;
 
@@ -200,6 +220,14 @@ export default function AudioSubtitles() {
         type: "error",
         title: "需要桌面版",
         message: "真实 WAV 旁白由 Windows 本地语音引擎生成。",
+      });
+      return;
+    }
+    if (usesFishAudio && !effectiveVoice.trim()) {
+      pushToast({
+        type: "error",
+        title: "缺少 Fish Audio 声线",
+        message: "请在音色输入框填写 Fish Audio 的 reference_id。",
       });
       return;
     }
@@ -320,7 +348,7 @@ export default function AudioSubtitles() {
       setSelectedCueId(cues[0]?.id ?? "");
       pushToast({
         type: "success",
-        title: cloudTtsProvider ? "云端旁白 WAV 已生成" : "本地旁白 WAV 已生成",
+        title: cloudTtsProvider ? "云端旁白已生成" : "本地旁白 WAV 已生成",
         message: `${generated.length} 段旁白已写入项目，并同步字幕与时间轴。${cloudTtsProvider ? ` Provider：${cloudTtsProvider.name}` : ""}`,
       });
     } catch (error) {
@@ -623,35 +651,50 @@ export default function AudioSubtitles() {
             <span className="eyebrow">VOICE</span>
             <Field
               label={
-                cloudTtsProvider?.protocol === "audio.cpp"
+                usesFishAudio
+                  ? "Fish Audio reference_id"
+                  : cloudTtsProvider?.protocol === "audio.cpp"
                   ? "Qwen3-TTS 音色"
                   : "系统语音"
               }
             >
-              <Select
-                value={effectiveVoice}
-                onChange={(event) =>
-                  updateProject(project.id, {
-                    audio: { ...project.audio, voice: event.target.value },
-                  })
-                }
-              >
-                {cloudTtsProvider?.protocol === "audio.cpp" ? (
-                  audioCppVoices.map(([id, label]) => (
-                    <option key={id} value={id}>
-                      {label}
-                    </option>
-                  ))
-                ) : voices.length ? (
-                  voices.map((voice) => (
-                    <option key={voice.name} value={voice.name}>
-                      {voice.name} · {voice.lang}
-                    </option>
-                  ))
-                ) : (
-                  <option>系统中文语音</option>
-                )}
-              </Select>
+              {usesFishAudio ? (
+                <TextInput
+                  value={fishVoiceDraft}
+                  onChange={(event) => {
+                    setFishVoiceDraft(event.target.value);
+                    updateProject(project.id, {
+                      audio: { ...project.audio, voice: event.target.value },
+                    });
+                  }}
+                  placeholder="输入 32 位 reference_id"
+                />
+              ) : (
+                <Select
+                  value={effectiveVoice}
+                  onChange={(event) =>
+                    updateProject(project.id, {
+                      audio: { ...project.audio, voice: event.target.value },
+                    })
+                  }
+                >
+                  {cloudTtsProvider?.protocol === "audio.cpp" ? (
+                    audioCppVoices.map(([id, label]) => (
+                      <option key={id} value={id}>
+                        {label}
+                      </option>
+                    ))
+                  ) : voices.length ? (
+                    voices.map((voice) => (
+                      <option key={voice.name} value={voice.name}>
+                        {voice.name} · {voice.lang}
+                      </option>
+                    ))
+                  ) : (
+                    <option>系统中文语音</option>
+                  )}
+                </Select>
+              )}
             </Field>
             <label className="range-field">
               <span>语速 <strong>{project.audio.rate.toFixed(2)}×</strong></span>
@@ -661,7 +704,7 @@ export default function AudioSubtitles() {
                 max={1.4}
                 step={0.02}
                 value={project.audio.rate}
-                disabled={usesAudioCpp}
+                disabled={usesFixedRate}
                 onChange={(event) =>
                   updateProject(project.id, {
                     audio: {

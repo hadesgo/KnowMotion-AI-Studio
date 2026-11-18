@@ -1215,6 +1215,7 @@ fn real_workflow_acceptance() {
                 ),
                 max_attempts: Some(2),
                 target_agent: None,
+                auto_mode: false,
             },
         )
         .expect("create run");

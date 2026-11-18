@@ -80,6 +80,7 @@ export async function startWorkflow(
     instruction?: string;
     targetAgent?: string;
     maxAttempts?: number;
+    autoMode?: boolean;
   },
 ): Promise<WorkflowRun> {
   requireDesktop();
@@ -102,6 +103,7 @@ export async function startWorkflow(
       instruction: options?.instruction ?? null,
       targetAgent: options?.targetAgent ?? null,
       maxAttempts: options?.maxAttempts ?? 2,
+      autoMode: options?.autoMode ?? false,
     },
   });
 }

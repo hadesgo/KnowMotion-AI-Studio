@@ -76,6 +76,7 @@ impl AgentRuntime {
             return Err("Workflow project must be a JSON object".to_string());
         }
         let target_agent = request.target_agent.clone();
+        let auto_mode = request.auto_mode;
         if let Some(agent) = target_agent.as_deref() {
             if !AGENT_KEYS.contains(&agent) {
                 return Err(format!("Unknown target agent: {agent}"));
@@ -90,7 +91,9 @@ impl AgentRuntime {
             serde_json::to_string(&request.agent_routes).map_err(|error| error.to_string())?;
         let project_json =
             serde_json::to_string(&request.project).map_err(|error| error.to_string())?;
-        let workflow_key = if target_agent.is_some() {
+        let workflow_key = if auto_mode {
+            format!("{WORKFLOW_KEY}.auto")
+        } else if target_agent.is_some() {
             format!("{WORKFLOW_KEY}.edit")
         } else {
             WORKFLOW_KEY.to_string()
@@ -159,7 +162,7 @@ impl AgentRuntime {
                                 &descriptor.dependencies
                             })
                             .map_err(|error| error.to_string())?,
-                            if descriptor.requires_approval { 1 } else { 0 },
+                            if !auto_mode && descriptor.requires_approval { 1 } else { 0 },
                             descriptor.approval_label,
                             now
                         ],

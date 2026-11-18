@@ -103,6 +103,48 @@ const localProtocolDefaults: Partial<
   },
 };
 
+const externalProtocolDefaults: Partial<
+  Record<
+    ProviderProfile["protocol"],
+    {
+      baseUrl: string;
+      model: string;
+      capabilities: ProviderCapability[];
+    }
+  >
+> = {
+  "OpenAI Compatible": {
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-5.1",
+    capabilities: ["LLM"],
+  },
+  Anthropic: {
+    baseUrl: "https://api.anthropic.com/v1",
+    model: "claude-sonnet-4-5",
+    capabilities: ["LLM"],
+  },
+  Gemini: {
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    model: "gemini-2.5-pro",
+    capabilities: ["LLM"],
+  },
+  Ollama: {
+    baseUrl: "http://127.0.0.1:11434",
+    model: "qwen3",
+    capabilities: ["LLM"],
+  },
+  ModelScope: {
+    baseUrl: "https://api-inference.modelscope.cn",
+    model: "Qwen/Qwen-Image-2.1-Turbo",
+    capabilities: ["Image"],
+  },
+  "Fish Audio": {
+    baseUrl: "https://api.fish.audio",
+    model: "s2.1-pro-free",
+    capabilities: ["TTS"],
+  },
+};
+
 interface ProviderDraft {
   id?: string;
   name: string;
@@ -359,6 +401,22 @@ export default function Models() {
       return;
     }
     if (
+      draft.protocol === "ModelScope" &&
+      (draft.capabilities.length !== 1 ||
+        draft.capabilities[0] !== "Image")
+    ) {
+      setFormError("ModelScope 当前只用于异步图片生成，请仅选择 Image 能力。");
+      return;
+    }
+    if (
+      draft.protocol === "Fish Audio" &&
+      (draft.capabilities.length !== 1 ||
+        draft.capabilities[0] !== "TTS")
+    ) {
+      setFormError("Fish Audio 当前只支持 TTS，请仅选择 TTS 能力。");
+      return;
+    }
+    if (
       draft.protocol === "GGUF" &&
       (draft.capabilities.length !== 1 ||
         !["LLM", "Embedding"].includes(draft.capabilities[0]))
@@ -367,9 +425,13 @@ export default function Models() {
       return;
     }
     const providerId = draft.id ?? makeId("provider");
-    const usesApiKey = ["OpenAI Compatible", "Anthropic", "Gemini"].includes(
-      draft.protocol,
-    );
+    const usesApiKey = [
+      "OpenAI Compatible",
+      "Anthropic",
+      "Gemini",
+      "ModelScope",
+      "Fish Audio",
+    ].includes(draft.protocol);
     if (isTauriDesktop && usesApiKey && draft.apiKey.trim()) {
       try {
         setSaving(true);
@@ -423,7 +485,9 @@ export default function Models() {
         type: "success",
         title: "Provider 已添加",
         message: draft.apiKey
-          ? "原型仅记录“已输入密钥”，不会持久化密钥内容。"
+          ? isTauriDesktop
+            ? "Token 已写入系统凭据库，项目文件与日志仅保留 Provider 引用。"
+            : "浏览器预览不会持久化 Token。"
           : undefined,
       });
     }
@@ -939,6 +1003,41 @@ export default function Models() {
               </Select>
             </Field>
           </div>
+          {draft.connectionType === "external" && (
+            <Field
+              label="接口协议"
+              hint="ModelScope 使用异步图片任务提交与轮询协议。"
+            >
+              <Select
+                value={draft.protocol}
+                onChange={(event) => {
+                  const protocol = event.target
+                    .value as ProviderProfile["protocol"];
+                  const defaults = externalProtocolDefaults[protocol];
+                  setDraft((current) => ({
+                    ...current,
+                    protocol,
+                    baseUrl: defaults?.baseUrl ?? current.baseUrl,
+                    model: defaults?.model ?? current.model,
+                    capabilities:
+                      defaults?.capabilities ?? current.capabilities,
+                    apiKey: "",
+                    hasSecret: false,
+                  }));
+                  setFormError("");
+                }}
+              >
+                <option value="OpenAI Compatible">OpenAI Compatible</option>
+                <option value="Anthropic">Anthropic</option>
+                <option value="Gemini">Gemini</option>
+                <option value="Ollama">Ollama</option>
+                <option value="ModelScope">
+                  ModelScope · 异步图片
+                </option>
+                <option value="Fish Audio">Fish Audio · TTS</option>
+              </Select>
+            </Field>
+          )}
           {draft.connectionType === "local" && (
             <Field
               label="本地运行时"
@@ -1083,6 +1182,20 @@ export default function Models() {
               <span className="flex items-center gap-1 text-[11px] leading-[1.5] text-[var(--faint)]">
                 模型只在当前电脑本地加载和推理，不上传到外部服务。目录输入会挑出其中唯一的
                 .gguf（自动排除 mmproj 投影器）；目录内有多份模型时请直接填目标文件路径。
+              </span>
+            )}
+            {draft.protocol === "ModelScope" && (
+              <span className="text-[11px] leading-[1.5] text-[var(--faint)]">
+                填写服务根地址即可，例如 https://api-inference.modelscope.cn。
+                应用会提交 /v1/images/generations，每 5 秒轮询任务，并从
+                output_images 下载结果。
+              </span>
+            )}
+            {draft.protocol === "Fish Audio" && (
+              <span className="text-[11px] leading-[1.5] text-[var(--faint)]">
+                填写服务根地址，例如 https://api.fish.audio。生成时调用
+                /v1/tts，模型名通过 model 请求头发送；音色
+                reference_id 在“音频字幕”页面按项目填写。
               </span>
             )}
           </div>
@@ -1250,7 +1363,11 @@ export default function Models() {
           ) && (
             <Field
               label="API Key"
-              hint="仅用于本次页面会话；关闭页面后不会保留。"
+              hint={
+                isTauriDesktop
+                  ? "桌面版写入系统凭据库，不进入项目文件、SQLite 或日志。"
+                  : "浏览器预览仅用于本次页面会话。"
+              }
             >
               <TextInput
                 type="password"
@@ -1259,7 +1376,11 @@ export default function Models() {
                   setDraft({ ...draft, apiKey: event.target.value })
                 }
                 placeholder={
-                  draft.hasSecret ? "已绑定密钥，输入可替换" : "本地服务可留空"
+                  draft.hasSecret
+                    ? "已绑定密钥，输入可替换"
+                    : draft.protocol === "Fish Audio"
+                      ? "输入 Fish Audio API Token"
+                      : "本地服务可留空"
                 }
                 autoComplete="off"
               />
@@ -1274,6 +1395,12 @@ export default function Models() {
                   }
                   if (draft.protocol === "stable-diffusion.cpp") {
                     return capability === "Image";
+                  }
+                  if (draft.protocol === "ModelScope") {
+                    return capability === "Image";
+                  }
+                  if (draft.protocol === "Fish Audio") {
+                    return capability === "TTS";
                   }
                   if (draft.protocol === "GGUF") {
                     return capability === "LLM" || capability === "Embedding";
@@ -1305,6 +1432,20 @@ export default function Models() {
                           setDraft({
                             ...draft,
                             capabilities: ["Image"],
+                          });
+                          return;
+                        }
+                        if (draft.protocol === "ModelScope") {
+                          setDraft({
+                            ...draft,
+                            capabilities: ["Image"],
+                          });
+                          return;
+                        }
+                        if (draft.protocol === "Fish Audio") {
+                          setDraft({
+                            ...draft,
+                            capabilities: ["TTS"],
                           });
                           return;
                         }

@@ -451,6 +451,8 @@ export interface WorkflowRunView {
 
 export interface WorkflowStartRequest {
   agentRoutes?: Record<string, AgentModelRoute>;
+  /** 自动成片模式跳过大纲、分镜和最终审批，让 DAG 连续执行。 */
+  autoMode?: boolean;
   instruction?: null | string;
   maxAttempts?: null | number;
   project: unknown;

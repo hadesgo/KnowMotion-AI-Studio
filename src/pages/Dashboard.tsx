@@ -24,6 +24,7 @@ import type { ProjectStage, VideoProject } from "../types";
 import { projectDuration, truncate } from "../utils";
 import { isTauriDesktop } from "../services/desktop";
 import { importDesktopProjectPackage } from "../services/desktop";
+import { inferProjectIntent } from "../services/projectIntent";
 import "./Dashboard.css";
 
 const starters = [
@@ -183,6 +184,7 @@ function ProjectCard({
 export default function Dashboard() {
   const navigate = useNavigate();
   const projects = useStudioStore((state) => state.projects);
+  const createProject = useStudioStore((state) => state.createProject);
   const duplicateProject = useStudioStore((state) => state.duplicateProject);
   const addProject = useStudioStore((state) => state.addProject);
   const deleteProject = useStudioStore((state) => state.deleteProject);
@@ -241,7 +243,12 @@ export default function Dashboard() {
 
   const startProject = () => {
     const clean = topic.trim();
-    navigate(clean ? `/projects/new?topic=${encodeURIComponent(clean)}` : "/projects/new");
+    if (!clean) {
+      navigate("/projects/new");
+      return;
+    }
+    const id = createProject(inferProjectIntent(clean));
+    navigate(`/projects/${id}/auto?run=1`);
   };
 
   const importProject = async () => {
@@ -338,19 +345,19 @@ export default function Dashboard() {
               onKeyDown={(event) => {
                 if (event.key === "Enter") startProject();
               }}
-              placeholder="输入一个你想讲清楚的知识主题…"
-              aria-label="视频知识主题"
+              placeholder="输入主题，或直接描述你想生成的视频…"
+              aria-label="视频主题或生成要求"
             />
             <Button
               variant="primary"
               icon={<ArrowRight size={16} />}
               onClick={startProject}
             >
-              开始策划
+              生成视频
             </Button>
           </div>
           <div className="hero-starters">
-            <span>从这些问题开始</span>
+            <span>从一个想法开始</span>
             {starters.slice(0, 3).map((starter) => (
               <button
                 type="button"

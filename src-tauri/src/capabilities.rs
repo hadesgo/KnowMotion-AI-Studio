@@ -31,9 +31,13 @@ const MAX_REFERENCE_IMAGES: usize = 3;
 /// stable-diffusion.cpp 原生任务是异步的；轮询上限按大模型在消费级 GPU 上的耗时留足余量。
 const SD_CPP_JOB_TIMEOUT: Duration = Duration::from_secs(900);
 const SD_CPP_JOB_POLL_INTERVAL: Duration = Duration::from_millis(700);
+const MODELSCOPE_PROTOCOL: &str = "ModelScope";
+const MODELSCOPE_JOB_TIMEOUT: Duration = Duration::from_secs(600);
+const MODELSCOPE_JOB_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_RESEARCH_SOURCE_BYTES: usize = 5 * 1024 * 1024;
 const MAX_DOWNLOADED_IMAGE_BYTES: usize = 25 * 1024 * 1024;
 const AUDIO_CPP_PROTOCOL: &str = "audio.cpp";
+const FISH_AUDIO_PROTOCOL: &str = "Fish Audio";
 const STABLE_DIFFUSION_CPP_PROTOCOL: &str = "stable-diffusion.cpp";
 /// 本地 GGUF：`base_url` 是模型文件路径，由 llama.cpp 回环服务加载。
 const GGUF_PROTOCOL: &str = "GGUF";
@@ -580,9 +584,11 @@ pub async fn generate_project_cloud_narration(
     }
     if !matches!(
         request.provider.protocol.as_str(),
-        "OpenAI Compatible" | AUDIO_CPP_PROTOCOL
+        "OpenAI Compatible" | AUDIO_CPP_PROTOCOL | FISH_AUDIO_PROTOCOL
     ) {
-        return Err("TTS requires an OpenAI Compatible or audio.cpp speech endpoint".to_string());
+        return Err(
+            "TTS requires an OpenAI Compatible, audio.cpp or Fish Audio endpoint".to_string(),
+        );
     }
     if request.scenes.is_empty() || request.scenes.len() > 100 {
         return Err("TTS request must contain between 1 and 100 scenes".to_string());
@@ -633,14 +639,14 @@ pub async fn generate_project_cloud_narration(
             request.rate,
         )
         .await?;
-        let duration_ms = wav_duration_ms(&bytes)?;
+        let (mime_type, duration_ms) = generated_audio_info(&bytes)?;
         let asset_id = format!("asset_{}", Uuid::new_v4().simple());
         let (relative, mime_type, _sha256) = crate::storage::persist_generated_audio(
             &state.projects_root,
             &request.project_id,
             &asset_id,
             &bytes,
-            "audio/wav",
+            mime_type,
         )?;
         total_audio_ms += duration_ms;
         assets.push(json!({
@@ -698,7 +704,7 @@ pub async fn generate_project_cloud_narration(
     })
 }
 
-/// TTS 传输核心：向音频服务请求一段旁白并返回 WAV 字节。
+/// TTS 传输核心：向音频服务请求一段旁白并返回 WAV 或 MP3 字节。
 ///
 /// 命令层与真实服务验收共用这一实现，避免验收路径和生产路径分叉。
 pub(crate) async fn synthesize_speech(
@@ -708,6 +714,9 @@ pub(crate) async fn synthesize_speech(
     voice: &str,
     rate: f32,
 ) -> Result<Vec<u8>, String> {
+    if provider.protocol == FISH_AUDIO_PROTOCOL {
+        return synthesize_fish_audio(provider, secret, text, voice).await;
+    }
     let uses_audio_cpp = provider.protocol == AUDIO_CPP_PROTOCOL;
     let endpoint = format!(
         "{}{}/audio/speech",
@@ -743,6 +752,69 @@ pub(crate) async fn synthesize_speech(
         .to_vec())
 }
 
+/// Fish Audio 的 TTS 约定：模型名放在 `model` 请求头，音色通过
+/// `reference_id` 传入，成功响应直接是 MP3 二进制，不再包一层 JSON。
+async fn synthesize_fish_audio(
+    provider: &ImageProviderConfig,
+    secret: Option<&str>,
+    text: &str,
+    reference_id: &str,
+) -> Result<Vec<u8>, String> {
+    if reference_id.trim().is_empty() {
+        return Err("Fish Audio reference_id cannot be empty".to_string());
+    }
+    let secret = secret.ok_or_else(|| "No API key is stored for Fish Audio".to_string())?;
+    let root = fish_audio_root_url(&provider.base_url)?;
+    let response = http_client()?
+        .post(format!("{root}/v1/tts"))
+        .bearer_auth(secret)
+        .header("model", &provider.model)
+        .json(&fish_audio_payload(text, reference_id))
+        .send()
+        .await
+        .map_err(provider_network_error)?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("Fish Audio TTS returned {status}"));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(provider_network_error)?
+        .to_vec();
+    if bytes.is_empty() {
+        return Err("Fish Audio returned an empty audio response".to_string());
+    }
+    Ok(bytes)
+}
+
+fn fish_audio_root_url(base_url: &str) -> Result<String, String> {
+    let base = base_url.trim().trim_end_matches('/');
+    let root = base.strip_suffix("/v1").unwrap_or(base);
+    if !(root.starts_with("https://") || root.starts_with("http://")) {
+        return Err("Fish Audio base URL must start with http:// or https://".to_string());
+    }
+    Ok(root.to_string())
+}
+
+fn fish_audio_payload(text: &str, reference_id: &str) -> Value {
+    json!({
+        "text": text,
+        "reference_id": reference_id.trim(),
+        "format": "mp3",
+    })
+}
+
+fn generated_audio_info(bytes: &[u8]) -> Result<(&'static str, i64), String> {
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE") {
+        return Ok(("audio/wav", wav_duration_ms(bytes)?));
+    }
+    if bytes.starts_with(b"ID3") || mp3_frame_header(bytes).is_some() {
+        return Ok(("audio/mpeg", mp3_duration_ms(bytes)?));
+    }
+    Err("TTS provider returned an unsupported audio format (expected WAV or MP3)".to_string())
+}
+
 pub(crate) fn wav_duration_ms(bytes: &[u8]) -> Result<i64, String> {
     let reader = hound::WavReader::new(std::io::Cursor::new(bytes))
         .map_err(|error| format!("TTS response is not a valid WAV file: {error}"))?;
@@ -752,6 +824,127 @@ pub(crate) fn wav_duration_ms(bytes: &[u8]) -> Result<i64, String> {
         return Err("TTS response WAV has no audio samples".to_string());
     }
     Ok(duration_ms)
+}
+
+struct Mp3Frame {
+    length: usize,
+    sample_rate: u32,
+    samples: u32,
+}
+
+fn mp3_duration_ms(bytes: &[u8]) -> Result<i64, String> {
+    let mut offset = skip_id3v2(bytes);
+    let mut total_seconds = 0.0_f64;
+    let mut frames = 0_u32;
+    while offset + 4 <= bytes.len() {
+        let Some(frame) = mp3_frame_header(&bytes[offset..]) else {
+            offset += 1;
+            continue;
+        };
+        if frame.length < 4 || offset + frame.length > bytes.len() {
+            offset += 1;
+            continue;
+        }
+        total_seconds += f64::from(frame.samples) / f64::from(frame.sample_rate);
+        frames += 1;
+        offset += frame.length;
+    }
+    if frames == 0 {
+        return Err("TTS response MP3 has no readable audio frames".to_string());
+    }
+    let duration_ms = (total_seconds * 1000.0).round() as i64;
+    if duration_ms <= 0 {
+        return Err("TTS response MP3 has no audio duration".to_string());
+    }
+    Ok(duration_ms)
+}
+
+fn skip_id3v2(bytes: &[u8]) -> usize {
+    if !bytes.starts_with(b"ID3") || bytes.len() < 10 {
+        return 0;
+    }
+    let size = usize::from(bytes[6] & 0x7f) << 21
+        | usize::from(bytes[7] & 0x7f) << 14
+        | usize::from(bytes[8] & 0x7f) << 7
+        | usize::from(bytes[9] & 0x7f);
+    let footer = if bytes[5] & 0x10 != 0 { 10 } else { 0 };
+    (10 + size + footer).min(bytes.len())
+}
+
+fn mp3_frame_header(bytes: &[u8]) -> Option<Mp3Frame> {
+    let header = bytes.get(..4)?;
+    if header[0] != 0xff || header[1] & 0xe0 != 0xe0 {
+        return None;
+    }
+    let version_bits = (header[1] >> 3) & 0x03;
+    let layer_bits = (header[1] >> 1) & 0x03;
+    let bitrate_index = usize::from(header[2] >> 4);
+    let sample_rate_index = usize::from((header[2] >> 2) & 0x03);
+    let padding = usize::from((header[2] >> 1) & 0x01);
+    if version_bits == 1 || layer_bits == 0 || bitrate_index == 0 || bitrate_index == 15 {
+        return None;
+    }
+    let layer = 4 - layer_bits;
+    let mpeg1 = version_bits == 3;
+    let sample_rate = match (version_bits, sample_rate_index) {
+        (3, 0) => 44_100,
+        (3, 1) => 48_000,
+        (3, 2) => 32_000,
+        (2, 0) => 22_050,
+        (2, 1) => 24_000,
+        (2, 2) => 16_000,
+        (0, 0) => 11_025,
+        (0, 1) => 12_000,
+        (0, 2) => 8_000,
+        _ => return None,
+    };
+    let bitrate_kbps = mp3_bitrate(mpeg1, layer, bitrate_index)?;
+    let (samples, coefficient) = match layer {
+        1 => (384_u32, 48_u64),
+        2 => (1_152_u32, 144_u64),
+        _ if mpeg1 => (1_152_u32, 144_u64),
+        _ => (576_u32, 72_u64),
+    };
+    let length = if layer == 1 {
+        ((12 * bitrate_kbps * 1_000 / sample_rate + padding as u32) * 4) as usize
+    } else {
+        ((coefficient * bitrate_kbps as u64 * 1_000 / u64::from(sample_rate)) as usize) + padding
+    };
+    Some(Mp3Frame {
+        length,
+        sample_rate,
+        samples,
+    })
+}
+
+fn mp3_bitrate(mpeg1: bool, layer: u8, index: usize) -> Option<u32> {
+    const MPEG1_LAYER3: [u32; 15] = [
+        32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0,
+    ];
+    const MPEG2_LAYER3: [u32; 15] = [8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0];
+    const MPEG2_LAYER2: [u32; 15] = MPEG2_LAYER3;
+    const MPEG2_LAYER1: [u32; 15] = [
+        32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256, 0,
+    ];
+    const MPEG1_LAYER2: [u32; 15] = [
+        32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, 0,
+    ];
+    const MPEG1_LAYER1: [u32; 15] = [
+        32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 0,
+    ];
+    let table = match (mpeg1, layer) {
+        (true, 1) => &MPEG1_LAYER1,
+        (true, 2) => &MPEG1_LAYER2,
+        (true, _) => &MPEG1_LAYER3,
+        (false, 1) => &MPEG2_LAYER1,
+        (false, 2) => &MPEG2_LAYER2,
+        (false, _) => &MPEG2_LAYER3,
+    };
+    index
+        .checked_sub(1)
+        .and_then(|position| table.get(position))
+        .copied()
+        .filter(|bitrate| *bitrate > 0)
 }
 
 /// ASR 传输核心：multipart 上传音频并解析文本与时间片段。
@@ -1012,6 +1205,10 @@ pub(crate) async fn execute_image_generation(
         request.conditioning.as_ref(),
         &reference_images,
     );
+    let reference_bytes = reference_images
+        .iter()
+        .map(|(_, bytes)| bytes.clone())
+        .collect::<Vec<_>>();
 
     let started = Instant::now();
     let (images, reference_mode, transport_degradations) = generate_images_with_conditioning(
@@ -1022,6 +1219,7 @@ pub(crate) async fn execute_image_generation(
         count,
         seed,
         &plan,
+        &reference_bytes,
     )
     .await?;
     let mut degradations = plan.degradations.clone();
@@ -1812,7 +2010,7 @@ pub(crate) async fn generate_images_for_provider(
 ) -> Result<(Vec<Vec<u8>>, String), String> {
     let plan = ConditionPlan::prompt_only();
     let (images, mode, _) =
-        generate_images_with_conditioning(provider, prompt, "", size, count, 0, &plan).await?;
+        generate_images_with_conditioning(provider, prompt, "", size, count, 0, &plan, &[]).await?;
     Ok((images, mode))
 }
 
@@ -1831,8 +2029,22 @@ async fn generate_images_with_conditioning(
     count: u8,
     seed: i64,
     plan: &ConditionPlan,
+    reference_images: &[Vec<u8>],
 ) -> Result<(Vec<Vec<u8>>, String, Vec<String>), String> {
     match provider.protocol.as_str() {
+        MODELSCOPE_PROTOCOL => {
+            let images = generate_modelscope_images(
+                provider,
+                prompt,
+                negative_prompt,
+                size,
+                count,
+                seed,
+                reference_images,
+            )
+            .await?;
+            Ok((images, "prompt".to_string(), Vec::new()))
+        }
         "OpenAI Compatible" => {
             // OpenAI Images generations 没有 pixel-level reference 通道；
             // 参考图已由前端写入锚点提示词，这里如实报告 prompt 模式。
@@ -1892,6 +2104,195 @@ async fn generate_images_with_conditioning(
             "Provider protocol {other} does not implement Image generation"
         )),
     }
+}
+
+/// ModelScope API-Inference 的图片生成采用异步任务：
+/// 提交 `/v1/images/generations` 后拿 `task_id`，轮询 `/v1/tasks/{task_id}`，
+/// 成功时从 `output_images` 下载结果。参考图按接口文档编码为 data URL。
+#[allow(clippy::too_many_arguments)]
+async fn generate_modelscope_images(
+    provider: &ImageProviderConfig,
+    prompt: &str,
+    negative_prompt: &str,
+    size: &str,
+    count: u8,
+    seed: i64,
+    reference_images: &[Vec<u8>],
+) -> Result<Vec<Vec<u8>>, String> {
+    let secret = get_provider_secret(&provider.id)
+        .ok_or_else(|| "No ModelScope token is stored for this provider".to_string())?;
+    let root = modelscope_root_url(&provider.base_url)?;
+    let client = http_client()?;
+    let payload = modelscope_image_payload(
+        provider,
+        prompt,
+        negative_prompt,
+        size,
+        count,
+        seed,
+        reference_images,
+    );
+    let response = client
+        .post(format!("{root}/v1/images/generations"))
+        .bearer_auth(&secret)
+        .header("X-ModelScope-Async-Mode", "true")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(provider_network_error)?;
+    let status = response.status();
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|_| format!("ModelScope returned a non-JSON response ({status})"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "ModelScope image submission returned {status}: {}",
+            modelscope_error_message(&body)
+        ));
+    }
+    let task_id = body
+        .get("task_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "ModelScope image submission did not return task_id".to_string())?;
+    await_modelscope_job(&client, &root, task_id, &secret).await
+}
+
+fn modelscope_root_url(base_url: &str) -> Result<String, String> {
+    let base = base_url.trim().trim_end_matches('/');
+    let root = base.strip_suffix("/v1").unwrap_or(base);
+    if !(root.starts_with("https://") || root.starts_with("http://")) {
+        return Err("ModelScope base URL must start with http:// or https://".to_string());
+    }
+    Ok(root.to_string())
+}
+
+fn modelscope_image_payload(
+    provider: &ImageProviderConfig,
+    prompt: &str,
+    negative_prompt: &str,
+    size: &str,
+    count: u8,
+    seed: i64,
+    reference_images: &[Vec<u8>],
+) -> Value {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    let (width, height) = parse_image_size(size);
+    let mut payload = json!({
+        "model": provider.model,
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "size": format!("{width}x{height}"),
+        "n": count.clamp(1, 4),
+        "seed": seed,
+    });
+    if !reference_images.is_empty() {
+        payload["image_url"] = Value::Array(
+            reference_images
+                .iter()
+                .take(MAX_REFERENCE_IMAGES)
+                .map(|bytes| {
+                    let mime = detect_image_mime(bytes).unwrap_or("image/png");
+                    json!(format!("data:{mime};base64,{}", BASE64.encode(bytes)))
+                })
+                .collect(),
+        );
+    }
+    payload
+}
+
+async fn await_modelscope_job(
+    client: &Client,
+    root: &str,
+    task_id: &str,
+    secret: &str,
+) -> Result<Vec<Vec<u8>>, String> {
+    let deadline = Instant::now() + MODELSCOPE_JOB_TIMEOUT;
+    loop {
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "ModelScope image task exceeded {} seconds",
+                MODELSCOPE_JOB_TIMEOUT.as_secs()
+            ));
+        }
+        tokio::time::sleep(MODELSCOPE_JOB_POLL_INTERVAL).await;
+        let response = client
+            .get(format!("{root}/v1/tasks/{task_id}"))
+            .bearer_auth(secret)
+            .header("X-ModelScope-Task-Type", "image_generation")
+            .send()
+            .await
+            .map_err(provider_network_error)?;
+        let status = response.status();
+        let body: Value = response
+            .json()
+            .await
+            .map_err(|_| format!("ModelScope task returned a non-JSON response ({status})"))?;
+        if !status.is_success() {
+            return Err(format!(
+                "ModelScope task query returned {status}: {}",
+                modelscope_error_message(&body)
+            ));
+        }
+        match body
+            .get("task_status")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_ascii_uppercase()
+            .as_str()
+        {
+            "SUCCEED" | "SUCCEEDED" | "SUCCESS" | "COMPLETED" => {
+                let urls = modelscope_output_urls(&body);
+                if urls.is_empty() {
+                    return Err("ModelScope image task completed without output_images".to_string());
+                }
+                let mut images = Vec::with_capacity(urls.len());
+                for url in urls {
+                    images.push(download_image(&url).await?);
+                }
+                return Ok(images);
+            }
+            "FAILED" | "FAIL" | "CANCELED" | "CANCELLED" => {
+                return Err(format!(
+                    "ModelScope image task failed: {}",
+                    modelscope_error_message(&body)
+                ));
+            }
+            _ => continue,
+        }
+    }
+}
+
+fn modelscope_output_urls(body: &Value) -> Vec<String> {
+    body.get("output_images")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    item.as_str()
+                        .map(str::to_string)
+                        .or_else(|| item.get("url").and_then(Value::as_str).map(str::to_string))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn modelscope_error_message(body: &Value) -> String {
+    [
+        "/errors/message",
+        "/error/message",
+        "/message",
+        "/errors",
+        "/error",
+    ]
+    .iter()
+    .find_map(|pointer| body.pointer(pointer).and_then(Value::as_str))
+    .map(limit)
+    .filter(|message| !message.trim().is_empty())
+    .unwrap_or_else(|| "unknown ModelScope error".to_string())
 }
 
 /// stable-diffusion.cpp 原生接口：ControlNet / IP-Adapter 条件通道。
@@ -2574,6 +2975,40 @@ mod tests {
     }
 
     #[test]
+    fn fish_audio_payload_matches_the_tts_api_contract() {
+        let payload = fish_audio_payload(
+            "The old lighthouse had not been lit. [break] A light flickered on.",
+            "e98fa6cdad6946bf8d9bb8f9cb8c2532",
+        );
+        assert_eq!(payload["format"], "mp3");
+        assert_eq!(payload["reference_id"], "e98fa6cdad6946bf8d9bb8f9cb8c2532");
+        assert!(payload["text"].as_str().expect("text").contains("[break]"));
+        assert_eq!(
+            fish_audio_root_url("https://api.fish.audio/").expect("root URL"),
+            "https://api.fish.audio"
+        );
+        assert_eq!(
+            fish_audio_root_url("https://api.fish.audio/v1").expect("versioned URL"),
+            "https://api.fish.audio"
+        );
+    }
+
+    #[test]
+    fn mp3_duration_scans_mpeg_audio_frames() {
+        let mut mp3 = Vec::new();
+        for _ in 0..2 {
+            let mut frame = vec![0_u8; 417];
+            frame[..4].copy_from_slice(&[0xff, 0xfb, 0x90, 0x64]);
+            mp3.extend_from_slice(&frame);
+        }
+        assert_eq!(mp3_frame_header(&mp3).expect("first frame").length, 417);
+        let (mime, duration_ms) = generated_audio_info(&mp3).expect("MP3 audio info");
+        assert_eq!(mime, "audio/mpeg");
+        assert_eq!(duration_ms, 52);
+        assert!(mp3_duration_ms(b"not an mp3").is_err());
+    }
+
+    #[test]
     fn prefers_openai_style_segment_seconds() {
         let cues = parse_asr_cues(&json!({
             "segments": [
@@ -2764,6 +3199,65 @@ mod tests {
         assert_eq!(parse_image_size("1024 x 1024"), (1024, 1024));
         assert_eq!(parse_image_size("garbage"), (1024, 1024));
         assert_eq!(parse_image_size("10x10"), (1024, 1024));
+    }
+
+    #[test]
+    fn modelscope_payload_matches_async_image_api_contract() {
+        let provider = embedding_provider("ModelScope", &["Image"]);
+        let payload = modelscope_image_payload(
+            &provider,
+            "给图中的狗戴上一个生日帽",
+            "不要文字",
+            "1536x1024",
+            2,
+            42,
+            &[b"\x89PNG\r\n\x1a\nreference".to_vec()],
+        );
+        assert_eq!(payload["model"], "embedding");
+        assert_eq!(payload["prompt"], "给图中的狗戴上一个生日帽");
+        assert_eq!(payload["negative_prompt"], "不要文字");
+        assert_eq!(payload["size"], "1536x1024");
+        assert_eq!(payload["n"], 2);
+        assert_eq!(payload["seed"], 42);
+        assert!(payload["image_url"][0]
+            .as_str()
+            .expect("reference image")
+            .starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn modelscope_normalizes_base_url_and_parses_output_images() {
+        assert_eq!(
+            modelscope_root_url("https://api-inference.modelscope.cn/")
+                .expect("root URL with slash"),
+            "https://api-inference.modelscope.cn"
+        );
+        assert_eq!(
+            modelscope_root_url("https://api-inference.modelscope.cn/v1").expect("versioned URL"),
+            "https://api-inference.modelscope.cn"
+        );
+        assert!(modelscope_root_url("api-inference.modelscope.cn").is_err());
+
+        let urls = modelscope_output_urls(&json!({
+            "task_status": "SUCCEED",
+            "output_images": [
+                "https://example.com/a.png",
+                { "url": "https://example.com/b.png" }
+            ]
+        }));
+        assert_eq!(
+            urls,
+            vec![
+                "https://example.com/a.png".to_string(),
+                "https://example.com/b.png".to_string()
+            ]
+        );
+        assert_eq!(
+            modelscope_error_message(&json!({
+                "errors": { "message": "invalid token" }
+            })),
+            "invalid token"
+        );
     }
 
     #[test]

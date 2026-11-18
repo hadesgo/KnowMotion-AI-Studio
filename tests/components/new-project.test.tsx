@@ -17,33 +17,38 @@ describe("NewProject component flow", () => {
     });
   });
 
-  it("creates a project and navigates to planning", async () => {
+  it("creates a project from one prompt and navigates to autopilot", async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter initialEntries={["/projects/new"]}>
         <Routes>
           <Route path="/projects/new" element={<NewProject />} />
-          <Route path="/projects/:projectId/plan" element={<div>PLANNING DESTINATION</div>} />
+          <Route path="/projects/:projectId/auto" element={<div>AUTO DESTINATION</div>} />
         </Routes>
       </MemoryRouter>,
     );
 
-    await user.click(screen.getByRole("button", { name: "填充示例" }));
-    await user.click(screen.getByRole("button", { name: "创建并进入策划" }));
+    await user.type(
+      screen.getByLabelText(/视频主题或生成要求/),
+      "45 秒横屏：为什么夜空是黑色的？",
+    );
+    await user.click(screen.getByRole("button", { name: "一键生成视频" }));
 
-    expect(await screen.findByText("PLANNING DESTINATION")).toBeVisible();
+    expect(await screen.findByText("AUTO DESTINATION")).toBeVisible();
     await waitFor(() => {
       expect(useStudioStore.getState().projects).toHaveLength(1);
     });
     expect(useStudioStore.getState().projects[0]).toMatchObject({
-      title: "夜空为什么是黑色的？",
+      title: "为什么夜空是黑色的",
       settings: {
-        topic: "为什么夜空是黑色的？",
+        topic: "45 秒横屏：为什么夜空是黑色的？",
         contentType: "科学原理",
         aspectRatio: "16:9",
       },
     });
-    expect(useStudioStore.getState().toasts[0]?.title).toBe("项目已创建");
+    expect(useStudioStore.getState().toasts[0]?.title).toBe(
+      "项目已创建，准备自动成片",
+    );
   });
 
   it("shows validation before creating an underspecified project", async () => {
@@ -56,10 +61,12 @@ describe("NewProject component flow", () => {
       </MemoryRouter>,
     );
 
-    await user.type(screen.getByLabelText(/视频主题/), "天空");
-    await user.click(screen.getByRole("button", { name: "创建并进入策划" }));
+    await user.type(screen.getByLabelText(/视频主题或生成要求/), "天");
+    await user.click(screen.getByRole("button", { name: "一键生成视频" }));
 
-    expect(screen.getByText("主题再具体一点，至少需要 4 个字符。")).toBeVisible();
+    expect(
+      screen.getByText("输入一个主题，或直接描述你想要的视频。"),
+    ).toBeVisible();
     expect(useStudioStore.getState().projects).toHaveLength(0);
   });
 });

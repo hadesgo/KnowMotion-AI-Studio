@@ -25,6 +25,36 @@ KnowMotion AI Studio 采用“一个桌面应用进程组 + 三个职责边界�
 
 ## 2. 系统架构图
 
+### 2.0 单输入自动成片层
+
+产品默认入口不再要求用户逐页配置。`AutoProduction` 是位于 Agent DAG 和生产能力之上的应用编排层：
+
+```mermaid
+flowchart LR
+    Brief["一句主题 / 视频要求"] --> Intent["Intent Resolver<br/>时长、画幅、受众、风格、语言"]
+    Intent --> Project["Project Manifest"]
+    Project --> Auto["Auto Director<br/>连续执行 DAG"]
+    Auto --> Research["Research → Director → Script"]
+    Research --> Craft["Storyboard → Art → Asset → Animation"]
+    Craft --> Sound["Audio + TTS + Subtitle Timeline"]
+    Sound --> Media["Optional Image Jobs"]
+    Media --> Gate["Quality + DSL Gate"]
+    Gate -->|pass| Render["Remotion Renderer"]
+    Gate -->|fail| Review["停止交付并定位问题"]
+    Render --> MP4["H.264 MP4"]
+    MP4 --> Studio["专业工作台继续精修"]
+```
+
+自动模式与专家模式共享同一份项目数据和受控工具，不产生第二套渲染实现：
+
+- `Intent Resolver` 只处理可由自然语言明确推断的参数；未说明的部分使用稳定默认值。用户展开高级设置后，显式值优先于推断值。
+- 自动模式启动时把 `autoMode` 写入请求，运行时不把大纲、分镜和最终质量节点设置为待审批；专家模式仍保留三个审批节点。
+- Agent DAG 完成后，编排层自动生成本地或 Provider 旁白，并根据真实音频时长重建字幕、旁白轨和视频轨。
+- 配置了 Image Provider 且需求或 Art Director 明确要求位图时，按镜头进入持久图片队列；图片失败时回退到可渲染的矢量构图，不阻断整片。
+- 只有项目质量报告不为 `fail`、必要内容完整且 Composition DSL 通过 Zod 校验时才启动正式渲染。
+- `project.automation` 持久化自动运行 ID、阶段、渲染 Job、输出路径、警告和错误，页面重载后仍能判断任务状态和恢复位置。
+- 自动成片是默认体验；用户始终可以进入 Agent、时间轴、Remotion 和渲染工作台查看结构化中间产物并继续编辑。
+
 ```mermaid
 flowchart LR
     User[用户] --> UI
@@ -576,8 +606,10 @@ type ProviderErrorCode =
 - `OllamaLlm`。
 - `GgufLocalLlm`：按需启动随包分发的官方 llama.cpp `llama-server`，缓存模型进程，并按配置选择 Vulkan GPU 或 CPU 进行推理。
 - `LocalModelScheduler`：统一持有 llama.cpp、audio.cpp 与 stable-diffusion.cpp 的 GPU 工作租约；请求前卸载竞争模型并检查显存安全余量，按需启动本地服务，空闲后调用运行时卸载 API 或停止进程。
-- `OpenAiCompatibleImage` / `StableDiffusionCppImage`。
-- `OpenAiCompatibleTts` / 可插拔本地 TTS。
+- `OpenAiCompatibleImage` / `ModelScopeAsyncImage` / `StableDiffusionCppImage`。
+- `ModelScopeAsyncImage` 以 `X-ModelScope-Async-Mode` 提交 `/v1/images/generations`，拿 `task_id` 后按 5 秒间隔轮询 `/v1/tasks/{task_id}`；终态成功后逐张下载 `output_images`，失败状态映射到队列的稳定错误并允许用户重试。Token 只从系统凭据库读取。
+- `OpenAiCompatibleTts` / `FishAudioTts` / 可插拔本地 TTS。
+- `FishAudioTts` 将模型名放在 `model` 请求头，以 `reference_id` 指定项目声线并请求 MP3；后端验证 WAV/MP3 文件头、解析音频帧时长后再原子落盘，避免把错误页或残缺音频写入项目。
 - `WhisperCompatibleAsr`。
 - `OpenAiCompatibleEmbedding` / `GgufLocalEmbedding`：后者把 `GGUF` Provider 的模型路径交给同一个 llama.cpp 运行时，以 `--embeddings` 模式启动独立回环服务（缓存键为「模型文件 + 用途」，不会复用聊天服务），上下文默认 2048，GPU 租约与聊天模型共用调度器。
 

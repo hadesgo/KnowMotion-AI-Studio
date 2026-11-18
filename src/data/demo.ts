@@ -515,6 +515,7 @@ export function createProject(input: CreateProjectInput): VideoProject {
     isDemo: false,
     settings: {
       topic: input.topic,
+      brief: input.brief,
       contentType: input.contentType,
       audience: input.audience,
       duration: input.duration,
@@ -540,6 +541,7 @@ export function createProject(input: CreateProjectInput): VideoProject {
       subtitlePosition: "bottom",
     },
     renders: [],
+    automation: undefined,
   };
 }
 

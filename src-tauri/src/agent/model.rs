@@ -83,6 +83,9 @@ pub struct WorkflowStartRequest {
     pub instruction: Option<String>,
     pub max_attempts: Option<u32>,
     pub target_agent: Option<String>,
+    /// 自动成片模式跳过大纲、分镜和最终审批，让 DAG 连续执行。
+    #[serde(default)]
+    pub auto_mode: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
