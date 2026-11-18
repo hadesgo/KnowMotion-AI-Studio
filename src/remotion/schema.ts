@@ -643,9 +643,9 @@ function buildContextExplainerDsl(
       easing: "easeInOut",
     },
     transition: {
-      type: index === 0 ? "fade" : "wipe",
-      durationMs: 420,
-      direction: index % 2 === 0 ? "right" : "left",
+      type: "fade",
+      durationMs: 520,
+      direction: "left",
     },
     gsap: scene.gsapMotion ?? undefined,
     layers,

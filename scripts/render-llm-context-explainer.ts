@@ -56,6 +56,7 @@ const rawProject = JSON.parse(
 const sourceScenes = rawProject.scenes.map((scene) => ({
   ...scene,
   narration: narrationById[scene.id] ?? scene.narration,
+  remotion: undefined,
 }));
 
 const audioAssets: Asset[] = [];

@@ -121,8 +121,8 @@
       },
       "transition": {
         "type": "fade",
-        "durationMs": 420,
-        "direction": "right"
+        "durationMs": 520,
+        "direction": "left"
       },
       "layers": [
         {
@@ -291,8 +291,8 @@
         "easing": "easeInOut"
       },
       "transition": {
-        "type": "wipe",
-        "durationMs": 420,
+        "type": "fade",
+        "durationMs": 520,
         "direction": "left"
       },
       "layers": [
@@ -468,9 +468,9 @@
         "easing": "easeInOut"
       },
       "transition": {
-        "type": "wipe",
-        "durationMs": 420,
-        "direction": "right"
+        "type": "fade",
+        "durationMs": 520,
+        "direction": "left"
       },
       "layers": [
         {
@@ -643,8 +643,8 @@
         "easing": "easeInOut"
       },
       "transition": {
-        "type": "wipe",
-        "durationMs": 420,
+        "type": "fade",
+        "durationMs": 520,
         "direction": "left"
       },
       "layers": [
@@ -818,9 +818,9 @@
         "easing": "easeInOut"
       },
       "transition": {
-        "type": "wipe",
-        "durationMs": 420,
-        "direction": "right"
+        "type": "fade",
+        "durationMs": 520,
+        "direction": "left"
       },
       "layers": [
         {
@@ -996,8 +996,8 @@
         "easing": "easeInOut"
       },
       "transition": {
-        "type": "wipe",
-        "durationMs": 420,
+        "type": "fade",
+        "durationMs": 520,
         "direction": "left"
       },
       "layers": [

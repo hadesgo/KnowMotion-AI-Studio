@@ -7,7 +7,7 @@
       "kind": "audio",
       "src": "assets/audio/narration-v2-scene-3885f05e-d786-4ddf-a899-0783b587cacc.wav",
       "prompt": "Windows SAPI local narration",
-      "createdAt": "2026-11-18T09:09:23.992Z",
+      "createdAt": "2026-11-18T09:22:28.630Z",
       "local": true,
       "durationMs": 9752.375,
       "mimeType": "audio/wav"
@@ -19,7 +19,7 @@
       "kind": "audio",
       "src": "assets/audio/narration-v2-scene-e17f8507-528d-4d60-8f61-f67d4d421026.wav",
       "prompt": "Windows SAPI local narration",
-      "createdAt": "2026-11-18T09:09:23.995Z",
+      "createdAt": "2026-11-18T09:22:28.632Z",
       "local": true,
       "durationMs": 7785.75,
       "mimeType": "audio/wav"
@@ -31,7 +31,7 @@
       "kind": "audio",
       "src": "assets/audio/narration-v2-scene-0e8ea1e7-c60b-44e1-9373-f1c2107a0d8b.wav",
       "prompt": "Windows SAPI local narration",
-      "createdAt": "2026-11-18T09:09:23.996Z",
+      "createdAt": "2026-11-18T09:22:28.634Z",
       "local": true,
       "durationMs": 8124.000000000001,
       "mimeType": "audio/wav"
@@ -43,7 +43,7 @@
       "kind": "audio",
       "src": "assets/audio/narration-v2-scene-0903610a-37ef-4d06-8548-afbd9ba442ce.wav",
       "prompt": "Windows SAPI local narration",
-      "createdAt": "2026-11-18T09:09:23.997Z",
+      "createdAt": "2026-11-18T09:22:28.635Z",
       "local": true,
       "durationMs": 5834.75,
       "mimeType": "audio/wav"
@@ -55,7 +55,7 @@
       "kind": "audio",
       "src": "assets/audio/narration-v2-scene-context-window-001.wav",
       "prompt": "Windows SAPI local narration",
-      "createdAt": "2026-11-18T09:09:23.999Z",
+      "createdAt": "2026-11-18T09:22:28.636Z",
       "local": true,
       "durationMs": 9077,
       "mimeType": "audio/wav"
@@ -67,7 +67,7 @@
       "kind": "audio",
       "src": "assets/audio/narration-v2-scene-takeaway-context-001.wav",
       "prompt": "Windows SAPI local narration",
-      "createdAt": "2026-11-18T09:09:24.000Z",
+      "createdAt": "2026-11-18T09:22:28.638Z",
       "local": true,
       "durationMs": 8075.625000000001,
       "mimeType": "audio/wav"
@@ -223,7 +223,7 @@
       "format": "MP4",
       "id": "render-llm-context-v2",
       "resolution": "1080p",
-      "size": "10.0 MB",
+      "size": "11.1 MB",
       "status": "ready"
     }
   ],
@@ -322,8 +322,8 @@
         },
         "transition": {
           "type": "fade",
-          "durationMs": 420,
-          "direction": "right"
+          "durationMs": 520,
+          "direction": "left"
         },
         "layers": [
           {
@@ -509,8 +509,8 @@
           "easing": "easeInOut"
         },
         "transition": {
-          "type": "wipe",
-          "durationMs": 420,
+          "type": "fade",
+          "durationMs": 520,
           "direction": "left"
         },
         "layers": [
@@ -703,9 +703,9 @@
           "easing": "easeInOut"
         },
         "transition": {
-          "type": "wipe",
-          "durationMs": 420,
-          "direction": "right"
+          "type": "fade",
+          "durationMs": 520,
+          "direction": "left"
         },
         "layers": [
           {
@@ -895,8 +895,8 @@
           "easing": "easeInOut"
         },
         "transition": {
-          "type": "wipe",
-          "durationMs": 420,
+          "type": "fade",
+          "durationMs": 520,
           "direction": "left"
         },
         "layers": [
@@ -1087,9 +1087,9 @@
           "easing": "easeInOut"
         },
         "transition": {
-          "type": "wipe",
-          "durationMs": 420,
-          "direction": "right"
+          "type": "fade",
+          "durationMs": 520,
+          "direction": "left"
         },
         "layers": [
           {
@@ -1282,8 +1282,8 @@
           "easing": "easeInOut"
         },
         "transition": {
-          "type": "wipe",
-          "durationMs": 420,
+          "type": "fade",
+          "durationMs": 520,
           "direction": "left"
         },
         "layers": [
@@ -1619,5 +1619,5 @@
     }
   ],
   "title": "大语言模型怎样理解上下文",
-  "updatedAt": "2026-11-18T09:09:24.000Z"
+  "updatedAt": "2026-11-18T09:22:28.638Z"
 }
